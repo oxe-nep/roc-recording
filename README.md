@@ -13,7 +13,7 @@ Live-preview för Blackmagic IP-kort (ST 2110) via HLS Low-Latency.
 
 ```bash
 # Med Docker
-PUBLIC_URL=http://<capture-host-ip>:8080 API_KEY=hemlig docker compose up -d
+PUBLIC_URL=http://10.199.28.249:8080 API_KEY=hemlig docker compose up -d
 
 # Eller direkt
 cd backend
@@ -28,7 +28,7 @@ Justera `backend/config.yaml` för rätt FFmpeg-input per kanal.
 ```bash
 cd frontend
 # Sätt backend-URL och API-nyckel i .env.local
-echo "NEXT_PUBLIC_BACKEND_URL=http://<capture-host-ip>:8080" >> .env.local
+echo "NEXT_PUBLIC_BACKEND_URL=http://10.199.28.249:8080" >> .env.local
 echo "NEXT_PUBLIC_API_KEY=hemlig" >> .env.local
 npm run dev
 ```

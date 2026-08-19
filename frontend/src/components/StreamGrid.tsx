@@ -6,12 +6,15 @@ import {
   startStream,
   stopStream,
   fetchRecordings,
+  fetchRecordingFiles,
+  fetchRecordingBlob,
   startRecording,
   stopRecording,
   startAllRecordings,
   stopAllRecordings,
   type Stream,
   type RecordingInfo,
+  type RecordingFile,
 } from "@/lib/api";
 import Thumbnail from "@/components/Thumbnail";
 
@@ -23,6 +26,10 @@ export default function StreamGrid() {
   const [busy, setBusy] = useState<Record<number, boolean>>({});
   const [recBusy, setRecBusy] = useState<Record<number, boolean>>({});
   const [globalRecBusy, setGlobalRecBusy] = useState(false);
+  const [filesOpen, setFilesOpen] = useState<Record<number, boolean>>({});
+  const [filesBusy, setFilesBusy] = useState<Record<number, boolean>>({});
+  const [recFiles, setRecFiles] = useState<Record<number, RecordingFile[]>>({});
+  const [playerURL, setPlayerURL] = useState<Record<number, string>>({});
 
   const load = useCallback(async () => {
     try {
@@ -83,6 +90,32 @@ export default function StreamGrid() {
     }
   };
 
+  const toggleFiles = async (id: number) => {
+    const willOpen = !filesOpen[id];
+    setFilesOpen((s) => ({ ...s, [id]: willOpen }));
+    if (!willOpen) return;
+    setFilesBusy((s) => ({ ...s, [id]: true }));
+    try {
+      const files = await fetchRecordingFiles(id);
+      setRecFiles((s) => ({ ...s, [id]: files }));
+    } finally {
+      setFilesBusy((s) => ({ ...s, [id]: false }));
+    }
+  };
+
+  const playFile = async (id: number, name: string) => {
+    setFilesBusy((s) => ({ ...s, [id]: true }));
+    try {
+      const blob = await fetchRecordingBlob(id, name);
+      const old = playerURL[id];
+      if (old) URL.revokeObjectURL(old);
+      const url = URL.createObjectURL(blob);
+      setPlayerURL((s) => ({ ...s, [id]: url }));
+    } finally {
+      setFilesBusy((s) => ({ ...s, [id]: false }));
+    }
+  };
+
   if (loading) {
     return <div className="loading"><span>Connecting to backend…</span></div>;
   }
@@ -138,8 +171,43 @@ export default function StreamGrid() {
                   >
                     {recBusy[s.id] ? "…" : isRecording ? "⏹" : "⏺"}
                   </button>
+                  <button
+                    className="badge files-btn"
+                    onClick={() => toggleFiles(s.id)}
+                    disabled={filesBusy[s.id]}
+                    title="Show recording files"
+                  >
+                    {filesBusy[s.id] ? "…" : "Files"}
+                  </button>
                 </div>
               </div>
+
+              {filesOpen[s.id] && (
+                <div className="files-panel">
+                  {(recFiles[s.id] ?? []).length === 0 ? (
+                    <div className="files-empty">No recordings yet</div>
+                  ) : (
+                    <>
+                      <div className="files-list">
+                        {(recFiles[s.id] ?? []).slice(0, 5).map((f) => (
+                          <button
+                            key={f.name}
+                            className="file-item"
+                            onClick={() => playFile(s.id, f.name)}
+                            disabled={filesBusy[s.id]}
+                            title={f.name}
+                          >
+                            ▶ {f.name}
+                          </button>
+                        ))}
+                      </div>
+                      {playerURL[s.id] && (
+                        <video className="recording-player" controls src={playerURL[s.id]} />
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
 
               {s.error && <div className="error-bar">{s.error}</div>}
             </div>

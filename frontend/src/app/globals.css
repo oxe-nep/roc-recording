@@ -294,6 +294,54 @@ body {
   animation: none;
 }
 
+.files-btn {
+  background: rgba(91, 159, 212, 0.14);
+  color: #8ec4ec;
+}
+
+.files-btn:hover {
+  background: rgba(91, 159, 212, 0.26);
+}
+
+.files-panel {
+  border-top: 1px solid var(--border-subtle);
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.files-empty {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.files-list {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.file-item {
+  text-align: left;
+  font-size: 0.68rem;
+  color: #c7d5df;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 4px;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+
+.file-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.recording-player {
+  width: 100%;
+  max-height: 180px;
+  background: #000;
+  border-radius: 4px;
+}
+
 .error-bar {
   font-size: 0.65rem;
   color: #ff8a7a;

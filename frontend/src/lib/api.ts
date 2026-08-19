@@ -45,6 +45,13 @@ export interface RecordingInfo {
   file_path?: string;
 }
 
+export interface RecordingFile {
+  name: string;
+  size: number;
+  mod_time: string;
+  url: string;
+}
+
 export async function fetchRecordings(): Promise<RecordingInfo[]> {
   const res = await apiFetch("/api/recordings");
   if (!res.ok) throw new Error(`fetchRecordings: ${res.status}`);
@@ -71,4 +78,16 @@ export async function startAllRecordings(): Promise<void> {
 export async function stopAllRecordings(): Promise<void> {
   const res = await apiFetch("/api/recordings/stop-all", { method: "POST" });
   if (!res.ok) throw new Error(`stopAllRecordings: ${res.status}`);
+}
+
+export async function fetchRecordingFiles(id: number): Promise<RecordingFile[]> {
+  const res = await apiFetch(`/api/recordings/files/${id}`);
+  if (!res.ok) throw new Error(`fetchRecordingFiles: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchRecordingBlob(id: number, name: string): Promise<Blob> {
+  const res = await apiFetch(`/api/recordings/file/${id}/${encodeURIComponent(name)}`);
+  if (!res.ok) throw new Error(`fetchRecordingBlob: ${res.status}`);
+  return res.blob();
 }

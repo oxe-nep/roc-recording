@@ -32,17 +32,19 @@ type Stream struct {
 }
 
 type Manager struct {
-	streams   map[int]*Stream
-	mu        sync.RWMutex
-	hlsDir    string
-	ffmpegBin string
+	streams    map[int]*Stream
+	mu         sync.RWMutex
+	hlsDir     string
+	ffmpegBin  string
+	videoCodec string
 }
 
-func NewManager(hlsDir, ffmpegBin string) *Manager {
+func NewManager(hlsDir, ffmpegBin, videoCodec string) *Manager {
 	return &Manager{
-		streams:   make(map[int]*Stream),
-		hlsDir:    hlsDir,
-		ffmpegBin: ffmpegBin,
+		streams:    make(map[int]*Stream),
+		hlsDir:     hlsDir,
+		ffmpegBin:  ffmpegBin,
+		videoCodec: videoCodec,
 	}
 }
 
@@ -192,10 +194,25 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 
 	// Build args: configurable input part + encoder + HLS output
 	inputArgs := shellSplit(s.ffmpegInput)
+	encoder := m.videoCodec
+	if encoder == "" {
+		encoder = "h264_nvenc"
+	}
 	encoderArgs := []string{
 		"-vf", "scale=1280:720",
-		"-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
-		"-b:v", "800k", "-g", "25", "-keyint_min", "25",
+		"-c:v", encoder,
+	}
+	// Codec-specific options
+	switch encoder {
+	case "h264_nvenc":
+		encoderArgs = append(encoderArgs, "-preset", "p1", "-tune", "ll", "-rc", "cbr", "-b:v", "800k")
+	case "libx264":
+		encoderArgs = append(encoderArgs, "-preset", "ultrafast", "-tune", "zerolatency", "-b:v", "800k")
+	default:
+		encoderArgs = append(encoderArgs, "-b:v", "800k")
+	}
+	encoderArgs = append(encoderArgs,
+		"-g", "50", "-keyint_min", "50",
 		"-c:a", "aac", "-b:a", "64k",
 		"-f", "hls",
 		"-hls_time", "0.5",
@@ -204,7 +221,7 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"-hls_segment_type", "mpegts",
 		"-hls_segment_filename", segPattern,
 		playlist,
-	}
+	)
 
 	args := append(inputArgs, encoderArgs...)
 	cmd := exec.Command(m.ffmpegBin, args...)

@@ -27,7 +27,7 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	mgr := capture.NewManager(cfg.HLSDir, cfg.FFmpegBin)
+	mgr := capture.NewManager(cfg.HLSDir, cfg.FFmpegBin, cfg.VideoCodec)
 	for _, ch := range cfg.Channels {
 		mgr.Register(ch.ID, ch.Name, ch.FFmpegInput)
 	}

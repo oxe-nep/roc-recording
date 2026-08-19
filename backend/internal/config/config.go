@@ -19,6 +19,7 @@ type Config struct {
 	AllowedOrigins string          `yaml:"allowed_origins"`
 	HLSDir         string          `yaml:"hls_dir"`
 	FFmpegBin      string          `yaml:"ffmpeg_bin"`
+	VideoCodec     string          `yaml:"video_codec"`
 	Channels       []ChannelConfig `yaml:"channels"`
 }
 
@@ -29,6 +30,7 @@ func Load(path string) (*Config, error) {
 		AllowedOrigins: "*",
 		HLSDir:         "./hls",
 		FFmpegBin:      "ffmpeg",
+		VideoCodec:     "h264_nvenc",
 	}
 
 	data, err := os.ReadFile(path)

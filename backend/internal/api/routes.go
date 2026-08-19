@@ -3,8 +3,12 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -22,7 +26,14 @@ type streamResponse struct {
 	HLSURL string `json:"hls_url"`
 }
 
-func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlshandler.Handler, apiKey, allowedOrigins, hlsBaseURL string) http.Handler {
+type recordingFileResponse struct {
+	Name    string    `json:"name"`
+	Size    int64     `json:"size"`
+	ModTime time.Time `json:"mod_time"`
+	URL     string    `json:"url"`
+}
+
+func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlshandler.Handler, recordingsDir, apiKey, allowedOrigins, hlsBaseURL string) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -174,6 +185,79 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlsh
 				return
 			}
 			jsonOK(w, map[string]string{"status": "all stopped"})
+		})
+
+		r.Get("/api/recordings/files/{id}", func(w http.ResponseWriter, r *http.Request) {
+			id, err := strconv.Atoi(chi.URLParam(r, "id"))
+			if err != nil || id < 1 {
+				jsonError(w, "invalid channel id", http.StatusBadRequest)
+				return
+			}
+			dir := filepath.Join(recordingsDir, strconv.Itoa(id))
+			entries, err := os.ReadDir(dir)
+			if err != nil {
+				if os.IsNotExist(err) {
+					jsonOK(w, []recordingFileResponse{})
+					return
+				}
+				jsonError(w, "failed to read recordings directory", http.StatusInternalServerError)
+				return
+			}
+
+			files := make([]recordingFileResponse, 0, len(entries))
+			for _, e := range entries {
+				if e.IsDir() {
+					continue
+				}
+				name := e.Name()
+				if !strings.HasSuffix(strings.ToLower(name), ".mp4") {
+					continue
+				}
+				info, err := e.Info()
+				if err != nil {
+					continue
+				}
+				files = append(files, recordingFileResponse{
+					Name:    name,
+					Size:    info.Size(),
+					ModTime: info.ModTime(),
+					URL:     "/api/recordings/file/" + strconv.Itoa(id) + "/" + name,
+				})
+			}
+			sort.Slice(files, func(i, j int) bool { return files[i].ModTime.After(files[j].ModTime) })
+			jsonOK(w, files)
+		})
+
+		r.Get("/api/recordings/file/{id}/{name}", func(w http.ResponseWriter, r *http.Request) {
+			id, err := strconv.Atoi(chi.URLParam(r, "id"))
+			if err != nil || id < 1 {
+				jsonError(w, "invalid channel id", http.StatusBadRequest)
+				return
+			}
+			name := chi.URLParam(r, "name")
+			if name == "" || name != filepath.Base(name) || strings.Contains(name, "..") {
+				jsonError(w, "invalid file name", http.StatusBadRequest)
+				return
+			}
+			fullPath := filepath.Join(recordingsDir, strconv.Itoa(id), name)
+			f, err := os.Open(fullPath)
+			if err != nil {
+				if os.IsNotExist(err) {
+					jsonError(w, "file not found", http.StatusNotFound)
+					return
+				}
+				jsonError(w, "failed to open file", http.StatusInternalServerError)
+				return
+			}
+			defer f.Close()
+			info, err := f.Stat()
+			if err != nil {
+				jsonError(w, "failed to read file info", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "video/mp4")
+			w.Header().Set("Cache-Control", "no-store")
+			http.ServeContent(w, r, name, info.ModTime(), f)
 		})
 	})
 

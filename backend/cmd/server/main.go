@@ -50,7 +50,7 @@ func main() {
 	}
 
 	hlsH := hlshandler.NewHandler(cfg.HLSDir, cfg.AllowedOrigins)
-	router := api.NewRouter(mgr, recMgr, hlsH, cfg.APIKey, cfg.AllowedOrigins, hlsBase)
+	router := api.NewRouter(mgr, recMgr, hlsH, cfg.RecordingsDir, cfg.APIKey, cfg.AllowedOrigins, hlsBase)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,

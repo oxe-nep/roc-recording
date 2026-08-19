@@ -198,16 +198,24 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	if encoder == "" {
 		encoder = "h264_nvenc"
 	}
+	// Convert UYVY422 (from Blackmagic) to yuv420p before encoding.
+	// NVENC does not support YUV422; libx264 prefers yuv420p for broad compatibility.
+	vfFilter := "scale=1280:720,format=yuv420p"
+
 	encoderArgs := []string{
-		"-vf", "scale=1280:720",
+		"-vf", vfFilter,
 		"-c:v", encoder,
 	}
 	// Codec-specific options
 	switch encoder {
 	case "h264_nvenc":
 		encoderArgs = append(encoderArgs, "-preset", "p1", "-tune", "ll", "-rc", "cbr", "-b:v", "800k")
+	case "hevc_nvenc":
+		encoderArgs = append(encoderArgs, "-preset", "p1", "-tune", "ll", "-rc", "cbr", "-b:v", "800k")
 	case "libx264":
 		encoderArgs = append(encoderArgs, "-preset", "ultrafast", "-tune", "zerolatency", "-b:v", "800k")
+	case "libx265":
+		encoderArgs = append(encoderArgs, "-preset", "ultrafast", "-b:v", "800k")
 	default:
 		encoderArgs = append(encoderArgs, "-b:v", "800k")
 	}

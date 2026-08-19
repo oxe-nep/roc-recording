@@ -293,7 +293,7 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"-preset", "p4",
 		"-g", "50",
 		"-forced-idr", "1",
-		"-repeat_headers", "1",
+		"-repeat-headers", "1",
 		"-tune", "ull",
 		"-f", "mpegts",
 		"-mpegts_flags", "resend_headers",

@@ -10,6 +10,7 @@ services:
       # Mount host FFmpeg with decklink support + shared libs
       - /usr/local/bin/ffmpeg:/usr/local/bin/ffmpeg:ro
       - /usr/local/lib:/usr/local/lib:ro
+      - /usr/lib/blackmagic:/usr/lib/blackmagic:ro
       - /usr/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:ro
     environment:
       - API_KEY=${API_KEY:-change-me}

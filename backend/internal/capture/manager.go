@@ -221,7 +221,9 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		encoderOpts = append(encoderOpts, "-b:v", "800k")
 	}
 
-	args := inputArgs
+	// -y: overwrite output files without asking (needed for thumb.jpg on restart)
+	args := []string{"-y"}
+	args = append(args, inputArgs...)
 	args = append(args,
 		// Shared video filter
 		"-vf", vfFilter,

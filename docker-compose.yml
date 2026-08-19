@@ -7,13 +7,16 @@ services:
     volumes:
       - ./backend/config.yaml:/app/config.yaml:ro
       - hls_data:/app/hls
+      # Mount host FFmpeg with decklink support + shared libs
+      - /usr/local/bin/ffmpeg:/usr/local/bin/ffmpeg:ro
+      - /usr/local/lib:/usr/local/lib:ro
+      - /usr/lib/x86_64-linux-gnu:/usr/lib/x86_64-linux-gnu:ro
     environment:
       - API_KEY=${API_KEY:-change-me}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
       - PUBLIC_URL=${PUBLIC_URL:-http://10.199.28.249:8080}
-    # Blackmagic-kort kräver host network eller device-access på Linux
-    # network_mode: host   # avkommentera om sdi2110 behöver direktåtkomst
-    devices: []            # lägg till t.ex. /dev/blackmagic0 vid behov
+    # Required for Blackmagic DeckLink device access
+    privileged: true
 
 volumes:
   hls_data:

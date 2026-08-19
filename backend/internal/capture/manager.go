@@ -155,7 +155,7 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	segPattern := filepath.Join(outDir, "%03d.ts")
 
 	// Build args: configurable input part + encoder + HLS output
-	inputArgs := strings.Fields(s.ffmpegInput)
+	inputArgs := shellSplit(s.ffmpegInput)
 	encoderArgs := []string{
 		"-vf", "scale=1280:720",
 		"-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
@@ -201,6 +201,35 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	case err := <-doneCh:
 		return err
 	}
+}
+
+// shellSplit splits a string into tokens respecting single-quoted strings,
+// so that device names like 'DeckLink IP 100G (1)' are kept as one argument.
+func shellSplit(s string) []string {
+	var args []string
+	var current strings.Builder
+	inQuote := false
+
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '\'' && !inQuote:
+			inQuote = true
+		case c == '\'' && inQuote:
+			inQuote = false
+		case c == ' ' && !inQuote:
+			if current.Len() > 0 {
+				args = append(args, current.String())
+				current.Reset()
+			}
+		default:
+			current.WriteByte(c)
+		}
+	}
+	if current.Len() > 0 {
+		args = append(args, current.String())
+	}
+	return args
 }
 
 func (m *Manager) killStream(s *Stream) {

@@ -24,6 +24,7 @@ type recState struct {
 	status    RecordingStatus
 	startedAt time.Time
 	filePath  string // final .mp4 path (after remux)
+	cmd       *exec.Cmd
 }
 
 type Manager struct {
@@ -93,9 +94,9 @@ func (m *Manager) Start(id int) (ChannelInfo, error) {
 		return ChannelInfo{}, fmt.Errorf("channel %d is already recording", id)
 	}
 
-	stream, ok := m.captureMgr.StreamByID(id)
+	feedURL, ok := m.captureMgr.FeedURL(id)
 	if !ok {
-		return ChannelInfo{}, fmt.Errorf("channel %d not found in capture manager", id)
+		return ChannelInfo{}, fmt.Errorf("channel %d has no feed url", id)
 	}
 
 	outDir := filepath.Join(m.recordingDir, fmt.Sprintf("%d", id))
@@ -105,26 +106,40 @@ func (m *Manager) Start(id int) (ChannelInfo, error) {
 
 	ts := time.Now()
 	baseName := ts.Format("2006-01-02_15-04-05")
-	tsPath := filepath.Join(outDir, baseName+".ts")
 	mp4Path := filepath.Join(outDir, baseName+".mp4")
-
-	f, err := os.Create(tsPath)
-	if err != nil {
-		return ChannelInfo{}, fmt.Errorf("create recording file: %w", err)
+	args := []string{
+		"-y",
+		"-i", feedURL,
+		"-c:v", "copy",
+		"-an",
+		"-movflags", "frag_keyframe+empty_moov+default_base_moof",
+		mp4Path,
 	}
-
-	stream.SetRecordingDst(&tsWriter{
-		File:      f,
-		tsPath:    tsPath,
-		mp4Path:   mp4Path,
-		ffmpegBin: m.ffmpegBin,
-	})
+	cmd := exec.Command(m.ffmpegBin, args...)
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		return ChannelInfo{}, fmt.Errorf("start recording ffmpeg: %w", err)
+	}
 
 	st.status = StatusRecording
 	st.startedAt = ts
 	st.filePath = mp4Path
+	st.cmd = cmd
 
-	log.Printf("[recording %d] Started TS capture: %s", id, tsPath)
+	go func(chID int, state *recState, c *exec.Cmd) {
+		err := c.Wait()
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		if state.cmd == c {
+			state.cmd = nil
+			state.status = StatusIdle
+		}
+		if err != nil {
+			log.Printf("[recording %d] FFmpeg exited with error: %v", chID, err)
+		}
+	}(id, st, cmd)
+
+	log.Printf("[recording %d] Started MP4 recording: %s", id, mp4Path)
 	return m.buildInfo(id, st), nil
 }
 
@@ -143,14 +158,14 @@ func (m *Manager) Stop(id int) (ChannelInfo, error) {
 		return ChannelInfo{}, fmt.Errorf("channel %d is not recording", id)
 	}
 
-	stream, ok := m.captureMgr.StreamByID(id)
-	if ok {
-		// Detaching closes the tsWriter which triggers remux
-		stream.SetRecordingDst(nil)
+	if st.cmd != nil && st.cmd.Process != nil {
+		if err := st.cmd.Process.Signal(os.Interrupt); err != nil {
+			_ = st.cmd.Process.Kill()
+		}
 	}
-
-	log.Printf("[recording %d] Stopped, remuxing to MP4…", id)
+	st.cmd = nil
 	st.status = StatusIdle
+	log.Printf("[recording %d] Stop requested", id)
 	return m.buildInfo(id, st), nil
 }
 
@@ -186,37 +201,3 @@ func (m *Manager) StopAll() []error {
 	return errs
 }
 
-// tsWriter wraps an os.File and remuxes the TS to MP4 when closed.
-type tsWriter struct {
-	*os.File
-	tsPath    string
-	mp4Path   string
-	ffmpegBin string
-}
-
-func (t *tsWriter) Write(p []byte) (int, error) { return t.File.Write(p) }
-
-func (t *tsWriter) Close() error {
-	err := t.File.Close()
-	go remuxToMP4(t.ffmpegBin, t.tsPath, t.mp4Path)
-	return err
-}
-
-// remuxToMP4 stream-copies a raw TS to MP4 with faststart. No re-encode.
-func remuxToMP4(ffmpegBin, tsPath, mp4Path string) {
-	log.Printf("[remux] %s → %s", tsPath, mp4Path)
-	cmd := exec.Command(ffmpegBin,
-		"-y",
-		"-i", tsPath,
-		"-c", "copy",
-		"-movflags", "faststart",
-		mp4Path,
-	)
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		log.Printf("[remux] error: %v", err)
-		return
-	}
-	_ = os.Remove(tsPath)
-	log.Printf("[remux] done: %s", mp4Path)
-}

@@ -3,7 +3,6 @@ package capture
 import (
 	"bufio"
 	"fmt"
-	"io"
 	"log"
 	"math"
 	"os"
@@ -43,26 +42,10 @@ type Stream struct {
 	AudioL      float64 // dBFS RMS left channel
 	AudioR      float64 // dBFS RMS right channel
 	ffmpegInput string
-	fifoPath    string
+	feedURL     string
 	cmd         *exec.Cmd
 	stopCh      chan struct{}
-	// recDst is set to a non-nil writer when recording is active.
-	// The drain goroutine copies FIFO data here instead of discarding it.
-	recDst   io.WriteCloser
-	recMu    sync.Mutex
-	mu       sync.Mutex
-}
-
-// SetRecordingDst atomically swaps the recording destination.
-// Pass nil to stop recording (drain goroutine resumes discarding).
-func (s *Stream) SetRecordingDst(w io.WriteCloser) {
-	s.recMu.Lock()
-	old := s.recDst
-	s.recDst = w
-	s.recMu.Unlock()
-	if old != nil {
-		_ = old.Close()
-	}
+	mu          sync.Mutex
 }
 
 type Manager struct {
@@ -88,7 +71,7 @@ func (m *Manager) Register(id int, name, ffmpegInput string) {
 		Name:        name,
 		Status:      StatusStopped,
 		ffmpegInput: ffmpegInput,
-		fifoPath:    fmt.Sprintf("/tmp/roc-feed-%d.ts", id),
+		feedURL:     fmt.Sprintf("udp://127.0.0.1:%d?pkt_size=1316", 21000+id),
 	}
 }
 
@@ -130,7 +113,16 @@ func (m *Manager) Stop(id int) error {
 		return fmt.Errorf("channel %d is not running", id)
 	}
 
-	close(s.stopCh)
+	if s.stopCh == nil {
+		return fmt.Errorf("channel %d stop channel is not initialized", id)
+	}
+	// Idempotent stop: if another request already closed stopCh, do nothing.
+	select {
+	case <-s.stopCh:
+		return nil
+	default:
+		close(s.stopCh)
+	}
 	return nil
 }
 
@@ -149,6 +141,16 @@ func (m *Manager) StreamByID(id int) (*Stream, bool) {
 	defer m.mu.RUnlock()
 	s, ok := m.streams[id]
 	return s, ok
+}
+
+func (m *Manager) FeedURL(id int) (string, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	s, ok := m.streams[id]
+	if !ok {
+		return "", false
+	}
+	return s.feedURL, true
 }
 
 func (m *Manager) AudioLevels(id int) (l, r float64, ok bool) {
@@ -182,15 +184,11 @@ func (m *Manager) runLoop(s *Stream) {
 	)
 	consecutiveFails := 0
 
-	// Ensure FIFO exists before the first run
-	ensureFIFO(s.fifoPath)
-
 	for {
 		select {
 		case <-s.stopCh:
 			m.killStream(s)
 			m.removeThumb(s.ID)
-			s.SetRecordingDst(nil)
 			s.mu.Lock()
 			s.Status = StatusStopped
 			s.Format = ""
@@ -235,8 +233,6 @@ func (m *Manager) runLoop(s *Stream) {
 		s.Error = err.Error()
 		s.mu.Unlock()
 		m.removeThumb(s.ID)
-		// Stop any in-progress recording – signal is gone
-		s.SetRecordingDst(nil)
 
 		log.Printf("[channel %d] FFmpeg exited after %s: %v (fail #%d) – restarting in %s",
 			s.ID, uptime.Round(time.Millisecond), err, consecutiveFails, delay)
@@ -257,12 +253,10 @@ func (m *Manager) runLoop(s *Stream) {
 	}
 }
 
-// runFFmpeg starts FFmpeg with two outputs:
-//  1. JPEG thumbnail updated every second (for grid preview)
-//  2. Low-overhead MPEG-TS written to a named FIFO (for recording)
-//
-// A drain goroutine reads the FIFO continuously and either discards the data
-// or writes it to the active recording destination.
+// runFFmpeg starts FFmpeg with three outputs:
+// 1) JPEG thumbnail for grid preview
+// 2) H264 MPEG-TS UDP feed for recording
+// 3) audio analysis (astats) to null
 func (m *Manager) runFFmpeg(s *Stream) error {
 	outDir := filepath.Join(m.hlsDir, fmt.Sprintf("%d", s.ID))
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
@@ -274,28 +268,35 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 
 	// astats prints RMS levels per channel to stderr every ~1 s.
 	afFilter := "astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.1.RMS_level:key=lavfi.astats.2.RMS_level"
-
-	// tee muxer: output 1 = JPEG thumbnail, output 2 = MPEG-TS to FIFO
-	// The FIFO output uses the full input resolution/codec so recording gets full quality.
-	teeOut := fmt.Sprintf(
-		// thumbnail branch: scale down, 1 fps, JPEG
-		"[select=v:f=image2:r=1:q\\:v=4:update=1]%s"+
-			"|"+
-			// FIFO branch: full resolution h264_nvenc TS for recording
-			"[select=v:f=mpegts:c:v=h264_nvenc:b:v=12M:maxrate=14M:bufsize=20M:preset=p4:vf=yadif\\=mode=0\\:deint=interlaced\\,format=yuv420p]%s",
-		thumbPath, s.fifoPath,
-	)
+	// One decode, two branches:
+	// - vthumb: low-res JPEG thumbnail
+	// - vrec: full-res encode to MPEG-TS UDP for recording
+	filterGraph := "[0:v]yadif=mode=0:deint=interlaced,split=2[vrec][vthumb];[vthumb]scale=640:360,format=yuv420p[vthumbout];[vrec]format=yuv420p[vrecout]"
 
 	args := []string{"-y"}
 	args = append(args, inputArgs...)
 	args = append(args,
-		"-map", "0:v",
+		"-filter_complex", filterGraph,
+		// Output #1: thumbnail JPEG (updated every second)
+		"-map", "[vthumbout]",
+		"-r", "1",
+		"-q:v", "4",
+		"-update", "1",
+		"-f", "image2",
+		thumbPath,
+		// Output #2: recording feed to FIFO (single DeckLink reader)
+		"-map", "[vrecout]",
+		"-c:v", "h264_nvenc",
+		"-b:v", "12M",
+		"-maxrate", "14M",
+		"-bufsize", "20M",
+		"-preset", "p4",
+		"-f", "mpegts",
+		s.feedURL,
+		// Output #3: audio analysis only
 		"-map", "0:a?",
-		// astats audio meter (null output)
 		"-af", afFilter,
 		"-f", "null", "-",
-		// tee video output (thumbnail + FIFO)
-		"-f", "tee", teeOut,
 	)
 
 	cmd := exec.Command(m.ffmpegBin, args...)
@@ -308,39 +309,6 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
-
-	// Drain goroutine: reads from FIFO continuously and routes data to the
-	// active recording destination (or discards if none is set).
-	// Closing fifoFile from the main goroutine unblocks any pending Read.
-	fifoFile, fifoErr := os.Open(s.fifoPath)
-	if fifoErr != nil {
-		_ = cmd.Process.Kill()
-		return fmt.Errorf("open FIFO: %w", fifoErr)
-	}
-	go func() {
-		defer fifoFile.Close()
-		buf := make([]byte, 188*256) // TS packet-aligned buffer
-		for {
-			n, err := fifoFile.Read(buf)
-			if n > 0 {
-				s.recMu.Lock()
-				dst := s.recDst
-				s.recMu.Unlock()
-				if dst != nil {
-					if _, werr := dst.Write(buf[:n]); werr != nil {
-						log.Printf("[channel %d] recording write error: %v", s.ID, werr)
-						s.SetRecordingDst(nil)
-					}
-				}
-			}
-			if err != nil {
-				if err != io.EOF {
-					log.Printf("[channel %d] drain read: %v", s.ID, err)
-				}
-				return
-			}
-		}
-	}()
 
 	// Stderr parser: signal format + audio levels + signal loss detection
 	go func() {
@@ -394,7 +362,6 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 				s.AudioL = 0
 				s.AudioR = 0
 				s.mu.Unlock()
-				s.SetRecordingDst(nil)
 				if cmd.Process != nil {
 					_ = cmd.Process.Kill()
 				}
@@ -408,26 +375,9 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	select {
 	case <-s.stopCh:
 		_ = cmd.Process.Kill()
-		_ = fifoFile.Close() // unblocks drain goroutine
 		return nil
 	case err := <-doneCh:
-		_ = fifoFile.Close()
 		return err
-	}
-}
-
-// ensureFIFO creates a named pipe at path if it doesn't already exist.
-func ensureFIFO(path string) {
-	// Remove any regular file that might be there from a previous crash
-	if fi, err := os.Lstat(path); err == nil {
-		if fi.Mode()&os.ModeNamedPipe == 0 {
-			_ = os.Remove(path)
-		} else {
-			return // already a FIFO
-		}
-	}
-	if err := mkfifo(path, 0o600); err != nil {
-		log.Printf("warning: could not create FIFO %s: %v", path, err)
 	}
 }
 

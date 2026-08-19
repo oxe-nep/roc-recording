@@ -24,7 +24,7 @@ func main() {
 
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
-		log.Fatalf("Kunde inte läsa config: %v", err)
+		log.Fatalf("Failed to load config: %v", err)
 	}
 
 	mgr := capture.NewManager(cfg.HLSDir, cfg.FFmpegBin)
@@ -46,9 +46,9 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("roc-recording backend startar på :%s", cfg.Port)
+		log.Printf("roc-recording backend starting on :%s", cfg.Port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Server fel: %v", err)
+			log.Fatalf("Server error: %v", err)
 		}
 	}()
 
@@ -56,7 +56,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Stänger ned...")
+	log.Println("Shutting down...")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)

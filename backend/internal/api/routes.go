@@ -25,10 +25,10 @@ func NewRouter(mgr *capture.Manager, hlsHandler *hlshandler.Handler, apiKey, hls
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	// HLS – ingen API-nyckel krävs
+	// HLS – no API key required
 	r.Mount("/hls/", hlsHandler)
 
-	// API – kräver API-nyckel
+	// API – requires API key
 	r.Group(func(r chi.Router) {
 		r.Use(apiKeyMiddleware(apiKey))
 
@@ -47,7 +47,7 @@ func NewRouter(mgr *capture.Manager, hlsHandler *hlshandler.Handler, apiKey, hls
 		r.Post("/api/streams/{id}/start", func(w http.ResponseWriter, r *http.Request) {
 			id, err := strconv.Atoi(chi.URLParam(r, "id"))
 			if err != nil {
-				jsonError(w, "ogiltigt kanal-id", http.StatusBadRequest)
+				jsonError(w, "invalid channel id", http.StatusBadRequest)
 				return
 			}
 			if err := mgr.Start(id); err != nil {
@@ -60,7 +60,7 @@ func NewRouter(mgr *capture.Manager, hlsHandler *hlshandler.Handler, apiKey, hls
 		r.Post("/api/streams/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
 			id, err := strconv.Atoi(chi.URLParam(r, "id"))
 			if err != nil {
-				jsonError(w, "ogiltigt kanal-id", http.StatusBadRequest)
+				jsonError(w, "invalid channel id", http.StatusBadRequest)
 				return
 			}
 			if err := mgr.Stop(id); err != nil {

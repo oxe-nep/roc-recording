@@ -14,9 +14,9 @@ export default async function StreamPage({ params }: Props) {
   return (
     <main className="min-h-screen bg-slate-950 text-white p-6">
       <Link href="/" className="text-slate-400 hover:text-white text-sm mb-6 inline-block">
-        ← Tillbaka
+        ← Back
       </Link>
-      <h1 className="text-xl font-bold mb-4">Kanal {id}</h1>
+      <h1 className="text-xl font-bold mb-4">Channel {id}</h1>
       <div className="max-w-4xl">
         <HlsPlayer
           src={hlsSrc}

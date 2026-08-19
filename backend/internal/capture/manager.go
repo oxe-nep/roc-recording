@@ -62,14 +62,14 @@ func (m *Manager) Start(id int) error {
 	s, ok := m.streams[id]
 	m.mu.RUnlock()
 	if !ok {
-		return fmt.Errorf("kanal %d finns inte", id)
+		return fmt.Errorf("channel %d not found", id)
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.Status == StatusRunning {
-		return fmt.Errorf("kanal %d körs redan", id)
+		return fmt.Errorf("channel %d is already running", id)
 	}
 
 	s.stopCh = make(chan struct{})
@@ -85,14 +85,14 @@ func (m *Manager) Stop(id int) error {
 	s, ok := m.streams[id]
 	m.mu.RUnlock()
 	if !ok {
-		return fmt.Errorf("kanal %d finns inte", id)
+		return fmt.Errorf("channel %d not found", id)
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.Status != StatusRunning {
-		return fmt.Errorf("kanal %d körs inte", id)
+		return fmt.Errorf("channel %d is not running", id)
 	}
 
 	close(s.stopCh)
@@ -134,7 +134,7 @@ func (m *Manager) runLoop(s *Stream) {
 				s.Status = StatusError
 				s.Error = err.Error()
 				s.mu.Unlock()
-				log.Printf("[kanal %d] FFmpeg avslutades med fel: %v – startar om om 3s", s.ID, err)
+				log.Printf("[channel %d] FFmpeg exited with error: %v – restarting in 3s", s.ID, err)
 				time.Sleep(3 * time.Second)
 				s.mu.Lock()
 				s.Status = StatusRunning
@@ -148,13 +148,13 @@ func (m *Manager) runLoop(s *Stream) {
 func (m *Manager) runFFmpeg(s *Stream) error {
 	outDir := filepath.Join(m.hlsDir, fmt.Sprintf("%d", s.ID))
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		return fmt.Errorf("skapa HLS-katalog: %w", err)
+		return fmt.Errorf("create HLS directory: %w", err)
 	}
 
 	playlist := filepath.Join(outDir, "index.m3u8")
 	segPattern := filepath.Join(outDir, "%03d.ts")
 
-	// Bygg args: inputdelen (konfigurerbar) + encoder + HLS-output
+	// Build args: configurable input part + encoder + HLS output
 	inputArgs := strings.Fields(s.ffmpegInput)
 	encoderArgs := []string{
 		"-vf", "scale=1280:720",
@@ -179,18 +179,18 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 
 	stderr, _ := cmd.StderrPipe()
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("starta ffmpeg: %w", err)
+		return fmt.Errorf("start ffmpeg: %w", err)
 	}
 
-	// Logga stderr
+	// Log stderr
 	go func() {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
-			log.Printf("[kanal %d ffmpeg] %s", s.ID, scanner.Text())
+			log.Printf("[channel %d ffmpeg] %s", s.ID, scanner.Text())
 		}
 	}()
 
-	// Övervaka stopCh parallellt
+	// Watch stopCh in parallel
 	doneCh := make(chan error, 1)
 	go func() { doneCh <- cmd.Wait() }()
 

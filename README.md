@@ -1,50 +1,50 @@
 # roc-recording
 
-Live-preview för Blackmagic IP-kort (ST 2110) via HLS Low-Latency.
+Live preview for Blackmagic IP card (ST 2110) via HLS Low-Latency.
 
-## Arkitektur
+## Architecture
 
-- **Backend** – Go + FFmpeg, kör på capture-hosten
-- **Frontend** – Next.js + hls.js, kör separat och pekar mot backend
+- **Backend** – Go + FFmpeg, runs on the capture host
+- **Frontend** – Next.js + hls.js, runs separately and points to the backend
 
-## Snabbstart
+## Quick start
 
-### Backend (capture-host, Linux)
+### Backend (capture host, Linux)
 
 ```bash
-# Med Docker
-PUBLIC_URL=http://10.199.28.249:8080 API_KEY=hemlig docker compose up -d
+# With Docker
+PUBLIC_URL=http://10.199.28.249:8080 API_KEY=secret docker compose up -d
 
-# Eller direkt
+# Or directly
 cd backend
 go build -o roc-recording ./cmd/server
 ./roc-recording config.yaml
 ```
 
-Justera `backend/config.yaml` för rätt FFmpeg-input per kanal.
+Adjust `backend/config.yaml` for the correct FFmpeg input per channel.
 
 ### Frontend
 
 ```bash
 cd frontend
-# Sätt backend-URL och API-nyckel i .env.local
+# Set backend URL and API key in .env.local
 echo "NEXT_PUBLIC_BACKEND_URL=http://10.199.28.249:8080" >> .env.local
-echo "NEXT_PUBLIC_API_KEY=hemlig" >> .env.local
+echo "NEXT_PUBLIC_API_KEY=secret" >> .env.local
 npm run dev
 ```
 
 ## API
 
-Alla `/api/`-endpoints kräver header `X-API-Key: <nyckel>`.
+All `/api/` endpoints require the header `X-API-Key: <key>`.
 
-| Metod | Path | Beskrivning |
+| Method | Path | Description |
 |---|---|---|
-| GET | `/api/streams` | Lista alla 8 kanaler |
-| POST | `/api/streams/{id}/start` | Starta kanal |
-| POST | `/api/streams/{id}/stop` | Stoppa kanal |
-| GET | `/hls/{id}/index.m3u8` | HLS-playlist |
+| GET | `/api/streams` | List all 8 channels |
+| POST | `/api/streams/{id}/start` | Start channel |
+| POST | `/api/streams/{id}/stop` | Stop channel |
+| GET | `/hls/{id}/index.m3u8` | HLS playlist |
 
-## FFmpeg-input
+## FFmpeg input
 
-`ffmpeg_input` i `config.yaml` är en fri sträng med FFmpeg-inputargument per kanal.
-Justera efter exakt enhetsnamn och SDK-version för ditt Blackmagic IP-kort.
+`ffmpeg_input` in `config.yaml` is a free-form FFmpeg input argument string per channel.
+Adjust to match the exact device name and SDK version of your Blackmagic IP card.

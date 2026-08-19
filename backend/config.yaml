@@ -6,26 +6,26 @@ ffmpeg_bin: "ffmpeg"
 
 channels:
   - id: 1
-    name: "Kanal 1"
+    name: "Channel 1"
     ffmpeg_input: '-f sdi2110 -video_input 1 -i ""'
   - id: 2
-    name: "Kanal 2"
+    name: "Channel 2"
     ffmpeg_input: '-f sdi2110 -video_input 2 -i ""'
   - id: 3
-    name: "Kanal 3"
+    name: "Channel 3"
     ffmpeg_input: '-f sdi2110 -video_input 3 -i ""'
   - id: 4
-    name: "Kanal 4"
+    name: "Channel 4"
     ffmpeg_input: '-f sdi2110 -video_input 4 -i ""'
   - id: 5
-    name: "Kanal 5"
+    name: "Channel 5"
     ffmpeg_input: '-f sdi2110 -video_input 5 -i ""'
   - id: 6
-    name: "Kanal 6"
+    name: "Channel 6"
     ffmpeg_input: '-f sdi2110 -video_input 6 -i ""'
   - id: 7
-    name: "Kanal 7"
+    name: "Channel 7"
     ffmpeg_input: '-f sdi2110 -video_input 7 -i ""'
   - id: 8
-    name: "Kanal 8"
+    name: "Channel 8"
     ffmpeg_input: '-f sdi2110 -video_input 8 -i ""'

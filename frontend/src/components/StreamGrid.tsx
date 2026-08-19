@@ -45,7 +45,7 @@ export default function StreamGrid() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64 text-slate-400">
-        Ansluter till backend…
+        Connecting to backend…
       </div>
     );
   }
@@ -94,7 +94,7 @@ export default function StreamGrid() {
                   : "bg-emerald-700 hover:bg-emerald-600 text-white"
               }`}
             >
-              {busy[s.id] ? "…" : s.status === "running" ? "Stoppa" : "Starta"}
+              {busy[s.id] ? "…" : s.status === "running" ? "Stop" : "Start"}
             </button>
           </div>
           {s.error && (

@@ -58,12 +58,12 @@ func Load(path string) (*Config, error) {
 		cfg.FFmpegBin = v
 	}
 
-	// Default channels 1-8 om inga definieras i config
+	// Default channels 1-8 if none defined in config
 	if len(cfg.Channels) == 0 {
 		for i := 1; i <= 8; i++ {
 			cfg.Channels = append(cfg.Channels, ChannelConfig{
 				ID:          i,
-				Name:        fmt.Sprintf("Kanal %d", i),
+				Name:        fmt.Sprintf("Channel %d", i),
 				FFmpegInput: fmt.Sprintf(`-f sdi2110 -video_input %d -i ""`, i),
 			})
 		}

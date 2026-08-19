@@ -7,25 +7,25 @@ ffmpeg_bin: "/usr/local/bin/ffmpeg"
 channels:
   - id: 1
     name: "Channel 1"
-    ffmpeg_input: "-f decklink -i 'DeckLink IP 100G (1)'"
+    ffmpeg_input: "-f decklink -draw_bars 0 -signal_loss_action repeat -i 'DeckLink IP 100G (1)'"
   - id: 2
     name: "Channel 2"
-    ffmpeg_input: "-f decklink -i 'DeckLink IP 100G (2)'"
+    ffmpeg_input: "-f decklink -draw_bars 0 -signal_loss_action repeat -i 'DeckLink IP 100G (2)'"
   - id: 3
     name: "Channel 3"
-    ffmpeg_input: "-f decklink -i 'DeckLink IP 100G (3)'"
+    ffmpeg_input: "-f decklink -draw_bars 0 -signal_loss_action repeat -i 'DeckLink IP 100G (3)'"
   - id: 4
     name: "Channel 4"
-    ffmpeg_input: "-f decklink -i 'DeckLink IP 100G (4)'"
+    ffmpeg_input: "-f decklink -draw_bars 0 -signal_loss_action repeat -i 'DeckLink IP 100G (4)'"
   - id: 5
     name: "Channel 5"
-    ffmpeg_input: "-f decklink -i 'DeckLink IP 100G (5)'"
+    ffmpeg_input: "-f decklink -draw_bars 0 -signal_loss_action repeat -i 'DeckLink IP 100G (5)'"
   - id: 6
     name: "Channel 6"
-    ffmpeg_input: "-f decklink -i 'DeckLink IP 100G (6)'"
+    ffmpeg_input: "-f decklink -draw_bars 0 -signal_loss_action repeat -i 'DeckLink IP 100G (6)'"
   - id: 7
     name: "Channel 7"
-    ffmpeg_input: "-f decklink -i 'DeckLink IP 100G (7)'"
+    ffmpeg_input: "-f decklink -draw_bars 0 -signal_loss_action repeat -i 'DeckLink IP 100G (7)'"
   - id: 8
     name: "Channel 8"
-    ffmpeg_input: "-f decklink -i 'DeckLink IP 100G (8)'"
+    ffmpeg_input: "-f decklink -draw_bars 0 -signal_loss_action repeat -i 'DeckLink IP 100G (8)'"

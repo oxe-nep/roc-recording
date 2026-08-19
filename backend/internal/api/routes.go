@@ -18,6 +18,7 @@ type streamResponse struct {
 	Name   string `json:"name"`
 	Status string `json:"status"`
 	Error  string `json:"error,omitempty"`
+	Format string `json:"format,omitempty"`
 	HLSURL string `json:"hls_url"`
 }
 
@@ -188,6 +189,7 @@ func toResponse(s *capture.Stream, hlsBaseURL string) streamResponse {
 		Name:   s.Name,
 		Status: string(s.Status),
 		Error:  s.Error,
+		Format: s.Format,
 		HLSURL: hlsBaseURL + "/hls/" + strconv.Itoa(s.ID) + "/index.m3u8",
 	}
 }

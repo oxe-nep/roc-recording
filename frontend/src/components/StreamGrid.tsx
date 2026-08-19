@@ -118,6 +118,9 @@ export default function StreamGrid() {
                 <div className="card-title">
                   <span className={`status-dot ${s.status}`} />
                   <span className="card-name">{s.name}</span>
+                  {s.format && (
+                    <span className="signal-format">{s.format}</span>
+                  )}
                 </div>
                 <div className="card-actions">
                   <button

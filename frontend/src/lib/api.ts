@@ -6,6 +6,7 @@ export interface Stream {
   name: string;
   status: "running" | "stopped" | "error";
   error?: string;
+  format?: string;
   hls_url: string;
 }
 

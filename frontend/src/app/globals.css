@@ -146,6 +146,18 @@ body {
   color: var(--text-primary);
 }
 
+.signal-format {
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  background: rgba(91, 159, 212, 0.12);
+  padding: 1px 4px;
+  border-radius: 3px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
 .status-dot {
   width: 6px;
   height: 6px;

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -20,11 +21,16 @@ const (
 	StatusError   Status = "error"
 )
 
+// reSignalFormat matches lines like:
+// "Found Decklink mode 1920 x 1080 with rate 25.00(i)" or "50.00"
+var reSignalFormat = regexp.MustCompile(`Found Decklink mode (\d+) x (\d+) with rate ([\d.]+)(\(i\))?`)
+
 type Stream struct {
 	ID          int
 	Name        string
 	Status      Status
 	Error       string
+	Format      string // e.g. "1080i50" or "1080p50", empty when unknown
 	ffmpegInput string
 	cmd         *exec.Cmd
 	stopCh      chan struct{}
@@ -137,6 +143,7 @@ func (m *Manager) runLoop(s *Stream) {
 			m.removeThumb(s.ID)
 			s.mu.Lock()
 			s.Status = StatusStopped
+			s.Format = ""
 			s.mu.Unlock()
 			return
 		default:
@@ -241,9 +248,32 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 			if strings.Contains(line, "rror") {
 				log.Printf("[channel %d] %s", s.ID, line)
 			}
+			// Parse signal format from DeckLink mode line
+			if m := reSignalFormat.FindStringSubmatch(line); m != nil {
+				// m[1]=width, m[2]=height, m[3]=rate, m[4]="(i)" or ""
+				height := m[2]
+				rateStr := m[3]
+				interlaced := m[4] != ""
+				// Convert rate "25.00" → "50" for interlaced (field rate→frame rate display)
+				// or keep as-is for progressive. Round to nearest integer.
+				var rateInt int
+				fmt.Sscanf(rateStr, "%d", &rateInt)
+				scanType := "p"
+				if interlaced {
+					scanType = "i"
+				}
+				format := fmt.Sprintf("%s%s%d", height, scanType, rateInt)
+				s.mu.Lock()
+				s.Format = format
+				s.mu.Unlock()
+				log.Printf("[channel %d] detected format: %s", s.ID, format)
+			}
 			// If DeckLink reports signal loss, force a restart so stale preview is removed
 			// and the process can re-lock when signal/mode comes back.
 			if strings.Contains(line, "No input signal detected") {
+				s.mu.Lock()
+				s.Format = ""
+				s.mu.Unlock()
 				if cmd.Process != nil {
 					_ = cmd.Process.Kill()
 				}

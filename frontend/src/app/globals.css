@@ -218,6 +218,44 @@ body {
   flex-shrink: 0;
 }
 
+.audio-meter {
+  display: flex;
+  align-items: end;
+  gap: 4px;
+  margin-left: auto;
+  margin-right: 8px;
+  height: 22px;
+}
+
+.audio-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+}
+
+.audio-bar {
+  width: 4px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+  display: flex;
+  align-items: end;
+}
+
+.audio-fill {
+  width: 100%;
+  background: linear-gradient(180deg, #ff6a6a 0%, #f0ad4e 45%, #5cb85c 100%);
+  transition: height 120ms linear;
+}
+
+.audio-label {
+  font-size: 0.5rem;
+  color: var(--text-muted);
+  line-height: 1;
+}
+
 .rec-btn {
   font-size: 0.75rem !important;
   padding: 2px 5px !important;

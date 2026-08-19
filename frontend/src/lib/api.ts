@@ -52,6 +52,11 @@ export interface RecordingFile {
   url: string;
 }
 
+export interface AudioLevels {
+  l: number;
+  r: number;
+}
+
 export async function fetchRecordings(): Promise<RecordingInfo[]> {
   const res = await apiFetch("/api/recordings");
   if (!res.ok) throw new Error(`fetchRecordings: ${res.status}`);
@@ -90,4 +95,10 @@ export async function fetchRecordingBlob(id: number, name: string): Promise<Blob
   const res = await apiFetch(`/api/recordings/file/${id}/${encodeURIComponent(name)}`);
   if (!res.ok) throw new Error(`fetchRecordingBlob: ${res.status}`);
   return res.blob();
+}
+
+export async function fetchAudioLevels(id: number): Promise<AudioLevels> {
+  const res = await fetch(`${BASE}/audio/${id}`);
+  if (!res.ok) throw new Error(`fetchAudioLevels: ${res.status}`);
+  return res.json();
 }

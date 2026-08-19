@@ -6,11 +6,13 @@ import {
   startStream,
   stopStream,
   fetchRecordings,
+  fetchAudioLevels,
   startRecording,
   stopRecording,
   startAllRecordings,
   stopAllRecordings,
   type Stream,
+  type AudioLevels,
   type RecordingInfo,
 } from "@/lib/api";
 import Thumbnail from "@/components/Thumbnail";
@@ -23,6 +25,7 @@ export default function StreamGrid() {
   const [busy, setBusy] = useState<Record<number, boolean>>({});
   const [recBusy, setRecBusy] = useState<Record<number, boolean>>({});
   const [globalRecBusy, setGlobalRecBusy] = useState(false);
+  const [audio, setAudio] = useState<Record<number, AudioLevels>>({});
 
   const load = useCallback(async () => {
     try {
@@ -47,6 +50,32 @@ export default function StreamGrid() {
     const interval = setInterval(load, 3000);
     return () => clearInterval(interval);
   }, [load]);
+
+  useEffect(() => {
+    const pollAudio = async () => {
+      const running = streams.filter((s) => s.status === "running");
+      if (running.length === 0) return;
+      await Promise.all(
+        running.map(async (s) => {
+          try {
+            const levels = await fetchAudioLevels(s.id);
+            setAudio((prev) => ({ ...prev, [s.id]: levels }));
+          } catch {
+            // ignore transient audio fetch errors
+          }
+        }),
+      );
+    };
+    const interval = setInterval(pollAudio, 250);
+    pollAudio();
+    return () => clearInterval(interval);
+  }, [streams]);
+
+  const levelPct = (db?: number): number => {
+    if (db === undefined || Number.isNaN(db)) return 0;
+    const clamped = Math.max(-60, Math.min(0, db));
+    return ((clamped + 60) / 60) * 100;
+  };
 
   const toggle = async (s: Stream) => {
     setBusy((b) => ({ ...b, [s.id]: true }));
@@ -126,6 +155,20 @@ export default function StreamGrid() {
                   {s.format && (
                     <span className="signal-format">{s.format}</span>
                   )}
+                </div>
+                <div className="audio-meter" title="Audio level L/R">
+                  <div className="audio-col">
+                    <div className="audio-bar">
+                      <div className="audio-fill" style={{ height: `${levelPct(audio[s.id]?.l)}%` }} />
+                    </div>
+                    <span className="audio-label">L</span>
+                  </div>
+                  <div className="audio-col">
+                    <div className="audio-bar">
+                      <div className="audio-fill" style={{ height: `${levelPct(audio[s.id]?.r)}%` }} />
+                    </div>
+                    <span className="audio-label">R</span>
+                  </div>
                 </div>
                 <div className="card-actions">
                   <button

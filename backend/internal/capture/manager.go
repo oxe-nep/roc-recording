@@ -113,8 +113,8 @@ func (m *Manager) List() []*Stream {
 
 func (m *Manager) runLoop(s *Stream) {
 	const (
-		restartDelay   = 5 * time.Second
-		stableAfter    = 10 * time.Second
+		restartDelay = 3 * time.Second
+		stableAfter  = 10 * time.Second
 	)
 	consecutiveFails := 0
 
@@ -142,14 +142,12 @@ func (m *Manager) runLoop(s *Stream) {
 		}
 
 		if err == nil {
-			// Clean exit (stopped externally)
 			consecutiveFails = 0
 			continue
 		}
 
 		uptime := time.Since(start)
 		if uptime >= stableAfter {
-			// Ran long enough – likely lost signal, reset fail counter
 			consecutiveFails = 0
 		} else {
 			consecutiveFails++
@@ -157,7 +155,7 @@ func (m *Manager) runLoop(s *Stream) {
 
 		delay := restartDelay
 		if consecutiveFails > 5 {
-			delay = 30 * time.Second
+			delay = 15 * time.Second
 		}
 
 		s.mu.Lock()
@@ -165,7 +163,7 @@ func (m *Manager) runLoop(s *Stream) {
 		s.Error = err.Error()
 		s.mu.Unlock()
 
-		log.Printf("[channel %d] FFmpeg exited after %s with error: %v (fail #%d) – restarting in %s",
+		log.Printf("[channel %d] FFmpeg exited after %s: %v (fail #%d) – restarting in %s",
 			s.ID, uptime.Round(time.Millisecond), err, consecutiveFails, delay)
 
 		select {
@@ -183,71 +181,29 @@ func (m *Manager) runLoop(s *Stream) {
 	}
 }
 
-// runFFmpeg runs a single FFmpeg process that produces both a thumbnail and HLS output.
-// yadif handles 1080i/1080p transparently. On format change (e.g. switching from
-// progressive to interlaced), FFmpeg exits and runLoop restarts it automatically.
+// runFFmpeg runs FFmpeg capturing from Blackmagic and writing a JPEG thumbnail
+// every second. yadif=deint=interlaced handles both 1080i and 1080p transparently.
+// On source format change FFmpeg exits and runLoop restarts it automatically.
 func (m *Manager) runFFmpeg(s *Stream) error {
 	outDir := filepath.Join(m.hlsDir, fmt.Sprintf("%d", s.ID))
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		return fmt.Errorf("create HLS directory: %w", err)
+		return fmt.Errorf("create output directory: %w", err)
 	}
 
-	playlist := filepath.Join(outDir, "index.m3u8")
-	segPattern := filepath.Join(outDir, "%03d.ts")
 	thumbPath := filepath.Join(outDir, "thumb.jpg")
-
 	inputArgs := shellSplit(s.ffmpegInput)
 
-	encoder := m.videoCodec
-	if encoder == "" {
-		encoder = "h264_nvenc"
-	}
-
-	// yadif=deint=interlaced: deinterlace only interlaced frames, pass progressive through.
-	// This makes the pipeline work for both 1080i50 and 1080p50 without reconfiguration.
+	// yadif=deint=interlaced: deinterlace only interlaced frames (1080i),
+	// pass progressive frames through unchanged (1080p).
 	vfFilter := "yadif=mode=0:deint=interlaced,scale=640:360,format=yuv420p"
 
-	encoderOpts := []string{}
-	switch encoder {
-	case "h264_nvenc":
-		encoderOpts = append(encoderOpts, "-preset", "p1", "-tune", "ll", "-rc", "cbr", "-b:v", "800k")
-	case "hevc_nvenc":
-		encoderOpts = append(encoderOpts, "-preset", "p1", "-tune", "ll", "-rc", "cbr", "-b:v", "800k")
-	case "libx264":
-		encoderOpts = append(encoderOpts, "-preset", "ultrafast", "-tune", "zerolatency", "-b:v", "800k")
-	case "libx265":
-		encoderOpts = append(encoderOpts, "-preset", "ultrafast", "-b:v", "800k")
-	default:
-		encoderOpts = append(encoderOpts, "-b:v", "800k")
-	}
-
-	// -y: overwrite output files without asking (needed for thumb.jpg on restart)
 	args := []string{"-y"}
 	args = append(args, inputArgs...)
 	args = append(args,
-		// Shared video filter
-		"-vf", vfFilter,
-		// Video encoder
-		"-c:v", encoder,
-	)
-	args = append(args, encoderOpts...)
-	args = append(args,
-		"-g", "50", "-keyint_min", "50",
-		// Audio
-		"-c:a", "aac", "-b:a", "64k",
-		// HLS output
-		"-f", "hls",
-		"-hls_time", "2",
-		"-hls_list_size", "10",
-		"-hls_flags", "delete_segments+append_list",
-		"-hls_segment_type", "mpegts",
-		"-hls_segment_filename", segPattern,
-		playlist,
-		// Thumbnail output: JPEG updated every second, same filter chain
 		"-vf", vfFilter,
 		"-r", "1",
-		"-update", "1",
 		"-q:v", "4",
+		"-update", "1",
 		"-f", "image2",
 		thumbPath,
 	)
@@ -263,15 +219,16 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
 
-	// Log stderr
 	go func() {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
-			log.Printf("[channel %d ffmpeg] %s", s.ID, scanner.Text())
+			line := scanner.Text()
+			if strings.Contains(line, "rror") {
+				log.Printf("[channel %d] %s", s.ID, line)
+			}
 		}
 	}()
 
-	// Watch stopCh in parallel
 	doneCh := make(chan error, 1)
 	go func() { doneCh <- cmd.Wait() }()
 

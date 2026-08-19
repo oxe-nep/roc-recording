@@ -121,7 +121,10 @@ func (m *Manager) Start(id int) (ChannelInfo, error) {
 		"-preset", "p4",
 		"-g", "50",
 		"-forced-idr", "1",
-		"-an",
+		"-c:a", "aac",
+		"-b:a", "192k",
+		"-ar", "48000",
+		"-ac", "2",
 		"-movflags", "frag_keyframe+empty_moov+default_base_moof",
 		mp4Path,
 	}

@@ -73,8 +73,9 @@ export default function StreamGrid() {
 
   const levelPct = (db?: number): number => {
     if (db === undefined || Number.isNaN(db)) return 0;
-    const clamped = Math.max(-60, Math.min(0, db));
-    return ((clamped + 60) / 60) * 100;
+    // Keep meter stable and readable in the normal dialog range
+    const clamped = Math.max(-50, Math.min(0, db));
+    return ((clamped + 50) / 50) * 100;
   };
 
   const toggle = async (s: Stream) => {

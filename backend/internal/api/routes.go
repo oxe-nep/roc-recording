@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -35,7 +36,7 @@ type recordingFileResponse struct {
 
 func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlshandler.Handler, recordingsDir, apiKey, allowedOrigins, hlsBaseURL string) http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.Logger)
+	r.Use(quietRequestLogger())
 	r.Use(middleware.Recoverer)
 	r.Use(corsMiddleware(allowedOrigins))
 
@@ -262,6 +263,59 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlsh
 	})
 
 	return r
+}
+
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+// quietRequestLogger skips high-frequency polling endpoints to keep logs readable.
+func quietRequestLogger() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if shouldSkipRequestLog(r) {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			start := time.Now()
+			sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+			next.ServeHTTP(sw, r)
+
+			if sw.status >= 400 || r.Method != http.MethodGet {
+				log.Printf("%s %s %s %d %s",
+					r.RemoteAddr, r.Method, r.URL.Path, sw.status, time.Since(start).Round(time.Microsecond))
+			}
+		})
+	}
+}
+
+func shouldSkipRequestLog(r *http.Request) bool {
+	if r.Method == http.MethodOptions {
+		return true
+	}
+	if r.Method != http.MethodGet {
+		return false
+	}
+	path := r.URL.Path
+	switch {
+	case strings.HasPrefix(path, "/thumb/"),
+		strings.HasPrefix(path, "/audio/"),
+		strings.HasPrefix(path, "/hls/"):
+		return true
+	case path == "/api/streams", path == "/api/recordings":
+		return true
+	case strings.HasPrefix(path, "/api/recordings/files/"):
+		return true
+	default:
+		return false
+	}
 }
 
 func corsMiddleware(allowedOrigins string) func(http.Handler) http.Handler {

@@ -29,7 +29,7 @@ var reSignalFormat = regexp.MustCompile(`Found Decklink mode (\d+) x (\d+) with 
 
 // reAstats matches ametadata print lines like:
 // "lavfi.astats.1.RMS_level=-18.32" (channel 1 = left, channel 2 = right)
-var reAstats = regexp.MustCompile(`lavfi\.astats\.(\d+)\.RMS_level=([-\d.]+|inf)`)
+var reAstats = regexp.MustCompile(`lavfi\.astats\.(\d+)\.RMS_level=([-\d.]+|-?inf)`)
 
 const audioSilence = -90.0 // treat -inf as this value
 
@@ -286,12 +286,17 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		thumbPath,
 		// Output #2: recording feed to FIFO (single DeckLink reader)
 		"-map", "[vrecout]",
+		"-map", "0:a?",
 		"-c:v", "h264_nvenc",
 		"-b:v", "12M",
 		"-maxrate", "14M",
 		"-bufsize", "20M",
 		"-preset", "p4",
 		"-g", "50",
+		"-c:a", "aac",
+		"-b:a", "192k",
+		"-ar", "48000",
+		"-ac", "2",
 		"-f", "mpegts",
 		"-mpegts_flags", "+resend_headers",
 		s.feedURL,
@@ -317,7 +322,7 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
 			line := scanner.Text()
-			if strings.Contains(line, "rror") {
+			if strings.Contains(line, "Error") || strings.Contains(line, "error:") {
 				log.Printf("[channel %d] %s", s.ID, line)
 			}
 			// Parse signal format from DeckLink mode line

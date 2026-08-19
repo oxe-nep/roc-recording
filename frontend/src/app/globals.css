@@ -342,6 +342,79 @@ body {
   border-radius: 4px;
 }
 
+.recordings-page {
+  padding: 18px;
+}
+
+.recordings-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.recordings-header h1 {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.recordings-layout {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 12px;
+}
+
+.recordings-list {
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--bg-surface);
+  padding: 8px;
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.recording-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.recording-row:last-child {
+  border-bottom: none;
+}
+
+.recording-name {
+  font-size: 0.75rem;
+  color: var(--text-primary);
+}
+
+.recording-sub {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+}
+
+.recording-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.recordings-player-wrap {
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--bg-surface);
+  padding: 8px;
+  min-height: 220px;
+}
+
+.recordings-player {
+  width: 100%;
+  max-height: 72vh;
+  background: #000;
+}
+
 .error-bar {
   font-size: 0.65rem;
   color: #ff8a7a;

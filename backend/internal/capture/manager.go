@@ -268,10 +268,11 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 
 	// astats prints RMS levels per channel to stderr every ~1 s.
 	afFilter := "astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.1.RMS_level:key=lavfi.astats.2.RMS_level"
-	// One decode, two branches:
+	// One decode, branched outputs:
 	// - vthumb: low-res JPEG thumbnail
 	// - vrec: full-res encode to MPEG-TS UDP for recording
-	filterGraph := "[0:v]yadif=mode=0:deint=interlaced,split=2[vrec][vthumb];[vthumb]scale=640:360,format=yuv420p[vthumbout];[vrec]format=yuv420p[vrecout]"
+	// - arec/ameter: force audio channel pair 1+2 (stereo) for recording and meter analysis
+	filterGraph := "[0:v]yadif=mode=0:deint=interlaced,split=2[vrec][vthumb];[vthumb]scale=640:360,format=yuv420p[vthumbout];[vrec]format=yuv420p[vrecout];[0:a]pan=stereo|c0=c0|c1=c1,asplit=2[arecout][ameterin]"
 
 	args := []string{"-y"}
 	args = append(args, inputArgs...)
@@ -286,7 +287,7 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		thumbPath,
 		// Output #2: recording feed to FIFO (single DeckLink reader)
 		"-map", "[vrecout]",
-		"-map", "0:a?",
+		"-map", "[arecout]",
 		"-c:v", "h264_nvenc",
 		"-b:v", "12M",
 		"-maxrate", "14M",
@@ -301,7 +302,7 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"-mpegts_flags", "+resend_headers",
 		s.feedURL,
 		// Output #3: audio analysis only
-		"-map", "0:a?",
+		"-map", "[ameterin]",
 		"-af", afFilter,
 		"-f", "null", "-",
 	)

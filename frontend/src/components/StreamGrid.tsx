@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback } from "react";
 import {
   fetchStreams,
   startStream,
-  stopStream,
   fetchRecordings,
   fetchAudioLevels,
   startRecording,
@@ -78,11 +77,15 @@ export default function StreamGrid() {
     return ((clamped + 50) / 50) * 100;
   };
 
-  const toggle = async (s: Stream) => {
+  const formatDb = (db?: number): string => {
+    if (db === undefined || Number.isNaN(db)) return "--.-";
+    return `${db.toFixed(1)} dBFS`;
+  };
+
+  const startPreview = async (s: Stream) => {
     setBusy((b) => ({ ...b, [s.id]: true }));
     try {
-      if (s.status === "running") await stopStream(s.id);
-      else await startStream(s.id);
+      await startStream(s.id);
       await load();
     } finally {
       setBusy((b) => ({ ...b, [s.id]: false }));
@@ -158,27 +161,31 @@ export default function StreamGrid() {
                   )}
                 </div>
                 <div className="audio-meter" title="Audio level L/R">
-                  <div className="audio-col">
-                    <div className="audio-bar">
-                      <div className="audio-fill" style={{ height: `${levelPct(audio[s.id]?.l)}%` }} />
-                    </div>
+                  <div className="audio-row">
                     <span className="audio-label">L</span>
-                  </div>
-                  <div className="audio-col">
                     <div className="audio-bar">
-                      <div className="audio-fill" style={{ height: `${levelPct(audio[s.id]?.r)}%` }} />
+                      <div className="audio-mask" style={{ width: `${100 - levelPct(audio[s.id]?.l)}%` }} />
                     </div>
+                    <span className="audio-db">{formatDb(audio[s.id]?.l)}</span>
+                  </div>
+                  <div className="audio-row">
                     <span className="audio-label">R</span>
+                    <div className="audio-bar">
+                      <div className="audio-mask" style={{ width: `${100 - levelPct(audio[s.id]?.r)}%` }} />
+                    </div>
+                    <span className="audio-db">{formatDb(audio[s.id]?.r)}</span>
                   </div>
                 </div>
                 <div className="card-actions">
-                  <button
-                    className={`badge ${s.status}`}
-                    onClick={() => toggle(s)}
-                    disabled={busy[s.id]}
-                  >
-                    {busy[s.id] ? "…" : s.status === "running" ? "Stop" : "Start"}
-                  </button>
+                  {s.status !== "running" && (
+                    <button
+                      className={`badge ${s.status}`}
+                      onClick={() => startPreview(s)}
+                      disabled={busy[s.id]}
+                    >
+                      {busy[s.id] ? "…" : "Start"}
+                    </button>
+                  )}
                   <button
                     className={`badge rec-btn ${isRecording ? "recording" : "idle"}`}
                     onClick={() => toggleRecording(s.id)}

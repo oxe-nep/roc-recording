@@ -220,40 +220,55 @@ body {
 
 .audio-meter {
   display: flex;
-  align-items: end;
-  gap: 6px;
+  flex-direction: column;
+  gap: 3px;
   margin-left: auto;
   margin-right: 8px;
-  height: 34px;
+  min-width: 72px;
+  flex: 1;
+  max-width: 110px;
 }
 
-.audio-col {
+.audio-row {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 1px;
+  gap: 4px;
 }
 
 .audio-bar {
-  width: 6px;
-  height: 26px;
-  background: rgba(255, 255, 255, 0.14);
+  flex: 1;
+  height: 6px;
+  position: relative;
+  background: linear-gradient(90deg, #5cb85c 0%, #f0ad4e 55%, #ff6a6a 100%);
   border-radius: 3px;
   overflow: hidden;
-  display: flex;
-  align-items: end;
 }
 
-.audio-fill {
-  width: 100%;
-  background: linear-gradient(180deg, #ff6a6a 0%, #f0ad4e 45%, #5cb85c 100%);
-  transition: height 120ms linear;
+.audio-mask {
+  position: absolute;
+  top: 0;
+  right: 0;
+  height: 100%;
+  background: rgba(28, 28, 28, 0.72);
+  transition: width 120ms linear;
 }
 
 .audio-label {
+  width: 10px;
+  flex-shrink: 0;
   font-size: 0.56rem;
   color: var(--text-muted);
   line-height: 1;
+}
+
+.audio-db {
+  width: 52px;
+  flex-shrink: 0;
+  text-align: right;
+  font-size: 0.52rem;
+  color: var(--text-secondary);
+  letter-spacing: 0.01em;
+  font-variant-numeric: tabular-nums;
 }
 
 .rec-btn {

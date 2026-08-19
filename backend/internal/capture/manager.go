@@ -3,11 +3,14 @@ package capture
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"log"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,32 +28,55 @@ const (
 // "Found Decklink mode 1920 x 1080 with rate 25.00(i)" or "50.00"
 var reSignalFormat = regexp.MustCompile(`Found Decklink mode (\d+) x (\d+) with rate ([\d.]+)(\(i\))?`)
 
+// reAstats matches ametadata print lines like:
+// "lavfi.astats.1.RMS_level=-18.32" (channel 1 = left, channel 2 = right)
+var reAstats = regexp.MustCompile(`lavfi\.astats\.(\d+)\.RMS_level=([-\d.]+|inf)`)
+
+const audioSilence = -90.0 // treat -inf as this value
+
 type Stream struct {
 	ID          int
 	Name        string
 	Status      Status
 	Error       string
-	Format      string // e.g. "1080i50" or "1080p50", empty when unknown
+	Format      string  // e.g. "1080i50" or "1080p50", empty when unknown
+	AudioL      float64 // dBFS RMS left channel
+	AudioR      float64 // dBFS RMS right channel
 	ffmpegInput string
+	fifoPath    string
 	cmd         *exec.Cmd
 	stopCh      chan struct{}
-	mu          sync.Mutex
+	// recDst is set to a non-nil writer when recording is active.
+	// The drain goroutine copies FIFO data here instead of discarding it.
+	recDst   io.WriteCloser
+	recMu    sync.Mutex
+	mu       sync.Mutex
+}
+
+// SetRecordingDst atomically swaps the recording destination.
+// Pass nil to stop recording (drain goroutine resumes discarding).
+func (s *Stream) SetRecordingDst(w io.WriteCloser) {
+	s.recMu.Lock()
+	old := s.recDst
+	s.recDst = w
+	s.recMu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
 }
 
 type Manager struct {
-	streams    map[int]*Stream
-	mu         sync.RWMutex
-	hlsDir     string
-	ffmpegBin  string
-	videoCodec string
+	streams   map[int]*Stream
+	mu        sync.RWMutex
+	hlsDir    string
+	ffmpegBin string
 }
 
-func NewManager(hlsDir, ffmpegBin, videoCodec string) *Manager {
+func NewManager(hlsDir, ffmpegBin string) *Manager {
 	return &Manager{
-		streams:    make(map[int]*Stream),
-		hlsDir:     hlsDir,
-		ffmpegBin:  ffmpegBin,
-		videoCodec: videoCodec,
+		streams:   make(map[int]*Stream),
+		hlsDir:    hlsDir,
+		ffmpegBin: ffmpegBin,
 	}
 }
 
@@ -62,6 +88,7 @@ func (m *Manager) Register(id int, name, ffmpegInput string) {
 		Name:        name,
 		Status:      StatusStopped,
 		ffmpegInput: ffmpegInput,
+		fifoPath:    fmt.Sprintf("/tmp/roc-feed-%d.ts", id),
 	}
 }
 
@@ -117,6 +144,25 @@ func (m *Manager) List() []*Stream {
 	return result
 }
 
+func (m *Manager) StreamByID(id int) (*Stream, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	s, ok := m.streams[id]
+	return s, ok
+}
+
+func (m *Manager) AudioLevels(id int) (l, r float64, ok bool) {
+	m.mu.RLock()
+	s, found := m.streams[id]
+	m.mu.RUnlock()
+	if !found {
+		return 0, 0, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.AudioL, s.AudioR, s.Status == StatusRunning
+}
+
 func (m *Manager) StatusByID(id int) (Status, bool) {
 	m.mu.RLock()
 	s, ok := m.streams[id]
@@ -136,14 +182,20 @@ func (m *Manager) runLoop(s *Stream) {
 	)
 	consecutiveFails := 0
 
+	// Ensure FIFO exists before the first run
+	ensureFIFO(s.fifoPath)
+
 	for {
 		select {
 		case <-s.stopCh:
 			m.killStream(s)
 			m.removeThumb(s.ID)
+			s.SetRecordingDst(nil)
 			s.mu.Lock()
 			s.Status = StatusStopped
 			s.Format = ""
+			s.AudioL = 0
+			s.AudioR = 0
 			s.mu.Unlock()
 			return
 		default:
@@ -183,6 +235,8 @@ func (m *Manager) runLoop(s *Stream) {
 		s.Error = err.Error()
 		s.mu.Unlock()
 		m.removeThumb(s.ID)
+		// Stop any in-progress recording – signal is gone
+		s.SetRecordingDst(nil)
 
 		log.Printf("[channel %d] FFmpeg exited after %s: %v (fail #%d) – restarting in %s",
 			s.ID, uptime.Round(time.Millisecond), err, consecutiveFails, delay)
@@ -203,9 +257,12 @@ func (m *Manager) runLoop(s *Stream) {
 	}
 }
 
-// runFFmpeg runs FFmpeg capturing from Blackmagic and writing a JPEG thumbnail
-// every second. yadif=deint=interlaced handles both 1080i and 1080p transparently.
-// On source format change FFmpeg exits and runLoop restarts it automatically.
+// runFFmpeg starts FFmpeg with two outputs:
+//  1. JPEG thumbnail updated every second (for grid preview)
+//  2. Low-overhead MPEG-TS written to a named FIFO (for recording)
+//
+// A drain goroutine reads the FIFO continuously and either discards the data
+// or writes it to the active recording destination.
 func (m *Manager) runFFmpeg(s *Stream) error {
 	outDir := filepath.Join(m.hlsDir, fmt.Sprintf("%d", s.ID))
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
@@ -215,19 +272,30 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	thumbPath := filepath.Join(outDir, "thumb.jpg")
 	inputArgs := sanitizeInputArgs(shellSplit(s.ffmpegInput))
 
-	// yadif=deint=interlaced: deinterlace only interlaced frames (1080i),
-	// pass progressive frames through unchanged (1080p).
-	vfFilter := "yadif=mode=0:deint=interlaced,scale=640:360,format=yuv420p"
+	// astats prints RMS levels per channel to stderr every ~1 s.
+	afFilter := "astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.1.RMS_level:key=lavfi.astats.2.RMS_level"
+
+	// tee muxer: output 1 = JPEG thumbnail, output 2 = MPEG-TS to FIFO
+	// The FIFO output uses the full input resolution/codec so recording gets full quality.
+	teeOut := fmt.Sprintf(
+		// thumbnail branch: scale down, 1 fps, JPEG
+		"[select=v:f=image2:r=1:q\\:v=4:update=1]%s"+
+			"|"+
+			// FIFO branch: full resolution h264_nvenc TS for recording
+			"[select=v:f=mpegts:c:v=h264_nvenc:b:v=12M:maxrate=14M:bufsize=20M:preset=p4:vf=yadif\\=mode=0\\:deint=interlaced\\,format=yuv420p]%s",
+		thumbPath, s.fifoPath,
+	)
 
 	args := []string{"-y"}
 	args = append(args, inputArgs...)
 	args = append(args,
-		"-vf", vfFilter,
-		"-r", "1",
-		"-q:v", "4",
-		"-update", "1",
-		"-f", "image2",
-		thumbPath,
+		"-map", "0:v",
+		"-map", "0:a?",
+		// astats audio meter (null output)
+		"-af", afFilter,
+		"-f", "null", "-",
+		// tee video output (thumbnail + FIFO)
+		"-f", "tee", teeOut,
 	)
 
 	cmd := exec.Command(m.ffmpegBin, args...)
@@ -241,6 +309,40 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
 
+	// Drain goroutine: reads from FIFO continuously and routes data to the
+	// active recording destination (or discards if none is set).
+	// Closing fifoFile from the main goroutine unblocks any pending Read.
+	fifoFile, fifoErr := os.Open(s.fifoPath)
+	if fifoErr != nil {
+		_ = cmd.Process.Kill()
+		return fmt.Errorf("open FIFO: %w", fifoErr)
+	}
+	go func() {
+		defer fifoFile.Close()
+		buf := make([]byte, 188*256) // TS packet-aligned buffer
+		for {
+			n, err := fifoFile.Read(buf)
+			if n > 0 {
+				s.recMu.Lock()
+				dst := s.recDst
+				s.recMu.Unlock()
+				if dst != nil {
+					if _, werr := dst.Write(buf[:n]); werr != nil {
+						log.Printf("[channel %d] recording write error: %v", s.ID, werr)
+						s.SetRecordingDst(nil)
+					}
+				}
+			}
+			if err != nil {
+				if err != io.EOF {
+					log.Printf("[channel %d] drain read: %v", s.ID, err)
+				}
+				return
+			}
+		}
+	}()
+
+	// Stderr parser: signal format + audio levels + signal loss detection
 	go func() {
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
@@ -249,15 +351,17 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 				log.Printf("[channel %d] %s", s.ID, line)
 			}
 			// Parse signal format from DeckLink mode line
-			if m := reSignalFormat.FindStringSubmatch(line); m != nil {
-				// m[1]=width, m[2]=height, m[3]=rate, m[4]="(i)" or ""
-				height := m[2]
-				rateStr := m[3]
-				interlaced := m[4] != ""
-				// Convert rate "25.00" → "50" for interlaced (field rate→frame rate display)
-				// or keep as-is for progressive. Round to nearest integer.
-				var rateInt int
-				fmt.Sscanf(rateStr, "%d", &rateInt)
+			if mm := reSignalFormat.FindStringSubmatch(line); mm != nil {
+				height := mm[2]
+				rateStr := mm[3]
+				interlaced := mm[4] != ""
+				rateFloat, _ := strconv.ParseFloat(rateStr, 64)
+				rateInt := int(math.Round(rateFloat))
+				// DeckLink reports interlaced as frame-rate with (i) suffix,
+				// multiply by 2 to get the conventional field-rate display (25i → 1080i50).
+				if interlaced {
+					rateInt *= 2
+				}
 				scanType := "p"
 				if interlaced {
 					scanType = "i"
@@ -268,12 +372,29 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 				s.mu.Unlock()
 				log.Printf("[channel %d] detected format: %s", s.ID, format)
 			}
+			// Parse per-channel RMS audio levels from astats metadata
+			if mm := reAstats.FindStringSubmatch(line); mm != nil {
+				ch, _ := strconv.Atoi(mm[1])
+				val := audioSilence
+				if mm[2] != "inf" && mm[2] != "-inf" {
+					val, _ = strconv.ParseFloat(mm[2], 64)
+				}
+				s.mu.Lock()
+				if ch == 1 {
+					s.AudioL = val
+				} else if ch == 2 {
+					s.AudioR = val
+				}
+				s.mu.Unlock()
+			}
 			// If DeckLink reports signal loss, force a restart so stale preview is removed
-			// and the process can re-lock when signal/mode comes back.
 			if strings.Contains(line, "No input signal detected") {
 				s.mu.Lock()
 				s.Format = ""
+				s.AudioL = 0
+				s.AudioR = 0
 				s.mu.Unlock()
+				s.SetRecordingDst(nil)
 				if cmd.Process != nil {
 					_ = cmd.Process.Kill()
 				}
@@ -287,9 +408,26 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	select {
 	case <-s.stopCh:
 		_ = cmd.Process.Kill()
+		_ = fifoFile.Close() // unblocks drain goroutine
 		return nil
 	case err := <-doneCh:
+		_ = fifoFile.Close()
 		return err
+	}
+}
+
+// ensureFIFO creates a named pipe at path if it doesn't already exist.
+func ensureFIFO(path string) {
+	// Remove any regular file that might be there from a previous crash
+	if fi, err := os.Lstat(path); err == nil {
+		if fi.Mode()&os.ModeNamedPipe == 0 {
+			_ = os.Remove(path)
+		} else {
+			return // already a FIFO
+		}
+	}
+	if err := mkfifo(path, 0o600); err != nil {
+		log.Printf("warning: could not create FIFO %s: %v", path, err)
 	}
 }
 
@@ -323,14 +461,11 @@ func shellSplit(s string) []string {
 }
 
 // sanitizeInputArgs removes options that keep stale frames alive on signal loss.
-// We explicitly drop signal_loss_action and draw_bars from config input so
-// signal loss causes process restart and frontend can show "no signal".
 func sanitizeInputArgs(args []string) []string {
 	clean := make([]string, 0, len(args))
 	i := 0
 	for i < len(args) {
 		if args[i] == "-signal_loss_action" || args[i] == "-draw_bars" {
-			// Skip option + value if present
 			i++
 			if i < len(args) {
 				i++

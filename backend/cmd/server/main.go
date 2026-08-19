@@ -28,7 +28,7 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	mgr := capture.NewManager(cfg.HLSDir, cfg.FFmpegBin, cfg.VideoCodec)
+	mgr := capture.NewManager(cfg.HLSDir, cfg.FFmpegBin)
 	for _, ch := range cfg.Channels {
 		mgr.Register(ch.ID, ch.Name, ch.FFmpegInput)
 	}
@@ -39,9 +39,9 @@ func main() {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	recMgr := recording.NewManager(cfg.RecordingsDir, cfg.FFmpegBin)
+	recMgr := recording.NewManager(cfg.RecordingsDir, cfg.FFmpegBin, mgr)
 	for _, ch := range cfg.Channels {
-		recMgr.Register(ch.ID, ch.FFmpegInput)
+		recMgr.Register(ch.ID)
 	}
 
 	hlsBase := fmt.Sprintf("http://localhost:%s", cfg.Port)

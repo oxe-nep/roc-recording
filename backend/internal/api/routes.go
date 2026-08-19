@@ -28,8 +28,23 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlsh
 	r.Use(middleware.Recoverer)
 	r.Use(corsMiddleware(allowedOrigins))
 
-	// HLS and thumbnails – no API key required
+	// HLS, thumbnails and audio meters – no API key required
 	r.Mount("/hls/", hlsHandler)
+	r.Get("/audio/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.Atoi(chi.URLParam(r, "id"))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		l, r2, ok := mgr.AudioLevels(id)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
+		w.Header().Set("Cache-Control", "no-cache, no-store")
+		jsonOK(w, map[string]float64{"l": l, "r": r2})
+	})
 	r.Get("/thumb/{id}", func(w http.ResponseWriter, r *http.Request) {
 		idParam := chi.URLParam(r, "id")
 		id, err := strconv.Atoi(idParam)
@@ -102,6 +117,15 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlsh
 			id, err := strconv.Atoi(chi.URLParam(r, "id"))
 			if err != nil {
 				jsonError(w, "invalid channel id", http.StatusBadRequest)
+				return
+			}
+			status, ok := mgr.StatusByID(id)
+			if !ok {
+				jsonError(w, "invalid channel id", http.StatusBadRequest)
+				return
+			}
+			if status != capture.StatusRunning {
+				jsonError(w, "channel must be running with valid signal before recording can start", http.StatusConflict)
 				return
 			}
 			info, err := recMgr.Start(id)

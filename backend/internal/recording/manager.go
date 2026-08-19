@@ -6,9 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
+
+	"github.com/roc-recording/backend/internal/capture"
 )
 
 type RecordingStatus string
@@ -18,45 +19,34 @@ const (
 	StatusRecording RecordingStatus = "recording"
 )
 
-type Recording struct {
-	ID        int
-	StartedAt time.Time
-	FilePath  string
-}
-
-type channel struct {
-	id          int
-	ffmpegInput string
-	mu          sync.Mutex
-	cmd         *exec.Cmd
-	status      RecordingStatus
-	startedAt   time.Time
-	filePath    string
+type recState struct {
+	mu        sync.Mutex
+	status    RecordingStatus
+	startedAt time.Time
+	filePath  string // final .mp4 path (after remux)
 }
 
 type Manager struct {
-	mu          sync.RWMutex
-	channels    map[int]*channel
+	mu           sync.RWMutex
+	states       map[int]*recState
+	captureMgr   *capture.Manager
 	recordingDir string
-	ffmpegBin   string
+	ffmpegBin    string
 }
 
-func NewManager(recordingDir, ffmpegBin string) *Manager {
+func NewManager(recordingDir, ffmpegBin string, captureMgr *capture.Manager) *Manager {
 	return &Manager{
-		channels:    make(map[int]*channel),
+		states:       make(map[int]*recState),
+		captureMgr:   captureMgr,
 		recordingDir: recordingDir,
-		ffmpegBin:   ffmpegBin,
+		ffmpegBin:    ffmpegBin,
 	}
 }
 
-func (m *Manager) Register(id int, ffmpegInput string) {
+func (m *Manager) Register(id int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.channels[id] = &channel{
-		id:          id,
-		ffmpegInput: ffmpegInput,
-		status:      StatusIdle,
-	}
+	m.states[id] = &recState{status: StatusIdle}
 }
 
 type ChannelInfo struct {
@@ -66,55 +56,46 @@ type ChannelInfo struct {
 	FilePath  string          `json:"file_path,omitempty"`
 }
 
-func (m *Manager) Info(id int) (ChannelInfo, bool) {
-	m.mu.RLock()
-	ch, ok := m.channels[id]
-	m.mu.RUnlock()
-	if !ok {
-		return ChannelInfo{}, false
-	}
-	ch.mu.Lock()
-	defer ch.mu.Unlock()
-	info := ChannelInfo{ID: ch.id, Status: ch.status}
-	if ch.status == StatusRecording {
-		t := ch.startedAt
+func (m *Manager) buildInfo(id int, st *recState) ChannelInfo {
+	info := ChannelInfo{ID: id, Status: st.status}
+	if st.status == StatusRecording {
+		t := st.startedAt
 		info.StartedAt = &t
-		info.FilePath = ch.filePath
+		info.FilePath = st.filePath
 	}
-	return info, true
+	return info
 }
 
 func (m *Manager) ListAll() []ChannelInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	out := make([]ChannelInfo, 0, len(m.channels))
-	for _, ch := range m.channels {
-		ch.mu.Lock()
-		info := ChannelInfo{ID: ch.id, Status: ch.status}
-		if ch.status == StatusRecording {
-			t := ch.startedAt
-			info.StartedAt = &t
-			info.FilePath = ch.filePath
-		}
-		ch.mu.Unlock()
-		out = append(out, info)
+	out := make([]ChannelInfo, 0, len(m.states))
+	for id, st := range m.states {
+		st.mu.Lock()
+		out = append(out, m.buildInfo(id, st))
+		st.mu.Unlock()
 	}
 	return out
 }
 
 func (m *Manager) Start(id int) (ChannelInfo, error) {
 	m.mu.RLock()
-	ch, ok := m.channels[id]
+	st, ok := m.states[id]
 	m.mu.RUnlock()
 	if !ok {
 		return ChannelInfo{}, fmt.Errorf("channel %d not found", id)
 	}
 
-	ch.mu.Lock()
-	defer ch.mu.Unlock()
+	st.mu.Lock()
+	defer st.mu.Unlock()
 
-	if ch.status == StatusRecording {
+	if st.status == StatusRecording {
 		return ChannelInfo{}, fmt.Errorf("channel %d is already recording", id)
+	}
+
+	stream, ok := m.captureMgr.StreamByID(id)
+	if !ok {
+		return ChannelInfo{}, fmt.Errorf("channel %d not found in capture manager", id)
 	}
 
 	outDir := filepath.Join(m.recordingDir, fmt.Sprintf("%d", id))
@@ -123,75 +104,63 @@ func (m *Manager) Start(id int) (ChannelInfo, error) {
 	}
 
 	ts := time.Now()
-	filename := ts.Format("2006-01-02_15-04-05") + ".mp4"
-	filePath := filepath.Join(outDir, filename)
+	baseName := ts.Format("2006-01-02_15-04-05")
+	tsPath := filepath.Join(outDir, baseName+".ts")
+	mp4Path := filepath.Join(outDir, baseName+".mp4")
 
-	cmd, err := m.startFFmpeg(ch.ffmpegInput, filePath)
+	f, err := os.Create(tsPath)
 	if err != nil {
-		return ChannelInfo{}, fmt.Errorf("start ffmpeg: %w", err)
+		return ChannelInfo{}, fmt.Errorf("create recording file: %w", err)
 	}
 
-	ch.cmd = cmd
-	ch.status = StatusRecording
-	ch.startedAt = ts
-	ch.filePath = filePath
+	stream.SetRecordingDst(&tsWriter{
+		File:      f,
+		tsPath:    tsPath,
+		mp4Path:   mp4Path,
+		ffmpegBin: m.ffmpegBin,
+	})
 
-	// Watch process in background; update status when it exits
-	go func() {
-		err := cmd.Wait()
-		ch.mu.Lock()
-		ch.cmd = nil
-		ch.status = StatusIdle
-		ch.mu.Unlock()
-		if err != nil {
-			log.Printf("[recording %d] FFmpeg exited with error: %v", id, err)
-		} else {
-			log.Printf("[recording %d] FFmpeg finished cleanly: %s", id, filePath)
-		}
-	}()
+	st.status = StatusRecording
+	st.startedAt = ts
+	st.filePath = mp4Path
 
-	log.Printf("[recording %d] Started: %s", id, filePath)
-	t := ch.startedAt
-	return ChannelInfo{ID: ch.id, Status: ch.status, StartedAt: &t, FilePath: ch.filePath}, nil
+	log.Printf("[recording %d] Started TS capture: %s", id, tsPath)
+	return m.buildInfo(id, st), nil
 }
 
 func (m *Manager) Stop(id int) (ChannelInfo, error) {
 	m.mu.RLock()
-	ch, ok := m.channels[id]
+	st, ok := m.states[id]
 	m.mu.RUnlock()
 	if !ok {
 		return ChannelInfo{}, fmt.Errorf("channel %d not found", id)
 	}
 
-	ch.mu.Lock()
-	defer ch.mu.Unlock()
+	st.mu.Lock()
+	defer st.mu.Unlock()
 
-	if ch.status != StatusRecording {
+	if st.status != StatusRecording {
 		return ChannelInfo{}, fmt.Errorf("channel %d is not recording", id)
 	}
 
-	// Send SIGINT so FFmpeg can finalize the MP4 moov atom
-	if ch.cmd != nil && ch.cmd.Process != nil {
-		if err := ch.cmd.Process.Signal(os.Interrupt); err != nil {
-			// Fallback: kill if interrupt not supported (Windows)
-			_ = ch.cmd.Process.Kill()
-		}
+	stream, ok := m.captureMgr.StreamByID(id)
+	if ok {
+		// Detaching closes the tsWriter which triggers remux
+		stream.SetRecordingDst(nil)
 	}
 
-	filePath := ch.filePath
-	ch.status = StatusIdle
-	log.Printf("[recording %d] Stopped: %s", id, filePath)
-	return ChannelInfo{ID: ch.id, Status: StatusIdle}, nil
+	log.Printf("[recording %d] Stopped, remuxing to MP4…", id)
+	st.status = StatusIdle
+	return m.buildInfo(id, st), nil
 }
 
 func (m *Manager) StartAll() []error {
 	m.mu.RLock()
-	ids := make([]int, 0, len(m.channels))
-	for id := range m.channels {
+	ids := make([]int, 0, len(m.states))
+	for id := range m.states {
 		ids = append(ids, id)
 	}
 	m.mu.RUnlock()
-
 	var errs []error
 	for _, id := range ids {
 		if _, err := m.Start(id); err != nil {
@@ -203,12 +172,11 @@ func (m *Manager) StartAll() []error {
 
 func (m *Manager) StopAll() []error {
 	m.mu.RLock()
-	ids := make([]int, 0, len(m.channels))
-	for id := range m.channels {
+	ids := make([]int, 0, len(m.states))
+	for id := range m.states {
 		ids = append(ids, id)
 	}
 	m.mu.RUnlock()
-
 	var errs []error
 	for _, id := range ids {
 		if _, err := m.Stop(id); err != nil {
@@ -218,55 +186,37 @@ func (m *Manager) StopAll() []error {
 	return errs
 }
 
-func (m *Manager) startFFmpeg(ffmpegInput, outputPath string) (*exec.Cmd, error) {
-	inputArgs := shellSplit(ffmpegInput)
-
-	// H.264 @ 10 Mbit/s, fragmented MP4 so file is readable if interrupted
-	args := []string{"-y"}
-	args = append(args, inputArgs...)
-	args = append(args,
-		"-vf", "yadif=mode=0:deint=interlaced,format=yuv420p",
-		"-c:v", "h264_nvenc",
-		"-b:v", "10M",
-		"-maxrate", "12M",
-		"-bufsize", "20M",
-		"-preset", "p4",
-		"-an",
-		"-movflags", "frag_keyframe+empty_moov+default_base_moof",
-		outputPath,
-	)
-
-	cmd := exec.Command(m.ffmpegBin, args...)
-	cmd.Stderr = os.Stderr
-
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	return cmd, nil
+// tsWriter wraps an os.File and remuxes the TS to MP4 when closed.
+type tsWriter struct {
+	*os.File
+	tsPath    string
+	mp4Path   string
+	ffmpegBin string
 }
 
-func shellSplit(s string) []string {
-	var args []string
-	var current strings.Builder
-	inQuote := false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c == '\'' && !inQuote:
-			inQuote = true
-		case c == '\'' && inQuote:
-			inQuote = false
-		case c == ' ' && !inQuote:
-			if current.Len() > 0 {
-				args = append(args, current.String())
-				current.Reset()
-			}
-		default:
-			current.WriteByte(c)
-		}
+func (t *tsWriter) Write(p []byte) (int, error) { return t.File.Write(p) }
+
+func (t *tsWriter) Close() error {
+	err := t.File.Close()
+	go remuxToMP4(t.ffmpegBin, t.tsPath, t.mp4Path)
+	return err
+}
+
+// remuxToMP4 stream-copies a raw TS to MP4 with faststart. No re-encode.
+func remuxToMP4(ffmpegBin, tsPath, mp4Path string) {
+	log.Printf("[remux] %s → %s", tsPath, mp4Path)
+	cmd := exec.Command(ffmpegBin,
+		"-y",
+		"-i", tsPath,
+		"-c", "copy",
+		"-movflags", "faststart",
+		mp4Path,
+	)
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		log.Printf("[remux] error: %v", err)
+		return
 	}
-	if current.Len() > 0 {
-		args = append(args, current.String())
-	}
-	return args
+	_ = os.Remove(tsPath)
+	log.Printf("[remux] done: %s", mp4Path)
 }

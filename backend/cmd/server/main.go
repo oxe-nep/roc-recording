@@ -38,7 +38,7 @@ func main() {
 	}
 
 	hlsH := hlshandler.NewHandler(cfg.HLSDir, cfg.AllowedOrigins)
-	router := api.NewRouter(mgr, hlsH, cfg.APIKey, hlsBase)
+	router := api.NewRouter(mgr, hlsH, cfg.APIKey, cfg.AllowedOrigins, hlsBase)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,

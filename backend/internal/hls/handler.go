@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// Handler serverar HLS-filer med rätt CORS och cache-headers.
+// Handler serves HLS files with correct CORS and cache headers.
 type Handler struct {
 	hlsDir         string
 	allowedOrigins string
@@ -26,11 +26,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// /hls/{id}/... → strip prefix och serva från hlsDir
+	// /hls/{id}/... → strip prefix and serve from hlsDir
 	path := strings.TrimPrefix(r.URL.Path, "/hls/")
 	full := filepath.Join(h.hlsDir, filepath.FromSlash(path))
 
-	// m3u8-playlister ska aldrig cachas
+	// m3u8 playlists must never be cached
 	if strings.HasSuffix(full, ".m3u8") {
 		w.Header().Set("Cache-Control", "no-cache, no-store")
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")

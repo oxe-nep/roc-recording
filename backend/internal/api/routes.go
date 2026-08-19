@@ -20,10 +20,11 @@ type streamResponse struct {
 	HLSURL string `json:"hls_url"`
 }
 
-func NewRouter(mgr *capture.Manager, hlsHandler *hlshandler.Handler, apiKey, hlsBaseURL string) http.Handler {
+func NewRouter(mgr *capture.Manager, hlsHandler *hlshandler.Handler, apiKey, allowedOrigins, hlsBaseURL string) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(corsMiddleware(allowedOrigins))
 
 	// HLS – no API key required
 	r.Mount("/hls/", hlsHandler)
@@ -72,6 +73,21 @@ func NewRouter(mgr *capture.Manager, hlsHandler *hlshandler.Handler, apiKey, hls
 	})
 
 	return r
+}
+
+func corsMiddleware(allowedOrigins string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func apiKeyMiddleware(key string) func(http.Handler) http.Handler {

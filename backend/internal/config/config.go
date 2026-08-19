@@ -18,6 +18,7 @@ type Config struct {
 	Port           string          `yaml:"port"`
 	AllowedOrigins string          `yaml:"allowed_origins"`
 	HLSDir         string          `yaml:"hls_dir"`
+	RecordingsDir  string          `yaml:"recordings_dir"`
 	FFmpegBin      string          `yaml:"ffmpeg_bin"`
 	VideoCodec     string          `yaml:"video_codec"`
 	Channels       []ChannelConfig `yaml:"channels"`
@@ -29,6 +30,7 @@ func Load(path string) (*Config, error) {
 		Port:           "8080",
 		AllowedOrigins: "*",
 		HLSDir:         "./hls",
+		RecordingsDir:  "./recordings",
 		FFmpegBin:      "ffmpeg",
 		VideoCodec:     "h264_nvenc",
 	}

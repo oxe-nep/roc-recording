@@ -1,19 +1,39 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { fetchStreams, startStream, stopStream, type Stream } from "@/lib/api";
+import {
+  fetchStreams,
+  startStream,
+  stopStream,
+  fetchRecordings,
+  startRecording,
+  stopRecording,
+  startAllRecordings,
+  stopAllRecordings,
+  type Stream,
+  type RecordingInfo,
+} from "@/lib/api";
 import Thumbnail from "@/components/Thumbnail";
 
 export default function StreamGrid() {
   const [streams, setStreams] = useState<Stream[]>([]);
+  const [recordings, setRecordings] = useState<Record<number, RecordingInfo>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Record<number, boolean>>({});
+  const [recBusy, setRecBusy] = useState<Record<number, boolean>>({});
+  const [globalRecBusy, setGlobalRecBusy] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const data = await fetchStreams();
-      setStreams(data);
+      const [streamData, recData] = await Promise.all([
+        fetchStreams(),
+        fetchRecordings(),
+      ]);
+      setStreams(streamData);
+      const recMap: Record<number, RecordingInfo> = {};
+      for (const r of recData) recMap[r.id] = r;
+      setRecordings(recMap);
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -31,81 +51,98 @@ export default function StreamGrid() {
   const toggle = async (s: Stream) => {
     setBusy((b) => ({ ...b, [s.id]: true }));
     try {
-      if (s.status === "running") {
-        await stopStream(s.id);
-      } else {
-        await startStream(s.id);
-      }
+      if (s.status === "running") await stopStream(s.id);
+      else await startStream(s.id);
       await load();
     } finally {
       setBusy((b) => ({ ...b, [s.id]: false }));
     }
   };
 
+  const toggleRecording = async (id: number) => {
+    setRecBusy((b) => ({ ...b, [id]: true }));
+    try {
+      if (recordings[id]?.status === "recording") await stopRecording(id);
+      else await startRecording(id);
+      await load();
+    } finally {
+      setRecBusy((b) => ({ ...b, [id]: false }));
+    }
+  };
+
+  const anyRecording = Object.values(recordings).some((r) => r.status === "recording");
+
+  const handleGlobalRec = async () => {
+    setGlobalRecBusy(true);
+    try {
+      if (anyRecording) await stopAllRecordings();
+      else await startAllRecordings();
+      await load();
+    } finally {
+      setGlobalRecBusy(false);
+    }
+  };
+
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64 text-slate-400">
-        Connecting to backend…
-      </div>
-    );
+    return <div className="loading"><span>Connecting to backend…</span></div>;
   }
 
   if (error) {
-    return (
-      <div className="rounded-lg bg-red-900/40 border border-red-700 p-4 text-red-300">
-        {error}
-      </div>
-    );
+    return <div className="error-message">{error}</div>;
   }
 
   return (
-    <div className="grid grid-cols-3 xl:grid-cols-4 gap-3">
-      {streams.map((s) => (
-        <div
-          key={s.id}
-          className="bg-slate-800 rounded-lg overflow-hidden border border-slate-700 flex flex-col"
+    <>
+      <div className="global-rec-bar">
+        <button
+          className={`global-rec-btn ${anyRecording ? "recording" : ""}`}
+          onClick={handleGlobalRec}
+          disabled={globalRecBusy}
         >
-          <div className="aspect-video bg-slate-900 relative flex items-center justify-center">
-            {s.status === "running" ? (
-              <Thumbnail id={s.id} className="w-full h-full object-contain" />
-            ) : (
-              <span className="text-xs font-mono text-slate-600">no signal</span>
-            )}
-          </div>
+          {globalRecBusy ? "…" : anyRecording ? "⏹ Stop all recordings" : "⏺ Record all"}
+        </button>
+      </div>
 
-          <div className="p-2 flex items-center justify-between gap-2">
-            <div className="min-w-0">
-              <p className="text-xs font-medium text-white truncate">{s.name}</p>
-              <StatusBadge status={s.status} />
+      <div className="cards-grid">
+        {streams.map((s) => {
+          const rec = recordings[s.id];
+          const isRecording = rec?.status === "recording";
+          return (
+            <div key={s.id} className={`card-panel ${s.status}`}>
+              <div className="card-thumb">
+                <Thumbnail id={s.id} active={s.status === "running"} />
+                {isRecording && <div className="rec-badge">● REC</div>}
+              </div>
+
+              <div className="card-footer">
+                <div className="card-title">
+                  <span className={`status-dot ${s.status}`} />
+                  <span className="card-name">{s.name}</span>
+                </div>
+                <div className="card-actions">
+                  <button
+                    className={`badge ${s.status}`}
+                    onClick={() => toggle(s)}
+                    disabled={busy[s.id]}
+                  >
+                    {busy[s.id] ? "…" : s.status === "running" ? "Stop" : "Start"}
+                  </button>
+                  <button
+                    className={`badge rec-btn ${isRecording ? "recording" : "idle"}`}
+                    onClick={() => toggleRecording(s.id)}
+                    disabled={recBusy[s.id]}
+                    title={isRecording ? "Stop recording" : "Start recording"}
+                  >
+                    {recBusy[s.id] ? "…" : isRecording ? "⏹" : "⏺"}
+                  </button>
+                </div>
+              </div>
+
+              {s.error && <div className="error-bar">{s.error}</div>}
             </div>
-            <button
-              onClick={() => toggle(s)}
-              disabled={busy[s.id]}
-              className={`shrink-0 text-[11px] px-2 py-1 rounded-md font-medium transition disabled:opacity-40 ${
-                s.status === "running"
-                  ? "bg-red-700 hover:bg-red-600 text-white"
-                  : "bg-emerald-700 hover:bg-emerald-600 text-white"
-              }`}
-            >
-              {busy[s.id] ? "…" : s.status === "running" ? "Stop" : "Start"}
-            </button>
-          </div>
-          {s.error && <p className="px-2 pb-2 text-[11px] text-red-400 truncate">{s.error}</p>}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function StatusBadge({ status }: { status: Stream["status"] }) {
-  const map = {
-    running: "bg-emerald-500/20 text-emerald-400",
-    stopped: "bg-slate-500/20 text-slate-400",
-    error: "bg-red-500/20 text-red-400",
-  };
-  return (
-    <span className={`text-xs px-2 py-0.5 rounded-full ${map[status]}`}>
-      {status}
-    </span>
+          );
+        })}
+      </div>
+    </>
   );
 }

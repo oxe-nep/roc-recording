@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/roc-recording/backend/internal/capture"
 	hlshandler "github.com/roc-recording/backend/internal/hls"
+	"github.com/roc-recording/backend/internal/recording"
 )
 
 type streamResponse struct {
@@ -20,7 +21,7 @@ type streamResponse struct {
 	HLSURL string `json:"hls_url"`
 }
 
-func NewRouter(mgr *capture.Manager, hlsHandler *hlshandler.Handler, apiKey, allowedOrigins, hlsBaseURL string) http.Handler {
+func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlshandler.Handler, apiKey, allowedOrigins, hlsBaseURL string) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -87,6 +88,67 @@ func NewRouter(mgr *capture.Manager, hlsHandler *hlshandler.Handler, apiKey, all
 				return
 			}
 			jsonOK(w, map[string]string{"status": "stopped"})
+		})
+
+		// Recording endpoints
+		r.Get("/api/recordings", func(w http.ResponseWriter, r *http.Request) {
+			infos := recMgr.ListAll()
+			sort.Slice(infos, func(i, j int) bool { return infos[i].ID < infos[j].ID })
+			jsonOK(w, infos)
+		})
+
+		r.Post("/api/recordings/{id}/start", func(w http.ResponseWriter, r *http.Request) {
+			id, err := strconv.Atoi(chi.URLParam(r, "id"))
+			if err != nil {
+				jsonError(w, "invalid channel id", http.StatusBadRequest)
+				return
+			}
+			info, err := recMgr.Start(id)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusConflict)
+				return
+			}
+			jsonOK(w, info)
+		})
+
+		r.Post("/api/recordings/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
+			id, err := strconv.Atoi(chi.URLParam(r, "id"))
+			if err != nil {
+				jsonError(w, "invalid channel id", http.StatusBadRequest)
+				return
+			}
+			info, err := recMgr.Stop(id)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusConflict)
+				return
+			}
+			jsonOK(w, info)
+		})
+
+		r.Post("/api/recordings/start-all", func(w http.ResponseWriter, r *http.Request) {
+			errs := recMgr.StartAll()
+			if len(errs) > 0 {
+				msgs := make([]string, len(errs))
+				for i, e := range errs {
+					msgs[i] = e.Error()
+				}
+				jsonOK(w, map[string]any{"started": true, "errors": msgs})
+				return
+			}
+			jsonOK(w, map[string]string{"status": "all started"})
+		})
+
+		r.Post("/api/recordings/stop-all", func(w http.ResponseWriter, r *http.Request) {
+			errs := recMgr.StopAll()
+			if len(errs) > 0 {
+				msgs := make([]string, len(errs))
+				for i, e := range errs {
+					msgs[i] = e.Error()
+				}
+				jsonOK(w, map[string]any{"stopped": true, "errors": msgs})
+				return
+			}
+			jsonOK(w, map[string]string{"status": "all stopped"})
 		})
 	})
 

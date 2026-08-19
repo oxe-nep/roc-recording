@@ -2,6 +2,7 @@ api_key: "change-me"
 port: "8080"
 allowed_origins: "*"
 hls_dir: "./hls"
+recordings_dir: "./recordings"
 ffmpeg_bin: "/usr/local/bin/ffmpeg"
 video_codec: "h264_nvenc"
 

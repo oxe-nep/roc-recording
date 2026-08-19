@@ -36,3 +36,38 @@ export async function stopStream(id: number): Promise<void> {
   const res = await apiFetch(`/api/streams/${id}/stop`, { method: "POST" });
   if (!res.ok) throw new Error(`stopStream: ${res.status}`);
 }
+
+export interface RecordingInfo {
+  id: number;
+  status: "idle" | "recording";
+  started_at?: string;
+  file_path?: string;
+}
+
+export async function fetchRecordings(): Promise<RecordingInfo[]> {
+  const res = await apiFetch("/api/recordings");
+  if (!res.ok) throw new Error(`fetchRecordings: ${res.status}`);
+  return res.json();
+}
+
+export async function startRecording(id: number): Promise<RecordingInfo> {
+  const res = await apiFetch(`/api/recordings/${id}/start`, { method: "POST" });
+  if (!res.ok) throw new Error(`startRecording: ${res.status}`);
+  return res.json();
+}
+
+export async function stopRecording(id: number): Promise<RecordingInfo> {
+  const res = await apiFetch(`/api/recordings/${id}/stop`, { method: "POST" });
+  if (!res.ok) throw new Error(`stopRecording: ${res.status}`);
+  return res.json();
+}
+
+export async function startAllRecordings(): Promise<void> {
+  const res = await apiFetch("/api/recordings/start-all", { method: "POST" });
+  if (!res.ok) throw new Error(`startAllRecordings: ${res.status}`);
+}
+
+export async function stopAllRecordings(): Promise<void> {
+  const res = await apiFetch("/api/recordings/stop-all", { method: "POST" });
+  if (!res.ok) throw new Error(`stopAllRecordings: ${res.status}`);
+}

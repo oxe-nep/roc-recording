@@ -2,17 +2,18 @@ import type { Metadata } from "next";
 import StreamGrid from "@/components/StreamGrid";
 
 export const metadata: Metadata = {
-  title: "roc-recording – Preview",
+  title: "roc-recording",
 };
 
 export default function Home() {
   return (
-    <main className="min-h-screen bg-slate-950 text-white p-4">
-      <header className="mb-5">
-        <h1 className="text-2xl font-bold tracking-tight">roc-recording</h1>
-        <p className="text-slate-400 text-sm mt-1">Live preview – 8 channels</p>
+    <>
+      <header className="compact-header">
+        <div className="header-brand">
+          <img src="/nep-logo.svg" alt="NEP" className="nep-logo" />
+        </div>
       </header>
       <StreamGrid />
-    </main>
+    </>
   );
 }

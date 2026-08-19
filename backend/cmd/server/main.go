@@ -14,6 +14,7 @@ import (
 	"github.com/roc-recording/backend/internal/capture"
 	"github.com/roc-recording/backend/internal/config"
 	hlshandler "github.com/roc-recording/backend/internal/hls"
+	"github.com/roc-recording/backend/internal/recording"
 )
 
 func main() {
@@ -38,13 +39,18 @@ func main() {
 		time.Sleep(500 * time.Millisecond)
 	}
 
+	recMgr := recording.NewManager(cfg.RecordingsDir, cfg.FFmpegBin)
+	for _, ch := range cfg.Channels {
+		recMgr.Register(ch.ID, ch.FFmpegInput)
+	}
+
 	hlsBase := fmt.Sprintf("http://localhost:%s", cfg.Port)
 	if v := os.Getenv("PUBLIC_URL"); v != "" {
 		hlsBase = v
 	}
 
 	hlsH := hlshandler.NewHandler(cfg.HLSDir, cfg.AllowedOrigins)
-	router := api.NewRouter(mgr, hlsH, cfg.APIKey, cfg.AllowedOrigins, hlsBase)
+	router := api.NewRouter(mgr, recMgr, hlsH, cfg.APIKey, cfg.AllowedOrigins, hlsBase)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,

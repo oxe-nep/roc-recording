@@ -6,34 +6,34 @@ const BASE = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8080";
 
 interface ThumbnailProps {
   id: number;
-  className?: string;
+  active: boolean;
 }
 
-export default function Thumbnail({ id, className }: ThumbnailProps) {
+export default function Thumbnail({ id, active }: ThumbnailProps) {
   const [src, setSrc] = useState(`${BASE}/thumb/${id}?t=${Date.now()}`);
   const [hasError, setHasError] = useState(false);
 
   useEffect(() => {
+    if (!active) {
+      setHasError(true);
+      return;
+    }
+    setHasError(false);
     const interval = setInterval(() => {
       setHasError(false);
       setSrc(`${BASE}/thumb/${id}?t=${Date.now()}`);
     }, 1000);
     return () => clearInterval(interval);
-  }, [id]);
+  }, [id, active]);
 
-  if (hasError) {
-    return (
-      <div className="w-full h-full flex items-center justify-center text-xs font-mono text-slate-600">
-        no signal
-      </div>
-    );
+  if (!active || hasError) {
+    return <span className="no-signal">No signal</span>;
   }
 
   return (
     <img
       src={src}
-      alt={`Channel ${id} preview`}
-      className={className}
+      alt={`Channel ${id}`}
       onError={() => setHasError(true)}
     />
   );

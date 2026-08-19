@@ -277,10 +277,8 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	filterGraph := "[0:v]yadif=mode=0:deint=interlaced,split=2[vrec][vthumb];" +
 		"[vthumb]scale=640:360,format=yuv420p[vthumbout];" +
 		"[vrec]format=yuv420p[vrecout];" +
-		"[0:a]pan=stereo|FL=c0|FR=c1,asplit=3[arec][ameter][ahls];" +
-		"[ameter]astats=metadata=1:reset=0.25," +
-		"ametadata=print:key=lavfi.astats.1.Peak_level:key=lavfi.astats.2.Peak_level:" +
-		"key=lavfi.astats.1.RMS_level:key=lavfi.astats.2.RMS_level,anullsink"
+		"[0:a]pan=stereo|c0=c0|c1=c1,asplit=3[arec][ameter][ahls];" +
+		"[ameter]astats=metadata=1:reset=0.25,ametadata=print,anullsink"
 
 	args := []string{"-y"}
 	args = append(args, inputArgs...)
@@ -312,13 +310,13 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		// Output #3: HLS audio-only for browser monitoring
 		"-map", "[ahls]",
 		"-c:a", "aac",
-		"-b:a", "128k",
+		"-b:a", "192k",
 		"-ar", "48000",
 		"-ac", "2",
 		"-f", "hls",
 		"-hls_time", "1",
 		"-hls_list_size", "4",
-		"-hls_flags", "delete_segments+append_list+omit_endlist",
+		"-hls_flags", "delete_segments+independent_segments+omit_endlist",
 		"-hls_segment_filename", audioSegmentPattern,
 		audioPlaylist,
 	)

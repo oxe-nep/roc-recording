@@ -255,11 +255,11 @@ func (m *Manager) runLoop(s *Stream) {
 	}
 }
 
-// runFFmpeg starts FFmpeg with four outputs:
+// runFFmpeg starts FFmpeg with three outputs:
 // 1) JPEG thumbnail for grid preview
-// 2) H264 MPEG-TS UDP feed for recording
-// 3) audio analysis (astats) to null
-// 4) HLS audio-only stream for browser monitoring
+// 2) H264/AAC MPEG-TS UDP feed for recording
+// 3) HLS audio-only stream for browser monitoring
+// Audio levels are parsed from astats metadata on a shared stereo branch in filter_complex.
 func (m *Manager) runFFmpeg(s *Stream) error {
 	outDir := filepath.Join(m.hlsDir, fmt.Sprintf("%d", s.ID))
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
@@ -272,12 +272,15 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	audioSegmentPattern := filepath.Join(outDir, "audio_%03d.ts")
 	inputArgs := sanitizeInputArgs(shellSplit(s.ffmpegInput))
 
-	// astats prints peak levels per channel to stderr ~4 times per second.
-	afFilter := "astats=metadata=1:reset=0.25,ametadata=print:key=lavfi.astats.1.Peak_level:key=lavfi.astats.2.Peak_level"
-	// One decode, branched outputs:
-	// - vthumb: low-res JPEG thumbnail
-	// - vrec: full-res encode to MPEG-TS UDP for recording
-	filterGraph := "[0:v]yadif=mode=0:deint=interlaced,split=2[vrec][vthumb];[vthumb]scale=640:360,format=yuv420p[vthumbout];[vrec]format=yuv420p[vrecout]"
+	// One decode for all audio consumers: recording, meters and browser monitor.
+	// astats on the shared stereo stream avoids inconsistent per-output audio decodes.
+	filterGraph := "[0:v]yadif=mode=0:deint=interlaced,split=2[vrec][vthumb];" +
+		"[vthumb]scale=640:360,format=yuv420p[vthumbout];" +
+		"[vrec]format=yuv420p[vrecout];" +
+		"[0:a]pan=stereo|FL=c0|FR=c1,asplit=3[arec][ameter][ahls];" +
+		"[ameter]astats=metadata=1:reset=0.25," +
+		"ametadata=print:key=lavfi.astats.1.Peak_level:key=lavfi.astats.2.Peak_level:" +
+		"key=lavfi.astats.1.RMS_level:key=lavfi.astats.2.RMS_level,anullsink"
 
 	args := []string{"-y"}
 	args = append(args, inputArgs...)
@@ -290,10 +293,9 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"-update", "1",
 		"-f", "image2",
 		thumbPath,
-		// Output #2: recording feed to FIFO (single DeckLink reader)
+		// Output #2: recording feed (single DeckLink reader)
 		"-map", "[vrecout]",
-		"-map", "0:a:0?",
-		"-af", "pan=stereo|c0=c0|c1=c1",
+		"-map", "[arec]",
 		"-c:v", "h264_nvenc",
 		"-b:v", "12M",
 		"-maxrate", "14M",
@@ -307,13 +309,8 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"-f", "mpegts",
 		"-mpegts_flags", "+resend_headers",
 		s.feedURL,
-		// Output #3: audio analysis only
-		"-map", "0:a:0?",
-		"-af", "pan=stereo|c0=c0|c1=c1," + afFilter,
-		"-f", "null", "-",
-		// Output #4: HLS audio-only for browser monitoring
-		"-map", "0:a:0?",
-		"-af", "pan=stereo|c0=c0|c1=c1",
+		// Output #3: HLS audio-only for browser monitoring
+		"-map", "[ahls]",
 		"-c:a", "aac",
 		"-b:a", "128k",
 		"-ar", "48000",

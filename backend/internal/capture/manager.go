@@ -111,6 +111,18 @@ func (m *Manager) List() []*Stream {
 	return result
 }
 
+func (m *Manager) StatusByID(id int) (Status, bool) {
+	m.mu.RLock()
+	s, ok := m.streams[id]
+	m.mu.RUnlock()
+	if !ok {
+		return "", false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.Status, true
+}
+
 func (m *Manager) runLoop(s *Stream) {
 	const (
 		restartDelay = 3 * time.Second
@@ -122,6 +134,7 @@ func (m *Manager) runLoop(s *Stream) {
 		select {
 		case <-s.stopCh:
 			m.killStream(s)
+			m.removeThumb(s.ID)
 			s.mu.Lock()
 			s.Status = StatusStopped
 			s.mu.Unlock()
@@ -162,6 +175,7 @@ func (m *Manager) runLoop(s *Stream) {
 		s.Status = StatusError
 		s.Error = err.Error()
 		s.mu.Unlock()
+		m.removeThumb(s.ID)
 
 		log.Printf("[channel %d] FFmpeg exited after %s: %v (fail #%d) – restarting in %s",
 			s.ID, uptime.Round(time.Millisecond), err, consecutiveFails, delay)
@@ -171,6 +185,7 @@ func (m *Manager) runLoop(s *Stream) {
 			s.mu.Lock()
 			s.Status = StatusStopped
 			s.mu.Unlock()
+			m.removeThumb(s.ID)
 			return
 		case <-time.After(delay):
 			s.mu.Lock()
@@ -276,4 +291,9 @@ func (m *Manager) killStream(s *Stream) {
 	if s.cmd != nil && s.cmd.Process != nil {
 		_ = s.cmd.Process.Kill()
 	}
+}
+
+func (m *Manager) removeThumb(id int) {
+	thumbPath := filepath.Join(m.hlsDir, fmt.Sprintf("%d", id), "thumb.jpg")
+	_ = os.Remove(thumbPath)
 }

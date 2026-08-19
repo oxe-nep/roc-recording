@@ -35,6 +35,7 @@ func main() {
 		if err := mgr.Start(ch.ID); err != nil {
 			log.Printf("Failed to auto-start channel %d: %v", ch.ID, err)
 		}
+		time.Sleep(500 * time.Millisecond)
 	}
 
 	hlsBase := fmt.Sprintf("http://localhost:%s", cfg.Port)

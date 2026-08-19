@@ -29,8 +29,18 @@ func NewRouter(mgr *capture.Manager, hlsHandler *hlshandler.Handler, apiKey, all
 	// HLS and thumbnails – no API key required
 	r.Mount("/hls/", hlsHandler)
 	r.Get("/thumb/{id}", func(w http.ResponseWriter, r *http.Request) {
-		id := chi.URLParam(r, "id")
-		thumbPath := hlsHandler.ThumbPath(id)
+		idParam := chi.URLParam(r, "id")
+		id, err := strconv.Atoi(idParam)
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		status, ok := mgr.StatusByID(id)
+		if !ok || status != capture.StatusRunning {
+			http.NotFound(w, r)
+			return
+		}
+		thumbPath := hlsHandler.ThumbPath(idParam)
 		w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
 		w.Header().Set("Cache-Control", "no-cache, no-store")
 		w.Header().Set("Content-Type", "image/jpeg")

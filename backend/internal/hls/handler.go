@@ -16,6 +16,10 @@ func NewHandler(hlsDir, allowedOrigins string) *Handler {
 	return &Handler{hlsDir: hlsDir, allowedOrigins: allowedOrigins}
 }
 
+func (h *Handler) ThumbPath(id string) string {
+	return filepath.Join(h.hlsDir, id, "thumb.jpg")
+}
+
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Access-Control-Allow-Origin", h.allowedOrigins)
 	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")

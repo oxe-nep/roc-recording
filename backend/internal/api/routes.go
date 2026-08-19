@@ -26,8 +26,16 @@ func NewRouter(mgr *capture.Manager, hlsHandler *hlshandler.Handler, apiKey, all
 	r.Use(middleware.Recoverer)
 	r.Use(corsMiddleware(allowedOrigins))
 
-	// HLS – no API key required
+	// HLS and thumbnails – no API key required
 	r.Mount("/hls/", hlsHandler)
+	r.Get("/thumb/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		thumbPath := hlsHandler.ThumbPath(id)
+		w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
+		w.Header().Set("Cache-Control", "no-cache, no-store")
+		w.Header().Set("Content-Type", "image/jpeg")
+		http.ServeFile(w, r, thumbPath)
+	})
 
 	// API – requires API key
 	r.Group(func(r chi.Router) {

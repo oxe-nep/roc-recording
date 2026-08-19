@@ -2,9 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { fetchStreams, startStream, stopStream, type Stream } from "@/lib/api";
-import HlsPlayer from "@/components/HlsPlayer";
-
-const BASE = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8080";
+import Thumbnail from "@/components/Thumbnail";
 
 export default function StreamGrid() {
   const [streams, setStreams] = useState<Stream[]>([]);
@@ -67,17 +65,12 @@ export default function StreamGrid() {
           key={s.id}
           className="bg-slate-800 rounded-xl overflow-hidden border border-slate-700 flex flex-col"
         >
-          {/* Inline player or placeholder */}
-          <div className="aspect-video bg-slate-900 relative">
+          {/* Thumbnail preview, updated every 2s */}
+          <div className="aspect-video bg-slate-900 relative flex items-center justify-center">
             {s.status === "running" ? (
-              <HlsPlayer
-                src={`${BASE}/hls/${s.id}/index.m3u8`}
-                className="w-full h-full object-contain"
-              />
+              <Thumbnail id={s.id} className="w-full h-full object-contain" />
             ) : (
-              <div className="absolute inset-0 flex items-center justify-center text-slate-600">
-                <span className="text-xs font-mono">no signal</span>
-              </div>
+              <span className="text-xs font-mono text-slate-600">no signal</span>
             )}
           </div>
 

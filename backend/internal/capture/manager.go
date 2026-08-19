@@ -219,9 +219,11 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	default:
 		encoderArgs = append(encoderArgs, "-b:v", "300k")
 	}
+	thumbPath := filepath.Join(outDir, "thumb.jpg")
 	encoderArgs = append(encoderArgs,
 		"-g", "50", "-keyint_min", "50",
 		"-c:a", "aac", "-b:a", "64k",
+		// HLS output
 		"-f", "hls",
 		"-hls_time", "2",
 		"-hls_list_size", "10",
@@ -231,7 +233,17 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		playlist,
 	)
 
+	// Second output: thumbnail JPEG updated every 2 seconds
+	thumbArgs := []string{
+		"-vf", vfFilter,
+		"-r", "0.5",
+		"-update", "1",
+		"-q:v", "5",
+		"-f", "image2",
+		thumbPath,
+	}
 	args := append(inputArgs, encoderArgs...)
+	args = append(args, thumbArgs...)
 	cmd := exec.Command(m.ffmpegBin, args...)
 
 	s.mu.Lock()

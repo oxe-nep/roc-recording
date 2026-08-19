@@ -110,6 +110,12 @@ func (m *Manager) List() []*Stream {
 }
 
 func (m *Manager) runLoop(s *Stream) {
+	const (
+		restartDelay   = 5 * time.Second
+		stableAfter    = 10 * time.Second
+	)
+	consecutiveFails := 0
+
 	for {
 		select {
 		case <-s.stopCh:
@@ -121,26 +127,56 @@ func (m *Manager) runLoop(s *Stream) {
 		default:
 		}
 
+		start := time.Now()
 		err := m.runFFmpeg(s)
-		if err != nil {
-			select {
-			case <-s.stopCh:
-				s.mu.Lock()
-				s.Status = StatusStopped
-				s.mu.Unlock()
-				return
-			default:
-				s.mu.Lock()
-				s.Status = StatusError
-				s.Error = err.Error()
-				s.mu.Unlock()
-				log.Printf("[channel %d] FFmpeg exited with error: %v – restarting in 3s", s.ID, err)
-				time.Sleep(3 * time.Second)
-				s.mu.Lock()
-				s.Status = StatusRunning
-				s.Error = ""
-				s.mu.Unlock()
-			}
+
+		select {
+		case <-s.stopCh:
+			s.mu.Lock()
+			s.Status = StatusStopped
+			s.mu.Unlock()
+			return
+		default:
+		}
+
+		if err == nil {
+			// Clean exit (stopped externally)
+			consecutiveFails = 0
+			continue
+		}
+
+		uptime := time.Since(start)
+		if uptime >= stableAfter {
+			// Ran long enough – likely lost signal, reset fail counter
+			consecutiveFails = 0
+		} else {
+			consecutiveFails++
+		}
+
+		delay := restartDelay
+		if consecutiveFails > 5 {
+			delay = 30 * time.Second
+		}
+
+		s.mu.Lock()
+		s.Status = StatusError
+		s.Error = err.Error()
+		s.mu.Unlock()
+
+		log.Printf("[channel %d] FFmpeg exited after %s with error: %v (fail #%d) – restarting in %s",
+			s.ID, uptime.Round(time.Millisecond), err, consecutiveFails, delay)
+
+		select {
+		case <-s.stopCh:
+			s.mu.Lock()
+			s.Status = StatusStopped
+			s.mu.Unlock()
+			return
+		case <-time.After(delay):
+			s.mu.Lock()
+			s.Status = StatusRunning
+			s.Error = ""
+			s.mu.Unlock()
 		}
 	}
 }

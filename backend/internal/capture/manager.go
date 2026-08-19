@@ -206,7 +206,7 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	}
 
 	thumbPath := filepath.Join(outDir, "thumb.jpg")
-	inputArgs := shellSplit(s.ffmpegInput)
+	inputArgs := sanitizeInputArgs(shellSplit(s.ffmpegInput))
 
 	// yadif=deint=interlaced: deinterlace only interlaced frames (1080i),
 	// pass progressive frames through unchanged (1080p).
@@ -240,6 +240,13 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 			line := scanner.Text()
 			if strings.Contains(line, "rror") {
 				log.Printf("[channel %d] %s", s.ID, line)
+			}
+			// If DeckLink reports signal loss, force a restart so stale preview is removed
+			// and the process can re-lock when signal/mode comes back.
+			if strings.Contains(line, "No input signal detected") {
+				if cmd.Process != nil {
+					_ = cmd.Process.Kill()
+				}
 			}
 		}
 	}()
@@ -283,6 +290,27 @@ func shellSplit(s string) []string {
 		args = append(args, current.String())
 	}
 	return args
+}
+
+// sanitizeInputArgs removes options that keep stale frames alive on signal loss.
+// We explicitly drop signal_loss_action and draw_bars from config input so
+// signal loss causes process restart and frontend can show "no signal".
+func sanitizeInputArgs(args []string) []string {
+	clean := make([]string, 0, len(args))
+	i := 0
+	for i < len(args) {
+		if args[i] == "-signal_loss_action" || args[i] == "-draw_bars" {
+			// Skip option + value if present
+			i++
+			if i < len(args) {
+				i++
+			}
+			continue
+		}
+		clean = append(clean, args[i])
+		i++
+	}
+	return clean
 }
 
 func (m *Manager) killStream(s *Stream) {

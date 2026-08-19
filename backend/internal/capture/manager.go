@@ -28,8 +28,8 @@ const (
 var reSignalFormat = regexp.MustCompile(`Found Decklink mode (\d+) x (\d+) with rate ([\d.]+)(\(i\))?`)
 
 // reAstats matches ametadata print lines like:
-// "lavfi.astats.1.RMS_level=-18.32" (channel 1 = left, channel 2 = right)
-var reAstats = regexp.MustCompile(`lavfi\.astats\.(\d+)\.RMS_level=([-\d.]+|-?inf)`)
+// "lavfi.astats.1.Peak_level=-18.32" (channel 1 = left, channel 2 = right)
+var reAstats = regexp.MustCompile(`lavfi\.astats\.(\d+)\.(?:Peak_level|RMS_level)=?\s*([-\d.]+|-?inf)`)
 
 const audioSilence = -90.0 // treat -inf as this value
 
@@ -93,6 +93,8 @@ func (m *Manager) Start(id int) error {
 	s.stopCh = make(chan struct{})
 	s.Status = StatusRunning
 	s.Error = ""
+	s.AudioL = audioSilence
+	s.AudioR = audioSilence
 
 	go m.runLoop(s)
 	return nil
@@ -192,8 +194,8 @@ func (m *Manager) runLoop(s *Stream) {
 			s.mu.Lock()
 			s.Status = StatusStopped
 			s.Format = ""
-			s.AudioL = 0
-			s.AudioR = 0
+			s.AudioL = audioSilence
+			s.AudioR = audioSilence
 			s.mu.Unlock()
 			return
 		default:
@@ -253,21 +255,25 @@ func (m *Manager) runLoop(s *Stream) {
 	}
 }
 
-// runFFmpeg starts FFmpeg with three outputs:
+// runFFmpeg starts FFmpeg with four outputs:
 // 1) JPEG thumbnail for grid preview
 // 2) H264 MPEG-TS UDP feed for recording
 // 3) audio analysis (astats) to null
+// 4) HLS audio-only stream for browser monitoring
 func (m *Manager) runFFmpeg(s *Stream) error {
 	outDir := filepath.Join(m.hlsDir, fmt.Sprintf("%d", s.ID))
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return fmt.Errorf("create output directory: %w", err)
 	}
+	m.removeAudioHLS(s.ID)
 
 	thumbPath := filepath.Join(outDir, "thumb.jpg")
+	audioPlaylist := filepath.Join(outDir, "audio.m3u8")
+	audioSegmentPattern := filepath.Join(outDir, "audio_%03d.ts")
 	inputArgs := sanitizeInputArgs(shellSplit(s.ffmpegInput))
 
-	// astats prints RMS levels per channel to stderr every ~1 s.
-	afFilter := "astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.1.RMS_level:key=lavfi.astats.2.RMS_level"
+	// astats prints peak levels per channel to stderr ~4 times per second.
+	afFilter := "astats=metadata=1:reset=0.25,ametadata=print:key=lavfi.astats.1.Peak_level:key=lavfi.astats.2.Peak_level"
 	// One decode, branched outputs:
 	// - vthumb: low-res JPEG thumbnail
 	// - vrec: full-res encode to MPEG-TS UDP for recording
@@ -305,6 +311,19 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"-map", "0:a:0?",
 		"-af", "pan=stereo|c0=c0|c1=c1," + afFilter,
 		"-f", "null", "-",
+		// Output #4: HLS audio-only for browser monitoring
+		"-map", "0:a:0?",
+		"-af", "pan=stereo|c0=c0|c1=c1",
+		"-c:a", "aac",
+		"-b:a", "128k",
+		"-ar", "48000",
+		"-ac", "2",
+		"-f", "hls",
+		"-hls_time", "1",
+		"-hls_list_size", "4",
+		"-hls_flags", "delete_segments+append_list+omit_endlist",
+		"-hls_segment_filename", audioSegmentPattern,
+		audioPlaylist,
 	)
 
 	cmd := exec.Command(m.ffmpegBin, args...)
@@ -348,17 +367,25 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 				s.mu.Unlock()
 				log.Printf("[channel %d] detected format: %s", s.ID, format)
 			}
-			// Parse per-channel RMS audio levels from astats metadata
+			// Parse per-channel peak audio levels from astats metadata.
 			if mm := reAstats.FindStringSubmatch(line); mm != nil {
 				ch, _ := strconv.Atoi(mm[1])
 				val := audioSilence
-				if mm[2] != "inf" && mm[2] != "-inf" {
-					val, _ = strconv.ParseFloat(mm[2], 64)
+				raw := strings.TrimSpace(mm[2])
+				if raw != "inf" && raw != "-inf" {
+					parsed, err := strconv.ParseFloat(raw, 64)
+					if err == nil {
+						val = parsed
+					}
+				}
+				if val > 0 {
+					val = 0
 				}
 				s.mu.Lock()
-				if ch == 1 {
+				switch ch {
+				case 1:
 					s.AudioL = val
-				} else if ch == 2 {
+				case 2:
 					s.AudioR = val
 				}
 				s.mu.Unlock()
@@ -367,8 +394,8 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 			if strings.Contains(line, "No input signal detected") {
 				s.mu.Lock()
 				s.Format = ""
-				s.AudioL = 0
-				s.AudioR = 0
+				s.AudioL = audioSilence
+				s.AudioR = audioSilence
 				s.mu.Unlock()
 				if cmd.Process != nil {
 					_ = cmd.Process.Kill()
@@ -447,4 +474,18 @@ func (m *Manager) killStream(s *Stream) {
 func (m *Manager) removeThumb(id int) {
 	thumbPath := filepath.Join(m.hlsDir, fmt.Sprintf("%d", id), "thumb.jpg")
 	_ = os.Remove(thumbPath)
+}
+
+func (m *Manager) removeAudioHLS(id int) {
+	dir := filepath.Join(m.hlsDir, fmt.Sprintf("%d", id))
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, "audio") {
+			_ = os.Remove(filepath.Join(dir, name))
+		}
+	}
 }

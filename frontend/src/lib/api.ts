@@ -97,6 +97,11 @@ export async function fetchRecordingBlob(id: number, name: string): Promise<Blob
   return res.blob();
 }
 
+export async function deleteRecordingFile(id: number, name: string): Promise<void> {
+  const res = await apiFetch(`/api/recordings/file/${id}/${encodeURIComponent(name)}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(`deleteRecordingFile: ${res.status}`);
+}
+
 export async function fetchAudioLevels(id: number): Promise<AudioLevels> {
   const res = await fetch(`${BASE}/audio/${id}`);
   if (!res.ok) throw new Error(`fetchAudioLevels: ${res.status}`);

@@ -15,6 +15,7 @@ import {
   type RecordingInfo,
 } from "@/lib/api";
 import Thumbnail from "@/components/Thumbnail";
+import AudioMonitor from "@/components/AudioMonitor";
 
 export default function StreamGrid() {
   const [streams, setStreams] = useState<Stream[]>([]);
@@ -25,6 +26,7 @@ export default function StreamGrid() {
   const [recBusy, setRecBusy] = useState<Record<number, boolean>>({});
   const [globalRecBusy, setGlobalRecBusy] = useState(false);
   const [audio, setAudio] = useState<Record<number, AudioLevels>>({});
+  const [listening, setListening] = useState<Record<number, boolean>>({});
 
   const load = useCallback(async () => {
     try {
@@ -70,16 +72,19 @@ export default function StreamGrid() {
     return () => clearInterval(interval);
   }, [streams]);
 
+  const hasLevel = (db?: number): boolean =>
+    db !== undefined && !Number.isNaN(db) && db > -89;
+
   const levelPct = (db?: number): number => {
-    if (db === undefined || Number.isNaN(db)) return 0;
+    if (!hasLevel(db)) return 0;
     // Keep meter stable and readable in the normal dialog range
-    const clamped = Math.max(-50, Math.min(0, db));
+    const clamped = Math.max(-50, Math.min(0, db!));
     return ((clamped + 50) / 50) * 100;
   };
 
   const formatDb = (db?: number): string => {
-    if (db === undefined || Number.isNaN(db)) return "--.-";
-    return `${db.toFixed(1)} dBFS`;
+    if (!hasLevel(db)) return "--.- dBFS";
+    return `${db!.toFixed(1)} dBFS`;
   };
 
   const startPreview = async (s: Stream) => {
@@ -120,6 +125,10 @@ export default function StreamGrid() {
     if (typeof window === "undefined") return;
     window.open(`/recordings/${id}`, "_blank", "noopener,noreferrer");
   };
+
+  const toggleListen = (id: number) => {
+    setListening((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
   
   if (loading) {
     return <div className="loading"><span>Connecting to backend…</span></div>;
@@ -145,8 +154,10 @@ export default function StreamGrid() {
         {streams.map((s) => {
           const rec = recordings[s.id];
           const isRecording = rec?.status === "recording";
+          const isListening = !!listening[s.id];
           return (
             <div key={s.id} className={`card-panel ${s.status}`}>
+              <AudioMonitor id={s.id} active={s.status === "running"} listening={isListening} />
               <div className="card-thumb">
                 <Thumbnail id={s.id} active={s.status === "running"} />
                 {isRecording && <div className="rec-badge">● REC</div>}
@@ -160,7 +171,7 @@ export default function StreamGrid() {
                     <span className="signal-format">{s.format}</span>
                   )}
                 </div>
-                <div className="audio-meter" title="Audio level L/R">
+                <div className="audio-meter" title="Audio level (dBFS): 0 = max, -inf = silence">
                   <div className="audio-row">
                     <span className="audio-label">L</span>
                     <div className="audio-bar">
@@ -184,6 +195,15 @@ export default function StreamGrid() {
                       disabled={busy[s.id]}
                     >
                       {busy[s.id] ? "…" : "Start"}
+                    </button>
+                  )}
+                  {s.status === "running" && (
+                    <button
+                      className={`badge listen-btn ${isListening ? "active" : ""}`}
+                      onClick={() => toggleListen(s.id)}
+                      title={isListening ? "Stop audio monitor" : "Monitor input audio"}
+                    >
+                      {isListening ? "🔊" : "🔈"}
                     </button>
                   )}
                   <button

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
-import { fetchRecordingBlob, fetchRecordingFiles, type RecordingFile } from "@/lib/api";
+import { deleteRecordingFile, fetchRecordingBlob, fetchRecordingFiles, type RecordingFile } from "@/lib/api";
 
 export default function RecordingsPage() {
   const params = useParams<{ id: string }>();
@@ -12,6 +12,7 @@ export default function RecordingsPage() {
   const [busyName, setBusyName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [playerURL, setPlayerURL] = useState<string | null>(null);
+  const [playingName, setPlayingName] = useState<string | null>(null);
 
   const validID = useMemo(() => Number.isInteger(id) && id > 0, [id]);
 
@@ -45,6 +46,7 @@ export default function RecordingsPage() {
       const blob = await fetchRecordingBlob(id, name);
       if (playerURL) URL.revokeObjectURL(playerURL);
       setPlayerURL(URL.createObjectURL(blob));
+      setPlayingName(name);
     } finally {
       setBusyName(null);
     }
@@ -62,6 +64,26 @@ export default function RecordingsPage() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
+    } finally {
+      setBusyName(null);
+    }
+  };
+
+  const deleteFile = async (name: string) => {
+    const ok = window.confirm(`Delete recording "${name}"?`);
+    if (!ok) return;
+
+    setBusyName(name);
+    try {
+      await deleteRecordingFile(id, name);
+      setFiles((prev) => prev.filter((f) => f.name !== name));
+      if (playingName === name) {
+        if (playerURL) URL.revokeObjectURL(playerURL);
+        setPlayerURL(null);
+        setPlayingName(null);
+      }
+    } catch (e) {
+      setError(String(e));
     } finally {
       setBusyName(null);
     }
@@ -101,6 +123,9 @@ export default function RecordingsPage() {
                   </button>
                   <button className="badge" onClick={() => downloadFile(f.name)} disabled={busyName === f.name}>
                     Download
+                  </button>
+                  <button className="badge delete-btn" onClick={() => deleteFile(f.name)} disabled={busyName === f.name}>
+                    Delete
                   </button>
                 </div>
               </div>

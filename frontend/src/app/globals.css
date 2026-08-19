@@ -271,6 +271,28 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.audio-monitor {
+  display: none;
+}
+
+.listen-btn {
+  font-size: 0.75rem !important;
+  padding: 2px 5px !important;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+}
+
+.listen-btn:hover {
+  background: rgba(92, 184, 92, 0.18);
+  color: #9fd49f;
+}
+
+.listen-btn.active {
+  background: rgba(92, 184, 92, 0.22);
+  color: #9fd49f;
+  box-shadow: 0 0 6px rgba(92, 184, 92, 0.25);
+}
+
 .rec-btn {
   font-size: 0.75rem !important;
   padding: 2px 5px !important;
@@ -354,6 +376,15 @@ body {
 
 .files-btn:hover {
   background: rgba(91, 159, 212, 0.26);
+}
+
+.delete-btn {
+  background: rgba(231, 76, 60, 0.18);
+  color: #ff9a8e;
+}
+
+.delete-btn:hover {
+  background: rgba(231, 76, 60, 0.3);
 }
 
 .files-panel {

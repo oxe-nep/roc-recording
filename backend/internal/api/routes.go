@@ -260,6 +260,29 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlsh
 			w.Header().Set("Cache-Control", "no-store")
 			http.ServeContent(w, r, name, info.ModTime(), f)
 		})
+
+		r.Delete("/api/recordings/file/{id}/{name}", func(w http.ResponseWriter, r *http.Request) {
+			id, err := strconv.Atoi(chi.URLParam(r, "id"))
+			if err != nil || id < 1 {
+				jsonError(w, "invalid channel id", http.StatusBadRequest)
+				return
+			}
+			name := chi.URLParam(r, "name")
+			if name == "" || name != filepath.Base(name) || strings.Contains(name, "..") {
+				jsonError(w, "invalid file name", http.StatusBadRequest)
+				return
+			}
+			fullPath := filepath.Join(recordingsDir, strconv.Itoa(id), name)
+			if err := os.Remove(fullPath); err != nil {
+				if os.IsNotExist(err) {
+					jsonError(w, "file not found", http.StatusNotFound)
+					return
+				}
+				jsonError(w, "failed to delete file", http.StatusInternalServerError)
+				return
+			}
+			jsonOK(w, map[string]string{"status": "deleted"})
+		})
 	})
 
 	return r

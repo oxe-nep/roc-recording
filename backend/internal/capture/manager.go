@@ -291,7 +291,12 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"-maxrate", "14M",
 		"-bufsize", "20M",
 		"-preset", "p4",
+		"-g", "50",
+		"-forced-idr", "1",
+		"-repeat_headers", "1",
+		"-tune", "ull",
 		"-f", "mpegts",
+		"-mpegts_flags", "resend_headers",
 		s.feedURL,
 		// Output #3: audio analysis only
 		"-map", "0:a?",

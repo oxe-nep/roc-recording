@@ -200,7 +200,7 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	}
 	// Convert UYVY422 (from Blackmagic) to yuv420p before encoding.
 	// NVENC does not support YUV422; libx264 prefers yuv420p for broad compatibility.
-	vfFilter := "scale=1280:720,format=yuv420p"
+	vfFilter := "scale=640:360,format=yuv420p"
 
 	encoderArgs := []string{
 		"-vf", vfFilter,
@@ -209,15 +209,15 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	// Codec-specific options
 	switch encoder {
 	case "h264_nvenc":
-		encoderArgs = append(encoderArgs, "-preset", "p1", "-tune", "ll", "-rc", "cbr", "-b:v", "800k")
+		encoderArgs = append(encoderArgs, "-preset", "p1", "-tune", "ll", "-rc", "cbr", "-b:v", "300k")
 	case "hevc_nvenc":
-		encoderArgs = append(encoderArgs, "-preset", "p1", "-tune", "ll", "-rc", "cbr", "-b:v", "800k")
+		encoderArgs = append(encoderArgs, "-preset", "p1", "-tune", "ll", "-rc", "cbr", "-b:v", "300k")
 	case "libx264":
-		encoderArgs = append(encoderArgs, "-preset", "ultrafast", "-tune", "zerolatency", "-b:v", "800k")
+		encoderArgs = append(encoderArgs, "-preset", "ultrafast", "-tune", "zerolatency", "-b:v", "300k")
 	case "libx265":
-		encoderArgs = append(encoderArgs, "-preset", "ultrafast", "-b:v", "800k")
+		encoderArgs = append(encoderArgs, "-preset", "ultrafast", "-b:v", "300k")
 	default:
-		encoderArgs = append(encoderArgs, "-b:v", "800k")
+		encoderArgs = append(encoderArgs, "-b:v", "300k")
 	}
 	encoderArgs = append(encoderArgs,
 		"-g", "50", "-keyint_min", "50",

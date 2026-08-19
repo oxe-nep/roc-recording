@@ -1,0 +1,31 @@
+api_key: "change-me"
+port: "8080"
+allowed_origins: "*"
+hls_dir: "./hls"
+ffmpeg_bin: "ffmpeg"
+
+channels:
+  - id: 1
+    name: "Kanal 1"
+    ffmpeg_input: '-f sdi2110 -video_input 1 -i ""'
+  - id: 2
+    name: "Kanal 2"
+    ffmpeg_input: '-f sdi2110 -video_input 2 -i ""'
+  - id: 3
+    name: "Kanal 3"
+    ffmpeg_input: '-f sdi2110 -video_input 3 -i ""'
+  - id: 4
+    name: "Kanal 4"
+    ffmpeg_input: '-f sdi2110 -video_input 4 -i ""'
+  - id: 5
+    name: "Kanal 5"
+    ffmpeg_input: '-f sdi2110 -video_input 5 -i ""'
+  - id: 6
+    name: "Kanal 6"
+    ffmpeg_input: '-f sdi2110 -video_input 6 -i ""'
+  - id: 7
+    name: "Kanal 7"
+    ffmpeg_input: '-f sdi2110 -video_input 7 -i ""'
+  - id: 8
+    name: "Kanal 8"
+    ffmpeg_input: '-f sdi2110 -video_input 8 -i ""'

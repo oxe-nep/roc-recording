@@ -1,0 +1,11 @@
+# Go
+backend/roc-recording
+backend/hls/
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/.env.local
+
+# Docker
+*.env

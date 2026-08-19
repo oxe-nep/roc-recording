@@ -271,8 +271,7 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	// One decode, branched outputs:
 	// - vthumb: low-res JPEG thumbnail
 	// - vrec: full-res encode to MPEG-TS UDP for recording
-	// - arec/ameter: force audio channel pair 1+2 (stereo) for recording and meter analysis
-	filterGraph := "[0:v]yadif=mode=0:deint=interlaced,split=2[vrec][vthumb];[vthumb]scale=640:360,format=yuv420p[vthumbout];[vrec]format=yuv420p[vrecout];[0:a]pan=stereo|c0=c0|c1=c1,asplit=2[arecout][ameterin]"
+	filterGraph := "[0:v]yadif=mode=0:deint=interlaced,split=2[vrec][vthumb];[vthumb]scale=640:360,format=yuv420p[vthumbout];[vrec]format=yuv420p[vrecout]"
 
 	args := []string{"-y"}
 	args = append(args, inputArgs...)
@@ -287,7 +286,8 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		thumbPath,
 		// Output #2: recording feed to FIFO (single DeckLink reader)
 		"-map", "[vrecout]",
-		"-map", "[arecout]",
+		"-map", "0:a:0?",
+		"-af", "pan=stereo|c0=c0|c1=c1",
 		"-c:v", "h264_nvenc",
 		"-b:v", "12M",
 		"-maxrate", "14M",
@@ -302,8 +302,8 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"-mpegts_flags", "+resend_headers",
 		s.feedURL,
 		// Output #3: audio analysis only
-		"-map", "[ameterin]",
-		"-af", afFilter,
+		"-map", "0:a:0?",
+		"-af", "pan=stereo|c0=c0|c1=c1," + afFilter,
 		"-f", "null", "-",
 	)
 

@@ -59,13 +59,12 @@ export default function StreamGrid() {
   }
 
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div className="grid grid-cols-3 xl:grid-cols-4 gap-3">
       {streams.map((s) => (
         <div
           key={s.id}
-          className="bg-slate-800 rounded-xl overflow-hidden border border-slate-700 flex flex-col"
+          className="bg-slate-800 rounded-lg overflow-hidden border border-slate-700 flex flex-col"
         >
-          {/* Thumbnail preview, updated every 2s */}
           <div className="aspect-video bg-slate-900 relative flex items-center justify-center">
             {s.status === "running" ? (
               <Thumbnail id={s.id} className="w-full h-full object-contain" />
@@ -74,16 +73,15 @@ export default function StreamGrid() {
             )}
           </div>
 
-          {/* Info + controls */}
-          <div className="p-3 flex items-center justify-between gap-2">
+          <div className="p-2 flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <p className="text-sm font-medium text-white truncate">{s.name}</p>
+              <p className="text-xs font-medium text-white truncate">{s.name}</p>
               <StatusBadge status={s.status} />
             </div>
             <button
               onClick={() => toggle(s)}
               disabled={busy[s.id]}
-              className={`shrink-0 text-xs px-3 py-1 rounded-lg font-medium transition disabled:opacity-40 ${
+              className={`shrink-0 text-[11px] px-2 py-1 rounded-md font-medium transition disabled:opacity-40 ${
                 s.status === "running"
                   ? "bg-red-700 hover:bg-red-600 text-white"
                   : "bg-emerald-700 hover:bg-emerald-600 text-white"
@@ -92,9 +90,7 @@ export default function StreamGrid() {
               {busy[s.id] ? "…" : s.status === "running" ? "Stop" : "Start"}
             </button>
           </div>
-          {s.error && (
-            <p className="px-3 pb-2 text-xs text-red-400 truncate">{s.error}</p>
-          )}
+          {s.error && <p className="px-2 pb-2 text-[11px] text-red-400 truncate">{s.error}</p>}
         </div>
       ))}
     </div>

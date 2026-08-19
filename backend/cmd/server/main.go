@@ -31,6 +31,11 @@ func main() {
 	for _, ch := range cfg.Channels {
 		mgr.Register(ch.ID, ch.Name, ch.FFmpegInput)
 	}
+	for _, ch := range cfg.Channels {
+		if err := mgr.Start(ch.ID); err != nil {
+			log.Printf("Failed to auto-start channel %d: %v", ch.ID, err)
+		}
+	}
 
 	hlsBase := fmt.Sprintf("http://localhost:%s", cfg.Port)
 	if v := os.Getenv("PUBLIC_URL"); v != "" {

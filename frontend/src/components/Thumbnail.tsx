@@ -15,7 +15,7 @@ export default function Thumbnail({ id, className }: ThumbnailProps) {
   useEffect(() => {
     const interval = setInterval(() => {
       setSrc(`${BASE}/thumb/${id}?t=${Date.now()}`);
-    }, 2000);
+    }, 1000);
     return () => clearInterval(interval);
   }, [id]);
 

@@ -183,6 +183,9 @@ func (m *Manager) runLoop(s *Stream) {
 	}
 }
 
+// runFFmpeg runs a single FFmpeg process that produces both a thumbnail and HLS output.
+// yadif handles 1080i/1080p transparently. On format change (e.g. switching from
+// progressive to interlaced), FFmpeg exits and runLoop restarts it automatically.
 func (m *Manager) runFFmpeg(s *Stream) error {
 	outDir := filepath.Join(m.hlsDir, fmt.Sprintf("%d", s.ID))
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
@@ -191,37 +194,44 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 
 	playlist := filepath.Join(outDir, "index.m3u8")
 	segPattern := filepath.Join(outDir, "%03d.ts")
+	thumbPath := filepath.Join(outDir, "thumb.jpg")
 
-	// Build args: configurable input part + encoder + HLS output
 	inputArgs := shellSplit(s.ffmpegInput)
+
 	encoder := m.videoCodec
 	if encoder == "" {
 		encoder = "h264_nvenc"
 	}
-	// yadif deinterlaces if the frame is interlaced (1080i), passes through if progressive.
-	// scale then resizes, format converts UYVY422 to yuv420p for encoder compatibility.
+
+	// yadif=deint=interlaced: deinterlace only interlaced frames, pass progressive through.
+	// This makes the pipeline work for both 1080i50 and 1080p50 without reconfiguration.
 	vfFilter := "yadif=mode=0:deint=interlaced,scale=640:360,format=yuv420p"
 
-	encoderArgs := []string{
-		"-vf", vfFilter,
-		"-c:v", encoder,
-	}
-	// Codec-specific options
+	encoderOpts := []string{}
 	switch encoder {
 	case "h264_nvenc":
-		encoderArgs = append(encoderArgs, "-preset", "p1", "-tune", "ll", "-rc", "cbr", "-b:v", "300k")
+		encoderOpts = append(encoderOpts, "-preset", "p1", "-tune", "ll", "-rc", "cbr", "-b:v", "800k")
 	case "hevc_nvenc":
-		encoderArgs = append(encoderArgs, "-preset", "p1", "-tune", "ll", "-rc", "cbr", "-b:v", "300k")
+		encoderOpts = append(encoderOpts, "-preset", "p1", "-tune", "ll", "-rc", "cbr", "-b:v", "800k")
 	case "libx264":
-		encoderArgs = append(encoderArgs, "-preset", "ultrafast", "-tune", "zerolatency", "-b:v", "300k")
+		encoderOpts = append(encoderOpts, "-preset", "ultrafast", "-tune", "zerolatency", "-b:v", "800k")
 	case "libx265":
-		encoderArgs = append(encoderArgs, "-preset", "ultrafast", "-b:v", "300k")
+		encoderOpts = append(encoderOpts, "-preset", "ultrafast", "-b:v", "800k")
 	default:
-		encoderArgs = append(encoderArgs, "-b:v", "300k")
+		encoderOpts = append(encoderOpts, "-b:v", "800k")
 	}
-	thumbPath := filepath.Join(outDir, "thumb.jpg")
-	encoderArgs = append(encoderArgs,
+
+	args := inputArgs
+	args = append(args,
+		// Shared video filter
+		"-vf", vfFilter,
+		// Video encoder
+		"-c:v", encoder,
+	)
+	args = append(args, encoderOpts...)
+	args = append(args,
 		"-g", "50", "-keyint_min", "50",
+		// Audio
 		"-c:a", "aac", "-b:a", "64k",
 		// HLS output
 		"-f", "hls",
@@ -231,19 +241,15 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"-hls_segment_type", "mpegts",
 		"-hls_segment_filename", segPattern,
 		playlist,
-	)
-
-	// Second output: thumbnail JPEG updated every 2 seconds
-	thumbArgs := []string{
+		// Thumbnail output: JPEG updated every second, same filter chain
 		"-vf", vfFilter,
-		"-r", "0.5",
+		"-r", "1",
 		"-update", "1",
-		"-q:v", "5",
+		"-q:v", "4",
 		"-f", "image2",
 		thumbPath,
-	}
-	args := append(inputArgs, encoderArgs...)
-	args = append(args, thumbArgs...)
+	)
+
 	cmd := exec.Command(m.ffmpegBin, args...)
 
 	s.mu.Lock()

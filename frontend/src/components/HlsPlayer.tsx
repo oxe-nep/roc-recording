@@ -17,19 +17,28 @@ export default function HlsPlayer({ src, className }: HlsPlayerProps) {
 
     if (Hls.isSupported()) {
       const hls = new Hls({
-        lowLatencyMode: true,
-        liveSyncDurationCount: 2,
-        liveMaxLatencyDurationCount: 4,
-        backBufferLength: 10,
+        lowLatencyMode: false,
+        liveSyncDurationCount: 3,
+        liveMaxLatencyDurationCount: 6,
+        maxBufferLength: 10,
+        backBufferLength: 0,
+        manifestLoadingTimeOut: 10000,
+        manifestLoadingMaxRetry: 10,
+        levelLoadingTimeOut: 10000,
+        levelLoadingMaxRetry: 10,
       });
       hls.loadSource(src);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         video.play().catch(() => {});
       });
+      hls.on(Hls.Events.ERROR, (_e, data) => {
+        if (data.fatal) {
+          hls.startLoad();
+        }
+      });
       return () => hls.destroy();
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-      // Safari – native HLS
       video.src = src;
       video.play().catch(() => {});
     }

@@ -198,9 +198,9 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	if encoder == "" {
 		encoder = "h264_nvenc"
 	}
-	// Convert UYVY422 (from Blackmagic) to yuv420p before encoding.
-	// NVENC does not support YUV422; libx264 prefers yuv420p for broad compatibility.
-	vfFilter := "scale=640:360,format=yuv420p"
+	// yadif deinterlaces if the frame is interlaced (1080i), passes through if progressive.
+	// scale then resizes, format converts UYVY422 to yuv420p for encoder compatibility.
+	vfFilter := "yadif=mode=0:deint=interlaced,scale=640:360,format=yuv420p"
 
 	encoderArgs := []string{
 		"-vf", vfFilter,
@@ -223,9 +223,9 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"-g", "50", "-keyint_min", "50",
 		"-c:a", "aac", "-b:a", "64k",
 		"-f", "hls",
-		"-hls_time", "1",
-		"-hls_list_size", "6",
-		"-hls_flags", "delete_segments+append_list+independent_segments",
+		"-hls_time", "2",
+		"-hls_list_size", "10",
+		"-hls_flags", "delete_segments+append_list",
 		"-hls_segment_type", "mpegts",
 		"-hls_segment_filename", segPattern,
 		playlist,

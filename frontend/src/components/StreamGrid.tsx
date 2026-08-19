@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import Link from "next/link";
 import { fetchStreams, startStream, stopStream, type Stream } from "@/lib/api";
+import HlsPlayer from "@/components/HlsPlayer";
+
+const BASE = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8080";
 
 export default function StreamGrid() {
   const [streams, setStreams] = useState<Stream[]>([]);
@@ -65,21 +67,21 @@ export default function StreamGrid() {
           key={s.id}
           className="bg-slate-800 rounded-xl overflow-hidden border border-slate-700 flex flex-col"
         >
-          {/* Preview-thumbnail / länk */}
-          <Link
-            href={`/stream/${s.id}`}
-            className="block aspect-video bg-slate-900 relative group"
-          >
-            <div className="absolute inset-0 flex items-center justify-center text-slate-600 group-hover:text-slate-400 transition">
-              {s.status === "running" ? (
-                <span className="text-xs font-mono">▶ preview</span>
-              ) : (
-                <span className="text-xs font-mono">–</span>
-              )}
-            </div>
-          </Link>
+          {/* Inline player or placeholder */}
+          <div className="aspect-video bg-slate-900 relative">
+            {s.status === "running" ? (
+              <HlsPlayer
+                src={`${BASE}/hls/${s.id}/index.m3u8`}
+                className="w-full h-full object-contain"
+              />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center text-slate-600">
+                <span className="text-xs font-mono">no signal</span>
+              </div>
+            )}
+          </div>
 
-          {/* Info + kontroller */}
+          {/* Info + controls */}
           <div className="p-3 flex items-center justify-between gap-2">
             <div className="min-w-0">
               <p className="text-sm font-medium text-white truncate">{s.name}</p>

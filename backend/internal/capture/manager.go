@@ -38,7 +38,10 @@ var reAstatsPeak = regexp.MustCompile(`lavfi\.astats\.(\d+)\.Peak_level=([-\d.]+
 
 // FFmpeg -progress / status: bitrate=12345.6kbits/s  (or N/A with multi-output)
 var reFFBitrate = regexp.MustCompile(`(?i)bitrate=\s*([0-9.]+)\s*([km])?bits/s`)
-var reProgressKV = regexp.MustCompile(`^([a-z_]+)=(.+)$`)
+var reProgressKV = regexp.MustCompile(`^([a-z_0-9]+)=(.+)$`)
+var reOutTimeHMS = regexp.MustCompile(`^(\d+):(\d+):(\d+(?:\.\d+)?)$`)
+var reFFSize = regexp.MustCompile(`(?i)size=\s*([0-9.]+)\s*(kB|KiB|MB|MiB)?`)
+var reFFTime = regexp.MustCompile(`time=(\d+):(\d+):(\d+(?:\.\d+)?)`)
 
 const audioSilence = -90.0 // treat -inf as this value
 
@@ -511,7 +514,7 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	progressPath := filepath.Join(outDir, "encode.progress")
 	_ = os.Remove(progressPath)
 	args = append(args,
-		// Periodic key=value progress (bitrate often N/A with multi-output; we derive from size/time).
+		// Periodic key=value progress. Put master UDP last so size/bitrate track that encode.
 		"-progress", progressPath,
 		"-filter_complex", filterGraph,
 		// Output #1: thumbnail JPEG (updated every second)
@@ -521,7 +524,19 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"-update", "1",
 		"-f", "image2",
 		thumbPath,
-		// Output #2: master encode feed (single DeckLink reader; REC copies this)
+		// Output #2: HLS audio-only for browser monitoring
+		"-map", "[ahls]",
+		"-c:a", "aac",
+		"-b:a", enc.AudioBitrate,
+		"-ar", "48000",
+		"-ac", "2",
+		"-f", "hls",
+		"-hls_time", "1",
+		"-hls_list_size", "4",
+		"-hls_flags", "delete_segments+independent_segments+omit_endlist",
+		"-hls_segment_filename", audioSegmentPattern,
+		audioPlaylist,
+		// Output #3 (last): master encode feed — progress stats follow this output
 		"-map", "[vrecout]",
 		"-map", "[arec]",
 		"-c:v", enc.VideoCodec,
@@ -539,18 +554,6 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"-f", "mpegts",
 		"-mpegts_flags", "+resend_headers",
 		s.feedURL,
-		// Output #3: HLS audio-only for browser monitoring
-		"-map", "[ahls]",
-		"-c:a", "aac",
-		"-b:a", enc.AudioBitrate,
-		"-ar", "48000",
-		"-ac", "2",
-		"-f", "hls",
-		"-hls_time", "1",
-		"-hls_list_size", "4",
-		"-hls_flags", "delete_segments+independent_segments+omit_endlist",
-		"-hls_segment_filename", audioSegmentPattern,
-		audioPlaylist,
 	)
 
 	cmd := exec.Command(m.ffmpegBin, args...)
@@ -632,6 +635,10 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 					s.EncodeBitrateKbps = kbps
 					s.mu.Unlock()
 				}
+			} else if kbps, ok := bitrateFromStatusSizeTime(line); ok {
+				s.mu.Lock()
+				s.EncodeBitrateKbps = kbps
+				s.mu.Unlock()
 			}
 			if mm := reAstatsPeak.FindStringSubmatch(line); mm != nil {
 				ch, _ := strconv.Atoi(mm[1])
@@ -748,18 +755,26 @@ func parseBitrateKbps(val, unit string) float64 {
 }
 
 // readProgressBitrateKbps parses an FFmpeg -progress file.
-// With multiple outputs bitrate= is often N/A; derive from total_size / out_time.
+// Prefer out_time_us / out_time — out_time_ms is historically wrong in FFmpeg.
+// When bitrate=N/A, derive from total_size / elapsed.
 func readProgressBitrateKbps(path string) (float64, bool) {
 	data, err := os.ReadFile(path)
 	if err != nil || len(data) == 0 {
 		return 0, false
 	}
+	// Use the tail of the file (latest progress block); the file is appended over time.
+	chunk := string(data)
+	lines := strings.Split(chunk, "\n")
+	if len(lines) > 40 {
+		chunk = strings.Join(lines[len(lines)-40:], "\n")
+	}
+
 	var totalSize int64
 	var outTimeUs int64
 	var bitrateKbps float64
-	for _, line := range strings.Split(string(data), "\n") {
+	for _, line := range strings.Split(chunk, "\n") {
 		line = strings.TrimSpace(line)
-		if line == "" {
+		if line == "" || strings.EqualFold(line, "bitrate=N/A") || strings.EqualFold(line, "total_size=N/A") {
 			continue
 		}
 		if br := reFFBitrate.FindStringSubmatch(line); br != nil {
@@ -778,20 +793,21 @@ func readProgressBitrateKbps(path string) (float64, bool) {
 			if n, err := strconv.ParseInt(val, 10, 64); err == nil && n > 0 {
 				totalSize = n
 			}
-		case "out_time_ms":
-			if n, err := strconv.ParseInt(val, 10, 64); err == nil && n > 0 {
-				outTimeUs = n * 1000
-			}
 		case "out_time_us":
 			if n, err := strconv.ParseInt(val, 10, 64); err == nil && n > 0 {
 				outTimeUs = n
 			}
+		case "out_time":
+			if us, ok := parseOutTimeToUs(val); ok {
+				outTimeUs = us
+			}
+			// Intentionally ignore out_time_ms (often microseconds mislabeled as ms).
 		}
 	}
 	if bitrateKbps > 0 {
 		return bitrateKbps, true
 	}
-	if totalSize > 0 && outTimeUs > 500_000 {
+	if totalSize > 0 && outTimeUs > 200_000 {
 		sec := float64(outTimeUs) / 1_000_000.0
 		kbps := float64(totalSize) * 8.0 / sec / 1000.0
 		if kbps > 0 {
@@ -799,6 +815,55 @@ func readProgressBitrateKbps(path string) (float64, bool) {
 		}
 	}
 	return 0, false
+}
+
+func parseOutTimeToUs(val string) (int64, bool) {
+	mm := reOutTimeHMS.FindStringSubmatch(strings.TrimSpace(val))
+	if mm == nil {
+		return 0, false
+	}
+	h, _ := strconv.ParseFloat(mm[1], 64)
+	m, _ := strconv.ParseFloat(mm[2], 64)
+	s, _ := strconv.ParseFloat(mm[3], 64)
+	sec := h*3600 + m*60 + s
+	if sec <= 0 {
+		return 0, false
+	}
+	return int64(sec * 1_000_000), true
+}
+
+func bitrateFromStatusSizeTime(line string) (float64, bool) {
+	sm := reFFSize.FindStringSubmatch(line)
+	tm := reFFTime.FindStringSubmatch(line)
+	if sm == nil || tm == nil {
+		return 0, false
+	}
+	sizeVal, err := strconv.ParseFloat(sm[1], 64)
+	if err != nil || sizeVal <= 0 {
+		return 0, false
+	}
+	unit := strings.ToLower(sm[2])
+	var sizeBytes float64
+	switch unit {
+	case "mb", "mib":
+		sizeBytes = sizeVal * 1024 * 1024
+	case "kb", "kib", "":
+		sizeBytes = sizeVal * 1024
+	default:
+		sizeBytes = sizeVal * 1024
+	}
+	h, _ := strconv.ParseFloat(tm[1], 64)
+	m, _ := strconv.ParseFloat(tm[2], 64)
+	s, _ := strconv.ParseFloat(tm[3], 64)
+	sec := h*3600 + m*60 + s
+	if sec < 0.2 {
+		return 0, false
+	}
+	kbps := sizeBytes * 8.0 / sec / 1000.0
+	if kbps <= 0 {
+		return 0, false
+	}
+	return kbps, true
 }
 
 // sanitizeInputArgs removes options that keep stale frames alive on signal loss.

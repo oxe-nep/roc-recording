@@ -318,3 +318,66 @@ export async function fetchAudioLevels(id: number): Promise<AudioLevels> {
   if (!res.ok) throw new Error(`fetchAudioLevels: ${res.status}`);
   return res.json();
 }
+
+export interface SrtInfo {
+  id: number;
+  status: "idle" | "streaming";
+  mode: "listener" | "caller";
+  port: number;
+  target: string;
+  has_passphrase: boolean;
+  latency_ms: number;
+  publish_url: string;
+  error?: string;
+}
+
+export type SrtUpdateInput = {
+  mode?: "listener" | "caller";
+  port?: number;
+  target?: string;
+  passphrase?: string;
+  latency_ms?: number;
+};
+
+export async function fetchSrtAll(): Promise<SrtInfo[]> {
+  const res = await apiFetch("/api/srt");
+  if (!res.ok) throw new Error(`fetchSrtAll: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchSrt(id: number): Promise<SrtInfo> {
+  const res = await apiFetch(`/api/srt/${id}`);
+  if (!res.ok) throw new Error(`fetchSrt: ${res.status}`);
+  return res.json();
+}
+
+export async function updateSrt(id: number, body: SrtUpdateInput): Promise<SrtInfo> {
+  const res = await apiFetch(`/api/srt/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    throw new Error(errBody.error || `updateSrt: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function startSrt(id: number): Promise<SrtInfo> {
+  const res = await apiFetch(`/api/srt/${id}/start`, { method: "POST" });
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    throw new Error(errBody.error || `startSrt: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function stopSrt(id: number): Promise<SrtInfo> {
+  const res = await apiFetch(`/api/srt/${id}/stop`, { method: "POST" });
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({}));
+    throw new Error(errBody.error || `stopSrt: ${res.status}`);
+  }
+  return res.json();
+}
+

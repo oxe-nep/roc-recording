@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -16,6 +19,7 @@ import (
 	"github.com/roc-recording/backend/internal/config"
 	hlshandler "github.com/roc-recording/backend/internal/hls"
 	"github.com/roc-recording/backend/internal/recording"
+	"github.com/roc-recording/backend/internal/srt"
 	"github.com/roc-recording/backend/internal/sysmetrics"
 )
 
@@ -80,9 +84,36 @@ func main() {
 		hlsBase = v
 	}
 
+	publicSRTHost := strings.TrimSpace(os.Getenv("PUBLIC_SRT_HOST"))
+	if publicSRTHost == "" {
+		if u, err := url.Parse(hlsBase); err == nil && u.Hostname() != "" {
+			publicSRTHost = u.Hostname()
+		}
+	} else if strings.Contains(publicSRTHost, "://") {
+		if u, err := url.Parse(publicSRTHost); err == nil && u.Hostname() != "" {
+			publicSRTHost = u.Hostname()
+		}
+	} else if host, _, err := net.SplitHostPort(publicSRTHost); err == nil {
+		publicSRTHost = host
+	}
+	if publicSRTHost == "" {
+		publicSRTHost = "127.0.0.1"
+	}
+
+	srtMgr := srt.NewManager(
+		cfg.FFmpegBin,
+		mgr,
+		filepath.Join(filepath.Dir(cfgPath), "srt-settings.json"),
+		publicSRTHost,
+	)
+	for _, ch := range cfg.Channels {
+		srtMgr.Register(ch.ID)
+	}
+	srtMgr.LoadSettings()
+
 	hlsH := hlshandler.NewHandler(cfg.HLSDir, cfg.AllowedOrigins)
 	metrics := sysmetrics.NewCollector(recMgr.RecordingDir())
-	router := api.NewRouter(mgr, recMgr, hlsH, cfg.APIKey, cfg.AllowedOrigins, hlsBase, metrics)
+	router := api.NewRouter(mgr, recMgr, srtMgr, hlsH, cfg.APIKey, cfg.AllowedOrigins, hlsBase, metrics)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
@@ -90,8 +121,8 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("roc-recording backend starting on :%s (%d encode presets, default=%s)",
-			cfg.Port, len(presets), cfg.DefaultEncodePreset)
+		log.Printf("roc-recording backend starting on :%s (%d encode presets, default=%s, srt_host=%s)",
+			cfg.Port, len(presets), cfg.DefaultEncodePreset, publicSRTHost)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server error: %v", err)
 		}
@@ -102,6 +133,7 @@ func main() {
 	<-quit
 
 	log.Println("Shutting down...")
+	srtMgr.StopAll()
 	_ = recMgr.StopAll()
 	mgr.StopAll()
 	time.Sleep(1500 * time.Millisecond)

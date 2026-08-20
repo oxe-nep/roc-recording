@@ -16,6 +16,7 @@ import (
 	"github.com/roc-recording/backend/internal/capture"
 	hlshandler "github.com/roc-recording/backend/internal/hls"
 	"github.com/roc-recording/backend/internal/recording"
+	"github.com/roc-recording/backend/internal/srt"
 	"github.com/roc-recording/backend/internal/sysmetrics"
 )
 
@@ -48,7 +49,7 @@ type recordingFileResponse struct {
 	URL     string    `json:"url"`
 }
 
-func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlshandler.Handler, apiKey, allowedOrigins, hlsBaseURL string, metrics *sysmetrics.Collector) http.Handler {
+func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Manager, hlsHandler *hlshandler.Handler, apiKey, allowedOrigins, hlsBaseURL string, metrics *sysmetrics.Collector) http.Handler {
 	r := chi.NewRouter()
 	r.Use(quietRequestLogger())
 	r.Use(middleware.Recoverer)
@@ -125,11 +126,79 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlsh
 				jsonError(w, "invalid channel id", http.StatusBadRequest)
 				return
 			}
+			_, _ = srtMgr.Stop(id)
 			if err := mgr.Stop(id); err != nil {
 				jsonError(w, err.Error(), http.StatusConflict)
 				return
 			}
 			jsonOK(w, map[string]string{"status": "stopped"})
+		})
+
+		r.Get("/api/srt", func(w http.ResponseWriter, r *http.Request) {
+			list := srtMgr.ListAll()
+			sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })
+			jsonOK(w, list)
+		})
+
+		r.Get("/api/srt/{id}", func(w http.ResponseWriter, r *http.Request) {
+			id, err := strconv.Atoi(chi.URLParam(r, "id"))
+			if err != nil {
+				jsonError(w, "invalid channel id", http.StatusBadRequest)
+				return
+			}
+			info, err := srtMgr.Get(id)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			jsonOK(w, info)
+		})
+
+		r.Put("/api/srt/{id}", func(w http.ResponseWriter, r *http.Request) {
+			id, err := strconv.Atoi(chi.URLParam(r, "id"))
+			if err != nil {
+				jsonError(w, "invalid channel id", http.StatusBadRequest)
+				return
+			}
+			var body srt.UpdateInput
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				jsonError(w, "invalid json body", http.StatusBadRequest)
+				return
+			}
+			info, err := srtMgr.Update(id, body)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusConflict)
+				return
+			}
+			jsonOK(w, info)
+		})
+
+		r.Post("/api/srt/{id}/start", func(w http.ResponseWriter, r *http.Request) {
+			id, err := strconv.Atoi(chi.URLParam(r, "id"))
+			if err != nil {
+				jsonError(w, "invalid channel id", http.StatusBadRequest)
+				return
+			}
+			info, err := srtMgr.Start(id)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusConflict)
+				return
+			}
+			jsonOK(w, info)
+		})
+
+		r.Post("/api/srt/{id}/stop", func(w http.ResponseWriter, r *http.Request) {
+			id, err := strconv.Atoi(chi.URLParam(r, "id"))
+			if err != nil {
+				jsonError(w, "invalid channel id", http.StatusBadRequest)
+				return
+			}
+			info, err := srtMgr.Stop(id)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusConflict)
+				return
+			}
+			jsonOK(w, info)
 		})
 
 		r.Get("/api/encode/presets", func(w http.ResponseWriter, r *http.Request) {
@@ -614,7 +683,7 @@ func shouldSkipRequestLog(r *http.Request) bool {
 		strings.HasPrefix(path, "/audio/"),
 		strings.HasPrefix(path, "/hls/"):
 		return true
-	case path == "/api/streams", path == "/api/recordings", path == "/api/system", path == "/api/encode/presets",
+	case path == "/api/streams", path == "/api/recordings", path == "/api/srt", path == "/api/system", path == "/api/encode/presets",
 		path == "/api/encode/options",
 		path == "/api/library/categories", path == "/api/library/files":
 		return true

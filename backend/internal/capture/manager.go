@@ -515,7 +515,7 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"[0:a]pan=stereo|c0=c0|c1=c1,asplit=3[arec][ameter][ahls];" +
 		// Only measure Peak_level so ametadata=print cannot emit RMS that overwrites meters.
 		// Do not set key= on ametadata — only one key is accepted and would drop L or R.
-		"[ameter]astats=metadata=1:reset=0.25:measure_perchannel=Peak_level:measure_overall=none," +
+		"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
 		"ametadata=print,anullsink"
 
 	args := []string{"-y"}

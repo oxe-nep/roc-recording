@@ -71,7 +71,13 @@ func main() {
 	<-quit
 
 	log.Println("Shutting down...")
+	// Stop recordings first, then capture FFmpeg processes, then HTTP.
+	_ = recMgr.StopAll()
+	mgr.StopAll()
+	time.Sleep(1500 * time.Millisecond)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
+	log.Println("Shutdown complete")
 }

@@ -1,0 +1,27 @@
+[Unit]
+Description=ROC Recording capture backend (DeckLink / FFmpeg)
+Documentation=https://github.com/oxe-nep/roc-recording
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/application/roc-recording/backend
+ExecStart=/opt/application/roc-recording/backend/roc-recording /opt/application/roc-recording/backend/config.yaml
+EnvironmentFile=-/etc/roc-recording.env
+# Ensure child FFmpeg processes die with the service (new SSH sessions / logouts must not leave orphans).
+KillMode=control-group
+KillSignal=SIGTERM
+TimeoutStopSec=20
+SendSIGKILL=yes
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65535
+
+# Optional hardening-friendly defaults (DeckLink often needs broad device access).
+# PrivateDevices=false is intentional so DeckLink nodes are visible.
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -9,7 +9,34 @@ Live preview and recording UI for Blackmagic DeckLink IP (ST 2110).
 
 ## Quick start
 
-### Backend (capture host, Linux)
+### Backend (capture host, Linux) — recommended: systemd
+
+Do **not** run the binary in a random SSH session. Use systemd so FFmpeg children
+are killed cleanly when you stop/restart, even after reconnecting.
+
+```bash
+cd /opt/application/roc-recording
+git pull
+chmod +x deploy/roc-ctl.sh
+
+# First time
+sudo ./deploy/roc-ctl.sh install   # unit + /etc/roc-recording.env
+sudo nano /etc/roc-recording.env   # PUBLIC_URL / API_KEY
+sudo ./deploy/roc-ctl.sh build
+sudo ./deploy/roc-ctl.sh start
+```
+
+Daily ops:
+
+```bash
+sudo ./deploy/roc-ctl.sh status
+sudo ./deploy/roc-ctl.sh restart
+sudo ./deploy/roc-ctl.sh stop
+sudo ./deploy/roc-ctl.sh logs
+sudo ./deploy/roc-ctl.sh cleanup   # stop + kill leftover ffmpeg/roc-recording
+```
+
+Manual one-shot (not recommended):
 
 ```bash
 cd backend

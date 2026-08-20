@@ -128,6 +128,23 @@ func (m *Manager) Stop(id int) error {
 	return nil
 }
 
+func (m *Manager) StopAll() {
+	m.mu.RLock()
+	ids := make([]int, 0, len(m.streams))
+	for id, s := range m.streams {
+		s.mu.Lock()
+		running := s.Status == StatusRunning
+		s.mu.Unlock()
+		if running {
+			ids = append(ids, id)
+		}
+	}
+	m.mu.RUnlock()
+	for _, id := range ids {
+		_ = m.Stop(id)
+	}
+}
+
 func (m *Manager) List() []*Stream {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

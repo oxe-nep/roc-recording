@@ -1,37 +1,47 @@
 # roc-recording
 
-Live preview for Blackmagic IP card (ST 2110) via HLS Low-Latency.
+Live preview and recording UI for Blackmagic DeckLink IP (ST 2110).
 
 ## Architecture
 
-- **Backend** – Go + FFmpeg, runs on the capture host
-- **Frontend** – Next.js + hls.js, runs separately and points to the backend
+- **Backend** – Go + FFmpeg, runs on the capture host (DeckLink access)
+- **Frontend** – Next.js in k3s; nginx proxies API/media to the capture host
 
 ## Quick start
 
 ### Backend (capture host, Linux)
 
 ```bash
-# With Docker
-PUBLIC_URL=http://10.199.28.249:8080 API_KEY=secret docker compose up -d
-
-# Or directly
 cd backend
 go build -o roc-recording ./cmd/server
-./roc-recording config.yaml
+PUBLIC_URL=http://10.199.28.249:8080 API_KEY=change-me ./roc-recording config.yaml
 ```
 
-Adjust `backend/config.yaml` for the correct FFmpeg input per channel.
-
-### Frontend
+### Frontend (local)
 
 ```bash
 cd frontend
-# Set backend URL and API key in .env.local
 echo "NEXT_PUBLIC_BACKEND_URL=http://10.199.28.249:8080" >> .env.local
-echo "NEXT_PUBLIC_API_KEY=secret" >> .env.local
+echo "NEXT_PUBLIC_API_KEY=change-me" >> .env.local
 npm run dev
 ```
+
+## k3s (frontend only)
+
+Same pattern as `roc-wg-monitor`:
+
+1. CI builds/pushes `ghcr.io/oxe-nep/roc-recording-frontend:latest` on push to `main`
+2. Apply manifests:
+
+```bash
+kubectl apply -f k8s-deployment.yaml
+```
+
+- Hostname: `recording.nepsweden.tech`
+- Secret `roc-recording-secrets`: `API_KEY`, `BACKEND_HOST`, `BACKEND_PORT`
+- nginx injects `X-API-Key` on proxied `/api/` calls (key is not baked into the image)
+
+Requires cluster prerequisites: `ghcr-creds`, Traefik `https-redirect`, `letsencrypt` certResolver.
 
 ## API
 
@@ -39,12 +49,9 @@ All `/api/` endpoints require the header `X-API-Key: <key>`.
 
 | Method | Path | Description |
 |---|---|---|
-| GET | `/api/streams` | List all 8 channels |
-| POST | `/api/streams/{id}/start` | Start channel |
-| POST | `/api/streams/{id}/stop` | Stop channel |
-| GET | `/hls/{id}/index.m3u8` | HLS playlist |
-
-## FFmpeg input
-
-`ffmpeg_input` in `config.yaml` is a free-form FFmpeg input argument string per channel.
-Adjust to match the exact device name and SDK version of your Blackmagic IP card.
+| GET | `/api/streams` | List channels |
+| POST | `/api/streams/{id}/start` | Start preview |
+| POST | `/api/streams/{id}/stop` | Stop preview |
+| GET | `/thumb/{id}` | JPEG thumbnail |
+| GET | `/audio/{id}` | Audio levels |
+| GET | `/hls/{id}/audio.m3u8` | Audio monitor HLS |

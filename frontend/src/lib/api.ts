@@ -1,6 +1,10 @@
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8080";
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? "";
 
+// Local: set NEXT_PUBLIC_* in .env.local and talk to backend directly.
+// k3s: image is built with empty NEXT_PUBLIC_* so the browser uses same-origin;
+// nginx proxies to the capture host and injects X-API-Key from Secret API_KEY.
+
 export interface Stream {
   id: number;
   name: string;

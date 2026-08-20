@@ -36,8 +36,9 @@ var reSignalFormat = regexp.MustCompile(`Found Decklink mode (\d+) x (\d+) with 
 // make meters read ~3 dB low on sine tones (and worse on program).
 var reAstatsPeak = regexp.MustCompile(`lavfi\.astats\.(\d+)\.Peak_level=([-\d.]+|-?inf)`)
 
-// FFmpeg status lines (often \r-delimited): bitrate=12345.6kbits/s
-var reFFBitrate = regexp.MustCompile(`bitrate=\s*([0-9.]+)\s*([kKmM])?bits/s`)
+// FFmpeg -progress / status: bitrate=12345.6kbits/s  (or N/A with multi-output)
+var reFFBitrate = regexp.MustCompile(`(?i)bitrate=\s*([0-9.]+)\s*([km])?bits/s`)
+var reProgressKV = regexp.MustCompile(`^([a-z_]+)=(.+)$`)
 
 const audioSilence = -90.0 // treat -inf as this value
 
@@ -505,14 +506,13 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"[ameter]astats=metadata=1:reset=0.25:measure_perchannel=Peak_level:measure_overall=none," +
 		"ametadata=print,anullsink"
 
-	args := []string{
-		"-y",
-		// Machine-readable encode stats on stdout (live bitrate for UI).
-		"-progress", "pipe:1",
-		"-nostats",
-	}
+	args := []string{"-y"}
 	args = append(args, inputArgs...)
+	progressPath := filepath.Join(outDir, "encode.progress")
+	_ = os.Remove(progressPath)
 	args = append(args,
+		// Periodic key=value progress (bitrate often N/A with multi-output; we derive from size/time).
+		"-progress", progressPath,
 		"-filter_complex", filterGraph,
 		// Output #1: thumbnail JPEG (updated every second)
 		"-map", "[vthumbout]",
@@ -559,10 +559,6 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	s.cmd = cmd
 	s.mu.Unlock()
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("stdout pipe: %w", err)
-	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return fmt.Errorf("stderr pipe: %w", err)
@@ -575,22 +571,26 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	s.EncodeBitrateKbps = 0
 	s.mu.Unlock()
 
-	// Progress pipe: bitrate=… from -progress pipe:1
+	doneCh := make(chan error, 1)
+	exitCh := make(chan struct{})
 	go func() {
-		scanner := newFFLineScanner(stdout)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if br := reFFBitrate.FindStringSubmatch(line); br != nil {
-				val, _ := strconv.ParseFloat(br[1], 64)
-				unit := strings.ToLower(br[2])
-				kbps := val
-				switch unit {
-				case "m":
-					kbps = val * 1000
-				case "k", "":
-					kbps = val
-				}
-				if kbps > 0 {
+		err := cmd.Wait()
+		close(exitCh)
+		doneCh <- err
+	}()
+
+	// Poll -progress file for live encode bitrate.
+	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-exitCh:
+				return
+			case <-s.stopCh:
+				return
+			case <-ticker.C:
+				if kbps, ok := readProgressBitrateKbps(progressPath); ok {
 					s.mu.Lock()
 					s.EncodeBitrateKbps = kbps
 					s.mu.Unlock()
@@ -599,7 +599,7 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		}
 	}()
 
-	// Stderr parser: signal format + audio levels + signal loss.
+	// Stderr parser: signal format + audio levels + signal loss + status bitrate fallback.
 	go func() {
 		scanner := newFFLineScanner(stderr)
 		for scanner.Scan() {
@@ -607,15 +607,12 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 			if strings.Contains(line, "Error") || strings.Contains(line, "error:") {
 				log.Printf("[channel %d] %s", s.ID, line)
 			}
-			// Parse signal format from DeckLink mode line
 			if mm := reSignalFormat.FindStringSubmatch(line); mm != nil {
 				height := mm[2]
 				rateStr := mm[3]
 				interlaced := mm[4] != ""
 				rateFloat, _ := strconv.ParseFloat(rateStr, 64)
 				rateInt := int(math.Round(rateFloat))
-				// DeckLink reports interlaced as frame-rate with (i) suffix,
-				// multiply by 2 to get the conventional field-rate display (25i → 1080i50).
 				if interlaced {
 					rateInt *= 2
 				}
@@ -629,7 +626,13 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 				s.mu.Unlock()
 				log.Printf("[channel %d] detected format: %s", s.ID, format)
 			}
-			// Parse per-channel sample-peak levels (dBFS) from astats metadata.
+			if br := reFFBitrate.FindStringSubmatch(line); br != nil {
+				if kbps := parseBitrateKbps(br[1], br[2]); kbps > 0 {
+					s.mu.Lock()
+					s.EncodeBitrateKbps = kbps
+					s.mu.Unlock()
+				}
+			}
 			if mm := reAstatsPeak.FindStringSubmatch(line); mm != nil {
 				ch, _ := strconv.Atoi(mm[1])
 				val := audioSilence
@@ -652,7 +655,6 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 				}
 				s.mu.Unlock()
 			}
-			// If DeckLink reports signal loss, force a restart so stale preview is removed
 			if strings.Contains(line, "No input signal detected") {
 				s.mu.Lock()
 				s.Format = ""
@@ -666,9 +668,6 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 			}
 		}
 	}()
-
-	doneCh := make(chan error, 1)
-	go func() { doneCh <- cmd.Wait() }()
 
 	select {
 	case <-s.stopCh:
@@ -731,6 +730,75 @@ func newFFLineScanner(r io.Reader) *bufio.Scanner {
 		return 0, nil, nil
 	})
 	return scanner
+}
+
+func parseBitrateKbps(val, unit string) float64 {
+	n, err := strconv.ParseFloat(val, 64)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	switch strings.ToLower(unit) {
+	case "m":
+		return n * 1000
+	case "k", "":
+		return n
+	default:
+		return n
+	}
+}
+
+// readProgressBitrateKbps parses an FFmpeg -progress file.
+// With multiple outputs bitrate= is often N/A; derive from total_size / out_time.
+func readProgressBitrateKbps(path string) (float64, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 {
+		return 0, false
+	}
+	var totalSize int64
+	var outTimeUs int64
+	var bitrateKbps float64
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if br := reFFBitrate.FindStringSubmatch(line); br != nil {
+			if kbps := parseBitrateKbps(br[1], br[2]); kbps > 0 {
+				bitrateKbps = kbps
+			}
+			continue
+		}
+		mm := reProgressKV.FindStringSubmatch(line)
+		if mm == nil {
+			continue
+		}
+		key, val := mm[1], mm[2]
+		switch key {
+		case "total_size":
+			if n, err := strconv.ParseInt(val, 10, 64); err == nil && n > 0 {
+				totalSize = n
+			}
+		case "out_time_ms":
+			if n, err := strconv.ParseInt(val, 10, 64); err == nil && n > 0 {
+				outTimeUs = n * 1000
+			}
+		case "out_time_us":
+			if n, err := strconv.ParseInt(val, 10, 64); err == nil && n > 0 {
+				outTimeUs = n
+			}
+		}
+	}
+	if bitrateKbps > 0 {
+		return bitrateKbps, true
+	}
+	if totalSize > 0 && outTimeUs > 500_000 {
+		sec := float64(outTimeUs) / 1_000_000.0
+		kbps := float64(totalSize) * 8.0 / sec / 1000.0
+		if kbps > 0 {
+			return kbps, true
+		}
+	}
+	return 0, false
 }
 
 // sanitizeInputArgs removes options that keep stale frames alive on signal loss.

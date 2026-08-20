@@ -505,7 +505,12 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"[ameter]astats=metadata=1:reset=0.25:measure_perchannel=Peak_level:measure_overall=none," +
 		"ametadata=print,anullsink"
 
-	args := []string{"-y"}
+	args := []string{
+		"-y",
+		// Machine-readable encode stats on stdout (live bitrate for UI).
+		"-progress", "pipe:1",
+		"-nostats",
+	}
 	args = append(args, inputArgs...)
 	args = append(args,
 		"-filter_complex", filterGraph,
@@ -554,7 +559,14 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	s.cmd = cmd
 	s.mu.Unlock()
 
-	stderr, _ := cmd.StderrPipe()
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("stderr pipe: %w", err)
+	}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
@@ -563,8 +575,31 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	s.EncodeBitrateKbps = 0
 	s.mu.Unlock()
 
-	// Stderr parser: signal format + audio levels + encode bitrate + signal loss.
-	// FFmpeg status lines often use CR, so split on both \n and \r.
+	// Progress pipe: bitrate=… from -progress pipe:1
+	go func() {
+		scanner := newFFLineScanner(stdout)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if br := reFFBitrate.FindStringSubmatch(line); br != nil {
+				val, _ := strconv.ParseFloat(br[1], 64)
+				unit := strings.ToLower(br[2])
+				kbps := val
+				switch unit {
+				case "m":
+					kbps = val * 1000
+				case "k", "":
+					kbps = val
+				}
+				if kbps > 0 {
+					s.mu.Lock()
+					s.EncodeBitrateKbps = kbps
+					s.mu.Unlock()
+				}
+			}
+		}
+	}()
+
+	// Stderr parser: signal format + audio levels + signal loss.
 	go func() {
 		scanner := newFFLineScanner(stderr)
 		for scanner.Scan() {
@@ -593,23 +628,6 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 				s.Format = format
 				s.mu.Unlock()
 				log.Printf("[channel %d] detected format: %s", s.ID, format)
-			}
-			// Live master-encode bitrate from FFmpeg status line.
-			if br := reFFBitrate.FindStringSubmatch(line); br != nil {
-				val, _ := strconv.ParseFloat(br[1], 64)
-				unit := strings.ToLower(br[2])
-				kbps := val
-				switch unit {
-				case "m":
-					kbps = val * 1000
-				case "k", "":
-					kbps = val
-				}
-				if kbps > 0 {
-					s.mu.Lock()
-					s.EncodeBitrateKbps = kbps
-					s.mu.Unlock()
-				}
 			}
 			// Parse per-channel sample-peak levels (dBFS) from astats metadata.
 			if mm := reAstatsPeak.FindStringSubmatch(line); mm != nil {

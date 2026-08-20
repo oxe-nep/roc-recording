@@ -317,11 +317,13 @@ export default function StreamGrid() {
                     </option>
                   ))}
                 </select>
-                <span className="encode-preset-hint">
+                <span className="encode-preset-hint" title="Live master-encode bitrate from capture FFmpeg">
                   {presetBusy[s.id]
                     ? "Applying…"
-                    : s.status === "running" && s.encode_bitrate_kbps && s.encode_bitrate_kbps > 0
-                      ? `${formatBitrate(s.encode_bitrate_kbps)}${activePreset ? ` · ${activePreset.video_bitrate}` : ""}`
+                    : s.status === "running"
+                      ? s.encode_bitrate_kbps && s.encode_bitrate_kbps > 0
+                        ? `Live ${formatBitrate(s.encode_bitrate_kbps)}${activePreset ? ` / ${activePreset.video_bitrate}` : ""}`
+                        : `Live …${activePreset ? ` / ${activePreset.video_bitrate}` : ""}`
                       : activePreset
                         ? `${activePreset.video_bitrate} · ${activePreset.audio_bitrate}`
                         : s.encode_preset}

@@ -297,8 +297,10 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"[vthumb]scale=640:360,format=yuv420p[vthumbout];" +
 		"[vrec]format=yuv420p[vrecout];" +
 		"[0:a]pan=stereo|c0=c0|c1=c1,asplit=3[arec][ameter][ahls];" +
+		// Only measure Peak_level so ametadata=print cannot emit RMS that overwrites meters.
+		// Do not set key= on ametadata — only one key is accepted and would drop L or R.
 		"[ameter]astats=metadata=1:reset=0.25:measure_perchannel=Peak_level:measure_overall=none," +
-		"ametadata=print:key=lavfi.astats.1.Peak_level:key=lavfi.astats.2.Peak_level,anullsink"
+		"ametadata=print,anullsink"
 
 	args := []string{"-y"}
 	args = append(args, inputArgs...)

@@ -68,6 +68,7 @@ func main() {
 		cfg.FFmpegBin,
 		mgr,
 		filepath.Join(filepath.Dir(cfgPath), "channel-categories.json"),
+		filepath.Join(filepath.Dir(cfgPath), "recordings-path.json"),
 	)
 	for _, ch := range cfg.Channels {
 		recMgr.Register(ch.ID)
@@ -80,8 +81,8 @@ func main() {
 	}
 
 	hlsH := hlshandler.NewHandler(cfg.HLSDir, cfg.AllowedOrigins)
-	metrics := sysmetrics.NewCollector(cfg.RecordingsDir)
-	router := api.NewRouter(mgr, recMgr, hlsH, cfg.RecordingsDir, cfg.APIKey, cfg.AllowedOrigins, hlsBase, metrics)
+	metrics := sysmetrics.NewCollector(recMgr.RecordingDir())
+	router := api.NewRouter(mgr, recMgr, hlsH, cfg.APIKey, cfg.AllowedOrigins, hlsBase, metrics)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,

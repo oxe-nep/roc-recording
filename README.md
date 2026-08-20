@@ -17,10 +17,12 @@ Recording starts a second FFmpeg that **remuxes** the UDP feed (`-c copy`) into 
 
 Encode presets are defined in `config.yaml`. Per-channel selection is available in the UI and persisted to `encode-assignments.json` next to the config. Changing preset restarts that channel’s capture (blocked while recording).
 
-Recordings land in global category folders:
+Recordings land in global category folders under a configurable storage root
+(default `recordings_dir` in config, overridable in the library UI → saved to
+`recordings-path.json`):
 
 ```
-recordings/{category}/{recname}_{YYYY-MM-DD_HH-MM-SS}.mp4
+{storage}/{category}/{recname}_{YYYY-MM-DD_HH-MM-SS}.mp4
 ```
 
 Default category is `_unsorted`. Create/rename/delete categories and browse all files in the **Recordings** library UI.

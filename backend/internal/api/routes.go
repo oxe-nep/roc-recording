@@ -48,7 +48,7 @@ type recordingFileResponse struct {
 	URL     string    `json:"url"`
 }
 
-func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlshandler.Handler, recordingsDir, apiKey, allowedOrigins, hlsBaseURL string, metrics *sysmetrics.Collector) http.Handler {
+func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlshandler.Handler, apiKey, allowedOrigins, hlsBaseURL string, metrics *sysmetrics.Collector) http.Handler {
 	r := chi.NewRouter()
 	r.Use(quietRequestLogger())
 	r.Use(middleware.Recoverer)
@@ -379,6 +379,27 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlsh
 			jsonOK(w, file)
 		})
 
+		r.Get("/api/settings/recordings-path", func(w http.ResponseWriter, r *http.Request) {
+			jsonOK(w, map[string]string{"path": recMgr.RecordingDir()})
+		})
+
+		r.Put("/api/settings/recordings-path", func(w http.ResponseWriter, r *http.Request) {
+			var body struct {
+				Path string `json:"path"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				jsonError(w, "invalid json body", http.StatusBadRequest)
+				return
+			}
+			path, err := recMgr.SetRecordingDir(body.Path)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusConflict)
+				return
+			}
+			metrics.SetDiskPath(path)
+			jsonOK(w, map[string]string{"path": path})
+		})
+
 		r.Post("/api/recordings/{id}/start", func(w http.ResponseWriter, r *http.Request) {
 			id, err := strconv.Atoi(chi.URLParam(r, "id"))
 			if err != nil {
@@ -448,7 +469,7 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlsh
 				jsonError(w, "invalid channel id", http.StatusBadRequest)
 				return
 			}
-			dir := filepath.Join(recordingsDir, strconv.Itoa(id))
+			dir := filepath.Join(recMgr.RecordingDir(), strconv.Itoa(id))
 			entries, err := os.ReadDir(dir)
 			if err != nil {
 				if os.IsNotExist(err) {
@@ -494,7 +515,7 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlsh
 				jsonError(w, "invalid file name", http.StatusBadRequest)
 				return
 			}
-			fullPath := filepath.Join(recordingsDir, strconv.Itoa(id), name)
+			fullPath := filepath.Join(recMgr.RecordingDir(), strconv.Itoa(id), name)
 			f, err := os.Open(fullPath)
 			if err != nil {
 				if os.IsNotExist(err) {
@@ -526,7 +547,7 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlsh
 				jsonError(w, "invalid file name", http.StatusBadRequest)
 				return
 			}
-			fullPath := filepath.Join(recordingsDir, strconv.Itoa(id), name)
+			fullPath := filepath.Join(recMgr.RecordingDir(), strconv.Itoa(id), name)
 			if err := os.Remove(fullPath); err != nil {
 				if os.IsNotExist(err) {
 					jsonError(w, "file not found", http.StatusNotFound)

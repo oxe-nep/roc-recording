@@ -46,8 +46,20 @@ func NewCollector(diskPath string) *Collector {
 	return c
 }
 
+func (c *Collector) SetDiskPath(path string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if path == "" {
+		path = "/"
+	}
+	c.diskPath = path
+}
+
 func (c *Collector) Snapshot() Snapshot {
-	s := Snapshot{DiskPath: c.diskPath}
+	c.mu.Lock()
+	diskPath := c.diskPath
+	c.mu.Unlock()
+	s := Snapshot{DiskPath: diskPath}
 
 	if pct, err := c.cpuPercent(); err == nil {
 		s.CPUPercent = pct
@@ -57,7 +69,7 @@ func (c *Collector) Snapshot() Snapshot {
 		s.MemTotalBytes = total
 		s.MemPercent = float64(used) / float64(total) * 100
 	}
-	if used, total, err := diskUsage(c.diskPath); err == nil && total > 0 {
+	if used, total, err := diskUsage(diskPath); err == nil && total > 0 {
 		s.DiskUsedBytes = used
 		s.DiskTotalBytes = total
 		s.DiskPercent = float64(used) / float64(total) * 100

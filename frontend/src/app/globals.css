@@ -758,6 +758,43 @@ body {
   justify-content: flex-end;
 }
 
+.library-path-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--bg-surface);
+}
+
+.library-path-label {
+  flex-shrink: 0;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.library-path-input {
+  flex: 1;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  padding: 4px 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.library-path-input:focus {
+  outline: none;
+  border-color: rgba(91, 159, 212, 0.5);
+}
+
 .library-layout {
   display: grid;
   grid-template-columns: 200px 1fr 1.2fr;

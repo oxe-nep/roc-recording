@@ -9,8 +9,10 @@ import {
   fetchLibraryBlob,
   fetchLibraryCategories,
   fetchLibraryFiles,
+  fetchRecordingsPath,
   moveLibraryFile,
   renameLibraryCategory,
+  setRecordingsPath,
   type LibraryCategory,
   type LibraryFile,
 } from "@/lib/api";
@@ -23,17 +25,25 @@ export default function LibraryPage() {
   const [error, setError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [newCat, setNewCat] = useState("");
+  const [storagePath, setStoragePath] = useState("");
+  const [pathDraft, setPathDraft] = useState("");
+  const [pathBusy, setPathBusy] = useState(false);
   const [playerURL, setPlayerURL] = useState<string | null>(null);
   const [playingKey, setPlayingKey] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [cats, list] = await Promise.all([
+      const [cats, list, path] = await Promise.all([
         fetchLibraryCategories(),
         fetchLibraryFiles(selectedCat || undefined),
+        fetchRecordingsPath(),
       ]);
       setCategories(cats);
       setFiles(list);
+      setStoragePath((prev) => {
+        setPathDraft((draft) => (draft === "" || draft === prev ? path : draft));
+        return path;
+      });
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -41,6 +51,20 @@ export default function LibraryPage() {
       setLoading(false);
     }
   }, [selectedCat]);
+
+  const savePath = async () => {
+    setPathBusy(true);
+    try {
+      const path = await setRecordingsPath(pathDraft.trim());
+      setStoragePath(path);
+      setPathDraft(path);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setPathBusy(false);
+    }
+  };
 
   useEffect(() => {
     load();
@@ -164,6 +188,29 @@ export default function LibraryPage() {
         </div>
         <button className="global-rec-btn" onClick={load} disabled={loading}>
           {loading ? "Refreshing…" : "Refresh"}
+        </button>
+      </div>
+
+      <div className="library-path-bar">
+        <label className="library-path-label" htmlFor="recordings-path">
+          Storage path
+        </label>
+        <input
+          id="recordings-path"
+          className="library-path-input"
+          value={pathDraft}
+          onChange={(e) => setPathDraft(e.target.value)}
+          placeholder="/data/recordings"
+          disabled={pathBusy}
+          title="Absolute path on the capture host where category folders are created"
+        />
+        <button
+          type="button"
+          className="badge files-btn"
+          onClick={savePath}
+          disabled={pathBusy || !pathDraft.trim() || pathDraft.trim() === storagePath}
+        >
+          {pathBusy ? "…" : "Save"}
         </button>
       </div>
 

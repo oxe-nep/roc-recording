@@ -53,16 +53,19 @@ type Manager struct {
 	recordingDir       string
 	ffmpegBin          string
 	categoryAssignPath string
+	pathSettingsPath   string
 }
 
-func NewManager(recordingDir, ffmpegBin string, captureMgr *capture.Manager, categoryAssignPath string) *Manager {
+func NewManager(recordingDir, ffmpegBin string, captureMgr *capture.Manager, categoryAssignPath, pathSettingsPath string) *Manager {
 	m := &Manager{
 		states:             make(map[int]*recState),
 		captureMgr:         captureMgr,
 		recordingDir:       recordingDir,
 		ffmpegBin:          ffmpegBin,
 		categoryAssignPath: categoryAssignPath,
+		pathSettingsPath:   pathSettingsPath,
 	}
+	m.loadRecordingPath()
 	_ = m.EnsureLibrary()
 	return m
 }
@@ -169,7 +172,7 @@ func (m *Manager) SetCategory(id int, category string) (ChannelInfo, error) {
 	if clean == "" {
 		return ChannelInfo{}, fmt.Errorf("invalid category")
 	}
-	if err := os.MkdirAll(filepath.Join(m.recordingDir, clean), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(m.RecordingDir(), clean), 0o755); err != nil {
 		return ChannelInfo{}, fmt.Errorf("ensure category dir: %w", err)
 	}
 	st.mu.Lock()
@@ -211,7 +214,7 @@ func (m *Manager) Start(id int) (ChannelInfo, error) {
 	if category == "" {
 		category = DefaultCategory
 	}
-	outDir := filepath.Join(m.recordingDir, category)
+	outDir := filepath.Join(m.RecordingDir(), category)
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return ChannelInfo{}, fmt.Errorf("create recording dir: %w", err)
 	}

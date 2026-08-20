@@ -207,7 +207,26 @@ export async function stopAllRecordings(): Promise<void> {
   if (!res.ok) throw new Error(`stopAllRecordings: ${res.status}`);
 }
 
-export async function fetchLibraryCategories(): Promise<LibraryCategory[]> {
+export async function fetchRecordingsPath(): Promise<string> {
+  const res = await apiFetch("/api/settings/recordings-path");
+  if (!res.ok) throw new Error(`fetchRecordingsPath: ${res.status}`);
+  const body = await res.json();
+  return body.path as string;
+}
+
+export async function setRecordingsPath(path: string): Promise<string> {
+  const res = await apiFetch("/api/settings/recordings-path", {
+    method: "PUT",
+    body: JSON.stringify({ path }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `setRecordingsPath: ${res.status}`);
+  }
+  const body = await res.json();
+  return body.path as string;
+}
+
   const res = await apiFetch("/api/library/categories");
   if (!res.ok) throw new Error(`fetchLibraryCategories: ${res.status}`);
   return res.json();

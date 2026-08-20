@@ -3,6 +3,7 @@ package recording
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -27,11 +28,107 @@ type LibraryFile struct {
 	URL      string    `json:"url"`
 }
 
-func (m *Manager) EnsureLibrary() error {
-	if err := os.MkdirAll(m.recordingDir, 0o755); err != nil {
+type pathSettingsFile struct {
+	Path string `json:"path"`
+}
+
+func (m *Manager) RecordingDir() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.recordingDir
+}
+
+func (m *Manager) loadRecordingPath() {
+	if m.pathSettingsPath == "" {
+		return
+	}
+	data, err := os.ReadFile(m.pathSettingsPath)
+	if err != nil {
+		return
+	}
+	var file pathSettingsFile
+	if err := json.Unmarshal(data, &file); err != nil || strings.TrimSpace(file.Path) == "" {
+		return
+	}
+	abs, err := normalizeRecordingPath(file.Path)
+	if err != nil {
+		log.Printf("[library] ignore bad recordings path %q: %v", file.Path, err)
+		return
+	}
+	if err := os.MkdirAll(filepath.Join(abs, DefaultCategory), 0o755); err != nil {
+		log.Printf("[library] cannot use saved recordings path %q: %v", abs, err)
+		return
+	}
+	m.recordingDir = abs
+	log.Printf("[library] recordings path: %s", abs)
+}
+
+func (m *Manager) saveRecordingPathLocked() error {
+	if m.pathSettingsPath == "" {
+		return nil
+	}
+	data, err := json.MarshalIndent(pathSettingsFile{Path: m.recordingDir}, "", "  ")
+	if err != nil {
 		return err
 	}
-	return os.MkdirAll(filepath.Join(m.recordingDir, DefaultCategory), 0o755)
+	return os.WriteFile(m.pathSettingsPath, data, 0o644)
+}
+
+// SetRecordingDir changes where category folders and new recordings are stored.
+// Existing files are not moved; only the active root path changes.
+func (m *Manager) SetRecordingDir(path string) (string, error) {
+	for _, info := range m.ListAll() {
+		if info.Status == StatusRecording {
+			return "", fmt.Errorf("stop all recordings before changing recordings path")
+		}
+	}
+	abs, err := normalizeRecordingPath(path)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Join(abs, DefaultCategory), 0o755); err != nil {
+		return "", fmt.Errorf("cannot create recordings dir: %w", err)
+	}
+	// Verify writable.
+	probe := filepath.Join(abs, ".roc-write-test")
+	if err := os.WriteFile(probe, []byte("ok"), 0o644); err != nil {
+		return "", fmt.Errorf("recordings dir is not writable: %w", err)
+	}
+	_ = os.Remove(probe)
+
+	m.mu.Lock()
+	m.recordingDir = abs
+	err = m.saveRecordingPathLocked()
+	m.mu.Unlock()
+	if err != nil {
+		return abs, err
+	}
+	log.Printf("[library] recordings path set to %s", abs)
+	return abs, nil
+}
+
+func normalizeRecordingPath(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	clean := filepath.Clean(path)
+	if strings.Contains(clean, "..") {
+		return "", fmt.Errorf("invalid path")
+	}
+	abs, err := filepath.Abs(clean)
+	if err != nil {
+		return "", err
+	}
+	return abs, nil
+}
+
+func (m *Manager) EnsureLibrary() error {
+	dir := m.RecordingDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.MkdirAll(filepath.Join(dir, DefaultCategory), 0o755)
 }
 
 func (m *Manager) loadChannelCategories() {

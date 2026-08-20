@@ -2,6 +2,7 @@
 backend/roc-recording
 backend/hls/
 backend/encode-assignments.json
+backend/encode-presets.json
 backend/channel-categories.json
 backend/recordings/
 

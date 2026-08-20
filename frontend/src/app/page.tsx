@@ -1,13 +1,14 @@
-import type { Metadata } from "next";
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
 import StreamGrid from "@/components/StreamGrid";
 import SystemStatus from "@/components/SystemStatus";
-
-export const metadata: Metadata = {
-  title: "roc-recording",
-};
+import EncodePresetsEditor from "@/components/EncodePresetsEditor";
 
 export default function Home() {
+  const [presetsOpen, setPresetsOpen] = useState(false);
+
   return (
     <>
       <header className="compact-header">
@@ -16,10 +17,22 @@ export default function Home() {
           <Link href="/recordings" className="header-library-link">
             Recordings
           </Link>
+          <button
+            type="button"
+            className="header-library-link header-link-btn"
+            onClick={() => setPresetsOpen(true)}
+          >
+            Encode presets
+          </button>
         </div>
         <SystemStatus />
       </header>
       <StreamGrid />
+      <EncodePresetsEditor
+        open={presetsOpen}
+        onClose={() => setPresetsOpen(false)}
+        onChanged={() => window.dispatchEvent(new Event("roc-presets-changed"))}
+      />
     </>
   );
 }

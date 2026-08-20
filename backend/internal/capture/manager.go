@@ -80,9 +80,10 @@ type Manager struct {
 	presets         map[string]NamedPreset
 	defaultPreset   string
 	assignmentsPath string
+	presetsPath     string
 }
 
-func NewManager(hlsDir, ffmpegBin string, presets map[string]NamedPreset, defaultPreset, assignmentsPath string) *Manager {
+func NewManager(hlsDir, ffmpegBin string, presets map[string]NamedPreset, defaultPreset, assignmentsPath, presetsPath string) *Manager {
 	if presets == nil {
 		presets = map[string]NamedPreset{}
 	}
@@ -99,6 +100,7 @@ func NewManager(hlsDir, ffmpegBin string, presets map[string]NamedPreset, defaul
 		presets:         presets,
 		defaultPreset:   defaultPreset,
 		assignmentsPath: assignmentsPath,
+		presetsPath:     presetsPath,
 	}
 }
 

@@ -133,22 +133,52 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlsh
 		})
 
 		r.Get("/api/encode/presets", func(w http.ResponseWriter, r *http.Request) {
-			presets := mgr.ListPresets()
-			resp := make([]encodePresetResponse, 0, len(presets))
-			for _, p := range presets {
-				resp = append(resp, encodePresetResponse{
-					ID:           p.ID,
-					Label:        p.Label,
-					VideoCodec:   p.Profile.VideoCodec,
-					VideoBitrate: p.Profile.VideoBitrate,
-					VideoMaxrate: p.Profile.VideoMaxrate,
-					VideoBufsize: p.Profile.VideoBufsize,
-					VideoPreset:  p.Profile.VideoPreset,
-					VideoGOP:     p.Profile.VideoGOP,
-					AudioBitrate: p.Profile.AudioBitrate,
-				})
+			jsonOK(w, presetsToResponse(mgr.ListPresets()))
+		})
+
+		r.Post("/api/encode/presets", func(w http.ResponseWriter, r *http.Request) {
+			var body capture.PresetInput
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				jsonError(w, "invalid json body", http.StatusBadRequest)
+				return
 			}
-			jsonOK(w, resp)
+			p, err := mgr.UpsertPreset(body, true)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusConflict)
+				return
+			}
+			jsonOK(w, presetToResponse(p))
+		})
+
+		r.Put("/api/encode/presets/{id}", func(w http.ResponseWriter, r *http.Request) {
+			var body capture.PresetInput
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				jsonError(w, "invalid json body", http.StatusBadRequest)
+				return
+			}
+			body.ID = chi.URLParam(r, "id")
+			p, err := mgr.UpsertPreset(body, false)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusConflict)
+				return
+			}
+			jsonOK(w, presetToResponse(p))
+		})
+
+		r.Delete("/api/encode/presets/{id}", func(w http.ResponseWriter, r *http.Request) {
+			id := chi.URLParam(r, "id")
+			// Block delete while any channel is recording (they may be remuxing that encode).
+			for _, info := range recMgr.ListAll() {
+				if info.Status == recording.StatusRecording {
+					jsonError(w, "stop all recordings before deleting a preset", http.StatusConflict)
+					return
+				}
+			}
+			if err := mgr.DeletePreset(id); err != nil {
+				jsonError(w, err.Error(), http.StatusConflict)
+				return
+			}
+			jsonOK(w, map[string]string{"status": "deleted"})
 		})
 
 		r.Put("/api/streams/{id}/encode-preset", func(w http.ResponseWriter, r *http.Request) {
@@ -603,6 +633,28 @@ func toResponse(s *capture.Stream, hlsBaseURL string) streamResponse {
 		EncodePreset: s.EncodePreset,
 		HLSURL:       hlsBaseURL + "/hls/" + strconv.Itoa(s.ID) + "/index.m3u8",
 	}
+}
+
+func presetToResponse(p capture.NamedPreset) encodePresetResponse {
+	return encodePresetResponse{
+		ID:           p.ID,
+		Label:        p.Label,
+		VideoCodec:   p.Profile.VideoCodec,
+		VideoBitrate: p.Profile.VideoBitrate,
+		VideoMaxrate: p.Profile.VideoMaxrate,
+		VideoBufsize: p.Profile.VideoBufsize,
+		VideoPreset:  p.Profile.VideoPreset,
+		VideoGOP:     p.Profile.VideoGOP,
+		AudioBitrate: p.Profile.AudioBitrate,
+	}
+}
+
+func presetsToResponse(presets []capture.NamedPreset) []encodePresetResponse {
+	resp := make([]encodePresetResponse, 0, len(presets))
+	for _, p := range presets {
+		resp = append(resp, presetToResponse(p))
+	}
+	return resp
 }
 
 func jsonOK(w http.ResponseWriter, v any) {

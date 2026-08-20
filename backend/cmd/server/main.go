@@ -48,7 +48,9 @@ func main() {
 	}
 
 	assignmentsPath := filepath.Join(filepath.Dir(cfgPath), "encode-assignments.json")
-	mgr := capture.NewManager(cfg.HLSDir, cfg.FFmpegBin, presets, cfg.DefaultEncodePreset, assignmentsPath)
+	presetsPath := filepath.Join(filepath.Dir(cfgPath), "encode-presets.json")
+	mgr := capture.NewManager(cfg.HLSDir, cfg.FFmpegBin, presets, cfg.DefaultEncodePreset, assignmentsPath, presetsPath)
+	mgr.LoadPresetsFile()
 	for _, ch := range cfg.Channels {
 		mgr.Register(ch.ID, ch.Name, ch.FFmpegInput, ch.EncodePreset)
 	}

@@ -63,6 +63,39 @@ export async function setEncodePreset(id: number, preset: string): Promise<Strea
   return res.json();
 }
 
+export async function createEncodePreset(preset: EncodePreset): Promise<EncodePreset> {
+  const res = await apiFetch("/api/encode/presets", {
+    method: "POST",
+    body: JSON.stringify(preset),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `createEncodePreset: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function updateEncodePreset(id: string, preset: Omit<EncodePreset, "id">): Promise<EncodePreset> {
+  const res = await apiFetch(`/api/encode/presets/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    body: JSON.stringify(preset),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `updateEncodePreset: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function deleteEncodePreset(id: string): Promise<void> {
+  const res = await apiFetch(`/api/encode/presets/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `deleteEncodePreset: ${res.status}`);
+  }
+}
+
+
 export async function startStream(id: number): Promise<void> {
   const res = await apiFetch(`/api/streams/${id}/start`, { method: "POST" });
   if (!res.ok) throw new Error(`startStream: ${res.status}`);

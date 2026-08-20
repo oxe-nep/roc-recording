@@ -128,6 +128,11 @@ export default function StreamGrid() {
   }, []);
 
   useEffect(() => {
+    const refreshPresets = () => {
+      fetchEncodePresets()
+        .then(setPresets)
+        .catch(() => {});
+    };
     fetchEncodePresets()
       .then(setPresets)
       .catch((e) => setError(String(e)));
@@ -136,9 +141,13 @@ export default function StreamGrid() {
       .catch(() => {
         /* library may be empty until backend restart */
       });
+    window.addEventListener("roc-presets-changed", refreshPresets);
     load();
     const interval = setInterval(load, 1000);
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("roc-presets-changed", refreshPresets);
+    };
   }, [load]);
 
   useEffect(() => {

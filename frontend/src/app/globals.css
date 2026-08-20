@@ -487,6 +487,8 @@ body {
 .global-rec-bar {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
   padding: 0 0 10px 0;
 }
 
@@ -590,6 +592,123 @@ body {
 .recordings-header h1 {
   font-size: 1rem;
   font-weight: 600;
+}
+
+.header-library-link {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.header-library-link:hover {
+  color: var(--accent);
+}
+
+.library-layout {
+  display: grid;
+  grid-template-columns: 200px 1fr 1.2fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.library-header-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.library-back {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.library-back:hover {
+  color: var(--accent);
+}
+
+.library-sidebar {
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--bg-surface);
+  padding: 8px;
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.library-sidebar-title {
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.library-cat-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.library-cat {
+  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  padding: 5px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.library-cat:hover,
+.library-cat.active {
+  background: rgba(91, 159, 212, 0.12);
+  color: var(--text-primary);
+}
+
+.library-cat-count {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.library-cat-ops button {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 0.7rem;
+}
+
+.library-cat-ops button:hover {
+  color: var(--text-primary);
+}
+
+.library-new-cat {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.library-new-cat input {
+  flex: 1;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-size: 0.7rem;
+  padding: 3px 6px;
 }
 
 .recordings-layout {

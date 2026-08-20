@@ -77,11 +77,30 @@ export interface RecordingInfo {
   id: number;
   status: "idle" | "recording";
   name: string;
+  category: string;
   started_at?: string;
   file_path?: string;
   elapsed_sec?: number;
   bitrate_kbps?: number;
   encoding?: boolean;
+}
+
+export interface LibraryCategory {
+  name: string;
+  file_count: number;
+}
+
+export interface LibraryFile {
+  category: string;
+  name: string;
+  size: number;
+  mod_time: string;
+  url: string;
+}
+
+export interface AudioLevels {
+  l: number;
+  r: number;
 }
 
 export interface SystemMetrics {
@@ -100,18 +119,6 @@ export interface SystemMetrics {
   gpu_mem_total_mb?: number;
 }
 
-export interface RecordingFile {
-  name: string;
-  size: number;
-  mod_time: string;
-  url: string;
-}
-
-export interface AudioLevels {
-  l: number;
-  r: number;
-}
-
 export async function fetchSystemMetrics(): Promise<SystemMetrics> {
   const res = await apiFetch("/api/system");
   if (!res.ok) throw new Error(`fetchSystemMetrics: ${res.status}`);
@@ -124,6 +131,18 @@ export async function setRecordingName(id: number, name: string): Promise<Record
     body: JSON.stringify({ name }),
   });
   if (!res.ok) throw new Error(`setRecordingName: ${res.status}`);
+  return res.json();
+}
+
+export async function setRecordingCategory(id: number, category: string): Promise<RecordingInfo> {
+  const res = await apiFetch(`/api/recordings/${id}/category`, {
+    method: "PUT",
+    body: JSON.stringify({ category }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `setRecordingCategory: ${res.status}`);
+  }
   return res.json();
 }
 
@@ -155,21 +174,85 @@ export async function stopAllRecordings(): Promise<void> {
   if (!res.ok) throw new Error(`stopAllRecordings: ${res.status}`);
 }
 
-export async function fetchRecordingFiles(id: number): Promise<RecordingFile[]> {
-  const res = await apiFetch(`/api/recordings/files/${id}`);
-  if (!res.ok) throw new Error(`fetchRecordingFiles: ${res.status}`);
+export async function fetchLibraryCategories(): Promise<LibraryCategory[]> {
+  const res = await apiFetch("/api/library/categories");
+  if (!res.ok) throw new Error(`fetchLibraryCategories: ${res.status}`);
   return res.json();
 }
 
-export async function fetchRecordingBlob(id: number, name: string): Promise<Blob> {
-  const res = await apiFetch(`/api/recordings/file/${id}/${encodeURIComponent(name)}`);
-  if (!res.ok) throw new Error(`fetchRecordingBlob: ${res.status}`);
+export async function createLibraryCategory(name: string): Promise<LibraryCategory> {
+  const res = await apiFetch("/api/library/categories", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `createLibraryCategory: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function renameLibraryCategory(name: string, newName: string): Promise<LibraryCategory> {
+  const res = await apiFetch(`/api/library/categories/${encodeURIComponent(name)}`, {
+    method: "PUT",
+    body: JSON.stringify({ name: newName }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `renameLibraryCategory: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function deleteLibraryCategory(name: string): Promise<void> {
+  const res = await apiFetch(`/api/library/categories/${encodeURIComponent(name)}`, { method: "DELETE" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `deleteLibraryCategory: ${res.status}`);
+  }
+}
+
+export async function fetchLibraryFiles(category?: string): Promise<LibraryFile[]> {
+  const q = category ? `?category=${encodeURIComponent(category)}` : "";
+  const res = await apiFetch(`/api/library/files${q}`);
+  if (!res.ok) throw new Error(`fetchLibraryFiles: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchLibraryBlob(category: string, name: string): Promise<Blob> {
+  const res = await apiFetch(
+    `/api/library/file/${encodeURIComponent(category)}/${encodeURIComponent(name)}`,
+  );
+  if (!res.ok) throw new Error(`fetchLibraryBlob: ${res.status}`);
   return res.blob();
 }
 
-export async function deleteRecordingFile(id: number, name: string): Promise<void> {
-  const res = await apiFetch(`/api/recordings/file/${id}/${encodeURIComponent(name)}`, { method: "DELETE" });
-  if (!res.ok) throw new Error(`deleteRecordingFile: ${res.status}`);
+export async function deleteLibraryFile(category: string, name: string): Promise<void> {
+  const res = await apiFetch(
+    `/api/library/file/${encodeURIComponent(category)}/${encodeURIComponent(name)}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) throw new Error(`deleteLibraryFile: ${res.status}`);
+}
+
+export async function moveLibraryFile(
+  fromCategory: string,
+  toCategory: string,
+  name: string,
+): Promise<LibraryFile> {
+  const res = await apiFetch("/api/library/move", {
+    method: "POST",
+    body: JSON.stringify({
+      from_category: fromCategory,
+      to_category: toCategory,
+      name,
+    }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `moveLibraryFile: ${res.status}`);
+  }
+  return res.json();
 }
 
 export async function fetchAudioLevels(id: number): Promise<AudioLevels> {

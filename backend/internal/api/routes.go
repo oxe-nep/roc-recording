@@ -212,6 +212,143 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlsh
 			jsonOK(w, info)
 		})
 
+		r.Put("/api/recordings/{id}/category", func(w http.ResponseWriter, r *http.Request) {
+			id, err := strconv.Atoi(chi.URLParam(r, "id"))
+			if err != nil {
+				jsonError(w, "invalid channel id", http.StatusBadRequest)
+				return
+			}
+			var body struct {
+				Category string `json:"category"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Category == "" {
+				jsonError(w, "invalid json body (need category)", http.StatusBadRequest)
+				return
+			}
+			info, err := recMgr.SetCategory(id, body.Category)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusConflict)
+				return
+			}
+			jsonOK(w, info)
+		})
+
+		// Global library: categories = folders under recordings_dir
+		r.Get("/api/library/categories", func(w http.ResponseWriter, r *http.Request) {
+			cats, err := recMgr.ListCategories()
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			jsonOK(w, cats)
+		})
+
+		r.Post("/api/library/categories", func(w http.ResponseWriter, r *http.Request) {
+			var body struct {
+				Name string `json:"name"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				jsonError(w, "invalid json body", http.StatusBadRequest)
+				return
+			}
+			cat, err := recMgr.CreateCategory(body.Name)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusConflict)
+				return
+			}
+			jsonOK(w, cat)
+		})
+
+		r.Put("/api/library/categories/{name}", func(w http.ResponseWriter, r *http.Request) {
+			oldName := chi.URLParam(r, "name")
+			var body struct {
+				Name string `json:"name"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				jsonError(w, "invalid json body", http.StatusBadRequest)
+				return
+			}
+			cat, err := recMgr.RenameCategory(oldName, body.Name)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusConflict)
+				return
+			}
+			jsonOK(w, cat)
+		})
+
+		r.Delete("/api/library/categories/{name}", func(w http.ResponseWriter, r *http.Request) {
+			if err := recMgr.DeleteCategory(chi.URLParam(r, "name")); err != nil {
+				jsonError(w, err.Error(), http.StatusConflict)
+				return
+			}
+			jsonOK(w, map[string]string{"status": "deleted"})
+		})
+
+		r.Get("/api/library/files", func(w http.ResponseWriter, r *http.Request) {
+			files, err := recMgr.ListLibraryFiles(r.URL.Query().Get("category"))
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			jsonOK(w, files)
+		})
+
+		r.Get("/api/library/file/{category}/{name}", func(w http.ResponseWriter, r *http.Request) {
+			path, err := recMgr.LibraryFilePath(chi.URLParam(r, "category"), chi.URLParam(r, "name"))
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			f, err := os.Open(path)
+			if err != nil {
+				if os.IsNotExist(err) {
+					jsonError(w, "file not found", http.StatusNotFound)
+					return
+				}
+				jsonError(w, "failed to open file", http.StatusInternalServerError)
+				return
+			}
+			defer f.Close()
+			info, err := f.Stat()
+			if err != nil {
+				jsonError(w, "failed to read file info", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "video/mp4")
+			w.Header().Set("Cache-Control", "no-store")
+			http.ServeContent(w, r, info.Name(), info.ModTime(), f)
+		})
+
+		r.Delete("/api/library/file/{category}/{name}", func(w http.ResponseWriter, r *http.Request) {
+			if err := recMgr.DeleteLibraryFile(chi.URLParam(r, "category"), chi.URLParam(r, "name")); err != nil {
+				status := http.StatusInternalServerError
+				if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "invalid") {
+					status = http.StatusBadRequest
+				}
+				jsonError(w, err.Error(), status)
+				return
+			}
+			jsonOK(w, map[string]string{"status": "deleted"})
+		})
+
+		r.Post("/api/library/move", func(w http.ResponseWriter, r *http.Request) {
+			var body struct {
+				FromCategory string `json:"from_category"`
+				ToCategory   string `json:"to_category"`
+				Name         string `json:"name"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				jsonError(w, "invalid json body", http.StatusBadRequest)
+				return
+			}
+			file, err := recMgr.MoveLibraryFile(body.FromCategory, body.ToCategory, body.Name)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusConflict)
+				return
+			}
+			jsonOK(w, file)
+		})
+
 		r.Post("/api/recordings/{id}/start", func(w http.ResponseWriter, r *http.Request) {
 			id, err := strconv.Atoi(chi.URLParam(r, "id"))
 			if err != nil {
@@ -419,7 +556,8 @@ func shouldSkipRequestLog(r *http.Request) bool {
 		strings.HasPrefix(path, "/audio/"),
 		strings.HasPrefix(path, "/hls/"):
 		return true
-	case path == "/api/streams", path == "/api/recordings", path == "/api/system", path == "/api/encode/presets":
+	case path == "/api/streams", path == "/api/recordings", path == "/api/system", path == "/api/encode/presets",
+		path == "/api/library/categories", path == "/api/library/files":
 		return true
 	case strings.HasPrefix(path, "/api/recordings/files/"):
 		return true

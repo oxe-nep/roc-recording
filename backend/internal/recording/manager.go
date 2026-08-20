@@ -39,6 +39,7 @@ type recState struct {
 	startedAt   time.Time
 	filePath    string
 	label       string // user-facing recording name prefix
+	category    string // global library folder under recordings_dir
 	cmd         *exec.Cmd
 	elapsedSec  float64
 	bitrateKbps float64
@@ -46,32 +47,46 @@ type recState struct {
 }
 
 type Manager struct {
-	mu           sync.RWMutex
-	states       map[int]*recState
-	captureMgr   *capture.Manager
-	recordingDir string
-	ffmpegBin    string
+	mu                 sync.RWMutex
+	states             map[int]*recState
+	captureMgr         *capture.Manager
+	recordingDir       string
+	ffmpegBin          string
+	categoryAssignPath string
 }
 
-func NewManager(recordingDir, ffmpegBin string, captureMgr *capture.Manager) *Manager {
-	return &Manager{
-		states:       make(map[int]*recState),
-		captureMgr:   captureMgr,
-		recordingDir: recordingDir,
-		ffmpegBin:    ffmpegBin,
+func NewManager(recordingDir, ffmpegBin string, captureMgr *capture.Manager, categoryAssignPath string) *Manager {
+	m := &Manager{
+		states:             make(map[int]*recState),
+		captureMgr:         captureMgr,
+		recordingDir:       recordingDir,
+		ffmpegBin:          ffmpegBin,
+		categoryAssignPath: categoryAssignPath,
 	}
+	_ = m.EnsureLibrary()
+	return m
 }
 
 func (m *Manager) Register(id int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.states[id] = &recState{status: StatusIdle, label: fmt.Sprintf("ch%d", id)}
+	m.states[id] = &recState{
+		status:   StatusIdle,
+		label:    fmt.Sprintf("ch%d", id),
+		category: DefaultCategory,
+	}
+}
+
+// LoadCategoryAssignments applies persisted per-channel category choices.
+func (m *Manager) LoadCategoryAssignments() {
+	m.loadChannelCategories()
 }
 
 type ChannelInfo struct {
 	ID          int             `json:"id"`
 	Status      RecordingStatus `json:"status"`
 	Name        string          `json:"name"`
+	Category    string          `json:"category"`
 	StartedAt   *time.Time      `json:"started_at,omitempty"`
 	FilePath    string          `json:"file_path,omitempty"`
 	ElapsedSec  float64         `json:"elapsed_sec,omitempty"`
@@ -81,9 +96,13 @@ type ChannelInfo struct {
 
 func (m *Manager) buildInfo(id int, st *recState) ChannelInfo {
 	info := ChannelInfo{
-		ID:     id,
-		Status: st.status,
-		Name:   st.label,
+		ID:       id,
+		Status:   st.status,
+		Name:     st.label,
+		Category: st.category,
+	}
+	if info.Category == "" {
+		info.Category = DefaultCategory
 	}
 	if st.status == StatusRecording {
 		t := st.startedAt
@@ -139,6 +158,35 @@ func (m *Manager) SetName(id int, name string) (ChannelInfo, error) {
 	return m.buildInfo(id, st), nil
 }
 
+func (m *Manager) SetCategory(id int, category string) (ChannelInfo, error) {
+	m.mu.RLock()
+	st, ok := m.states[id]
+	m.mu.RUnlock()
+	if !ok {
+		return ChannelInfo{}, fmt.Errorf("channel %d not found", id)
+	}
+	clean := sanitizeCategory(category)
+	if clean == "" {
+		return ChannelInfo{}, fmt.Errorf("invalid category")
+	}
+	if err := os.MkdirAll(filepath.Join(m.recordingDir, clean), 0o755); err != nil {
+		return ChannelInfo{}, fmt.Errorf("ensure category dir: %w", err)
+	}
+	st.mu.Lock()
+	if st.status == StatusRecording {
+		st.mu.Unlock()
+		return ChannelInfo{}, fmt.Errorf("stop recording before changing category")
+	}
+	st.category = clean
+	info := m.buildInfo(id, st)
+	st.mu.Unlock()
+
+	m.mu.Lock()
+	_ = m.saveChannelCategoriesLocked()
+	m.mu.Unlock()
+	return info, nil
+}
+
 func (m *Manager) Start(id int) (ChannelInfo, error) {
 	m.mu.RLock()
 	st, ok := m.states[id]
@@ -159,7 +207,11 @@ func (m *Manager) Start(id int) (ChannelInfo, error) {
 		return ChannelInfo{}, fmt.Errorf("channel %d has no feed url", id)
 	}
 
-	outDir := filepath.Join(m.recordingDir, fmt.Sprintf("%d", id))
+	category := st.category
+	if category == "" {
+		category = DefaultCategory
+	}
+	outDir := filepath.Join(m.recordingDir, category)
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return ChannelInfo{}, fmt.Errorf("create recording dir: %w", err)
 	}

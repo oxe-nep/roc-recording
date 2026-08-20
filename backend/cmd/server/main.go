@@ -61,10 +61,16 @@ func main() {
 		time.Sleep(500 * time.Millisecond)
 	}
 
-	recMgr := recording.NewManager(cfg.RecordingsDir, cfg.FFmpegBin, mgr)
+	recMgr := recording.NewManager(
+		cfg.RecordingsDir,
+		cfg.FFmpegBin,
+		mgr,
+		filepath.Join(filepath.Dir(cfgPath), "channel-categories.json"),
+	)
 	for _, ch := range cfg.Channels {
 		recMgr.Register(ch.ID)
 	}
+	recMgr.LoadCategoryAssignments()
 
 	hlsBase := fmt.Sprintf("http://localhost:%s", cfg.Port)
 	if v := os.Getenv("PUBLIC_URL"); v != "" {

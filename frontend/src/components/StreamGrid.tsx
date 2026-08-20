@@ -8,6 +8,8 @@ import {
   fetchAudioLevels,
   fetchEncodePresets,
   setEncodePreset,
+  fetchLibraryCategories,
+  setRecordingCategory,
   startRecording,
   stopRecording,
   startAllRecordings,
@@ -17,6 +19,7 @@ import {
   type AudioLevels,
   type RecordingInfo,
   type EncodePreset,
+  type LibraryCategory,
 } from "@/lib/api";
 import Thumbnail from "@/components/Thumbnail";
 import AudioMonitor from "@/components/AudioMonitor";
@@ -87,6 +90,7 @@ function SegmentedMeter({ db, label }: { db?: number; label: string }) {
 export default function StreamGrid() {
   const [streams, setStreams] = useState<Stream[]>([]);
   const [presets, setPresets] = useState<EncodePreset[]>([]);
+  const [categories, setCategories] = useState<LibraryCategory[]>([]);
   const [recordings, setRecordings] = useState<Record<number, RecordingInfo>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -127,6 +131,11 @@ export default function StreamGrid() {
     fetchEncodePresets()
       .then(setPresets)
       .catch((e) => setError(String(e)));
+    fetchLibraryCategories()
+      .then(setCategories)
+      .catch(() => {
+        /* library may be empty until backend restart */
+      });
     load();
     const interval = setInterval(load, 1000);
     return () => clearInterval(interval);
@@ -185,6 +194,17 @@ export default function StreamGrid() {
     }
   };
 
+  const changeCategory = async (id: number, category: string) => {
+    try {
+      const info = await setRecordingCategory(id, category);
+      setRecordings((prev) => ({ ...prev, [id]: { ...prev[id], ...info } }));
+      const cats = await fetchLibraryCategories();
+      setCategories(cats);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   const commitName = async (id: number) => {
     const draft = (nameDraft[id] ?? "").trim();
     if (!draft) return;
@@ -210,9 +230,9 @@ export default function StreamGrid() {
     }
   };
 
-  const openFilesWindow = (id: number) => {
+  const openLibrary = () => {
     if (typeof window === "undefined") return;
-    window.open(`/recordings/${id}`, "_blank", "noopener,noreferrer");
+    window.open("/recordings", "_blank", "noopener,noreferrer");
   };
 
   const toggleListen = (id: number) => {
@@ -243,6 +263,9 @@ export default function StreamGrid() {
           disabled={globalRecBusy}
         >
           {globalRecBusy ? "…" : anyRecording ? "⏹ Stop all recordings" : "⏺ Record all"}
+        </button>
+        <button type="button" className="badge files-btn" onClick={openLibrary}>
+          Library
         </button>
       </div>
 
@@ -309,8 +332,8 @@ export default function StreamGrid() {
                   </button>
                   <button
                     className="badge files-btn"
-                    onClick={() => openFilesWindow(s.id)}
-                    title="Open recordings window"
+                    onClick={openLibrary}
+                    title="Open recordings library"
                   >
                     Files
                   </button>
@@ -346,6 +369,27 @@ export default function StreamGrid() {
                       ? `${activePreset.video_bitrate} · ${activePreset.audio_bitrate}`
                       : s.encode_preset}
                 </span>
+              </div>
+
+              <div className="rec-name-row">
+                <label className="rec-name-label" htmlFor={`rec-cat-${s.id}`}>
+                  Category
+                </label>
+                <select
+                  id={`rec-cat-${s.id}`}
+                  className="encode-preset-select"
+                  value={rec?.category || "_unsorted"}
+                  disabled={isRecording || categories.length === 0}
+                  onChange={(e) => changeCategory(s.id, e.target.value)}
+                  title="Recordings are stored in recordings/{category}/"
+                >
+                  {categories.map((c) => (
+                    <option key={c.name} value={c.name}>
+                      {c.name === "_unsorted" ? "Unsorted" : c.name}
+                    </option>
+                  ))}
+                </select>
+                <span className="encode-preset-hint">recordings/{rec?.category || "_unsorted"}/</span>
               </div>
 
               <div className="rec-name-row">

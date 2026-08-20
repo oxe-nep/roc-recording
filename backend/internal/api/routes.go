@@ -20,13 +20,14 @@ import (
 )
 
 type streamResponse struct {
-	ID           int    `json:"id"`
-	Name         string `json:"name"`
-	Status       string `json:"status"`
-	Error        string `json:"error,omitempty"`
-	Format       string `json:"format,omitempty"`
-	EncodePreset string `json:"encode_preset"`
-	HLSURL       string `json:"hls_url"`
+	ID                int     `json:"id"`
+	Name              string  `json:"name"`
+	Status            string  `json:"status"`
+	Error             string  `json:"error,omitempty"`
+	Format            string  `json:"format,omitempty"`
+	EncodePreset      string  `json:"encode_preset"`
+	EncodeBitrateKbps float64 `json:"encode_bitrate_kbps,omitempty"`
+	HLSURL            string  `json:"hls_url"`
 }
 
 type encodePresetResponse struct {
@@ -457,13 +458,14 @@ func apiKeyMiddleware(key string) func(http.Handler) http.Handler {
 
 func toResponse(s *capture.Stream, hlsBaseURL string) streamResponse {
 	return streamResponse{
-		ID:           s.ID,
-		Name:         s.Name,
-		Status:       string(s.Status),
-		Error:        s.Error,
-		Format:       s.Format,
-		EncodePreset: s.EncodePreset,
-		HLSURL:       hlsBaseURL + "/hls/" + strconv.Itoa(s.ID) + "/index.m3u8",
+		ID:                s.ID,
+		Name:              s.Name,
+		Status:            string(s.Status),
+		Error:             s.Error,
+		Format:            s.Format,
+		EncodePreset:      s.EncodePreset,
+		EncodeBitrateKbps: s.EncodeBitrateKbps,
+		HLSURL:            hlsBaseURL + "/hls/" + strconv.Itoa(s.ID) + "/index.m3u8",
 	}
 }
 

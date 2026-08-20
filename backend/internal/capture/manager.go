@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"os"
@@ -35,22 +36,26 @@ var reSignalFormat = regexp.MustCompile(`Found Decklink mode (\d+) x (\d+) with 
 // make meters read ~3 dB low on sine tones (and worse on program).
 var reAstatsPeak = regexp.MustCompile(`lavfi\.astats\.(\d+)\.Peak_level=([-\d.]+|-?inf)`)
 
+// FFmpeg status lines (often \r-delimited): bitrate=12345.6kbits/s
+var reFFBitrate = regexp.MustCompile(`bitrate=\s*([0-9.]+)\s*([kKmM])?bits/s`)
+
 const audioSilence = -90.0 // treat -inf as this value
 
 type Stream struct {
-	ID           int
-	Name         string
-	Status       Status
-	Error        string
-	Format       string  // e.g. "1080i50" or "1080p50", empty when unknown
-	AudioL       float64 // dBFS sample-peak left
-	AudioR       float64 // dBFS sample-peak right
-	EncodePreset string  // preset id applied to master UDP encode
-	ffmpegInput  string
-	feedURL      string
-	cmd          *exec.Cmd
-	stopCh       chan struct{}
-	mu           sync.Mutex
+	ID                int
+	Name              string
+	Status            Status
+	Error             string
+	Format            string  // e.g. "1080i50" or "1080p50", empty when unknown
+	AudioL            float64 // dBFS sample-peak left
+	AudioR            float64 // dBFS sample-peak right
+	EncodePreset      string  // preset id applied to master UDP encode
+	EncodeBitrateKbps float64 // live master-encode bitrate from FFmpeg stats
+	ffmpegInput       string
+	feedURL           string
+	cmd               *exec.Cmd
+	stopCh            chan struct{}
+	mu                sync.Mutex
 }
 
 // EncodeProfile is the always-on master encode written to the local UDP feed.
@@ -407,6 +412,7 @@ func (m *Manager) runLoop(s *Stream) {
 			s.Format = ""
 			s.AudioL = audioSilence
 			s.AudioR = audioSilence
+			s.EncodeBitrateKbps = 0
 			s.mu.Unlock()
 			return
 		default:
@@ -553,9 +559,14 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
 
-	// Stderr parser: signal format + audio levels + signal loss detection
+	s.mu.Lock()
+	s.EncodeBitrateKbps = 0
+	s.mu.Unlock()
+
+	// Stderr parser: signal format + audio levels + encode bitrate + signal loss.
+	// FFmpeg status lines often use CR, so split on both \n and \r.
 	go func() {
-		scanner := bufio.NewScanner(stderr)
+		scanner := newFFLineScanner(stderr)
 		for scanner.Scan() {
 			line := scanner.Text()
 			if strings.Contains(line, "Error") || strings.Contains(line, "error:") {
@@ -582,6 +593,23 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 				s.Format = format
 				s.mu.Unlock()
 				log.Printf("[channel %d] detected format: %s", s.ID, format)
+			}
+			// Live master-encode bitrate from FFmpeg status line.
+			if br := reFFBitrate.FindStringSubmatch(line); br != nil {
+				val, _ := strconv.ParseFloat(br[1], 64)
+				unit := strings.ToLower(br[2])
+				kbps := val
+				switch unit {
+				case "m":
+					kbps = val * 1000
+				case "k", "":
+					kbps = val
+				}
+				if kbps > 0 {
+					s.mu.Lock()
+					s.EncodeBitrateKbps = kbps
+					s.mu.Unlock()
+				}
 			}
 			// Parse per-channel sample-peak levels (dBFS) from astats metadata.
 			if mm := reAstatsPeak.FindStringSubmatch(line); mm != nil {
@@ -612,6 +640,7 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 				s.Format = ""
 				s.AudioL = audioSilence
 				s.AudioR = audioSilence
+				s.EncodeBitrateKbps = 0
 				s.mu.Unlock()
 				if cmd.Process != nil {
 					_ = cmd.Process.Kill()
@@ -659,6 +688,31 @@ func shellSplit(s string) []string {
 		args = append(args, current.String())
 	}
 	return args
+}
+
+// newFFLineScanner splits on both \n and \r because FFmpeg status lines often use CR.
+func newFFLineScanner(r io.Reader) *bufio.Scanner {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner.Split(func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+		if atEOF && len(data) == 0 {
+			return 0, nil, nil
+		}
+		for i, b := range data {
+			if b == '\n' || b == '\r' {
+				adv := i + 1
+				if b == '\r' && i+1 < len(data) && data[i+1] == '\n' {
+					adv = i + 2
+				}
+				return adv, data[0:i], nil
+			}
+		}
+		if atEOF {
+			return len(data), data, nil
+		}
+		return 0, nil, nil
+	})
+	return scanner
 }
 
 // sanitizeInputArgs removes options that keep stale frames alive on signal loss.

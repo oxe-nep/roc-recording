@@ -320,9 +320,11 @@ export default function StreamGrid() {
                 <span className="encode-preset-hint">
                   {presetBusy[s.id]
                     ? "Applying…"
-                    : activePreset
-                      ? `${activePreset.video_bitrate} · ${activePreset.audio_bitrate}`
-                      : s.encode_preset}
+                    : s.status === "running" && s.encode_bitrate_kbps && s.encode_bitrate_kbps > 0
+                      ? `${formatBitrate(s.encode_bitrate_kbps)}${activePreset ? ` · ${activePreset.video_bitrate}` : ""}`
+                      : activePreset
+                        ? `${activePreset.video_bitrate} · ${activePreset.audio_bitrate}`
+                        : s.encode_preset}
                 </span>
               </div>
 

@@ -135,12 +135,18 @@ body {
 .encode-preset-select {
   min-width: 120px;
   flex-shrink: 0;
-  background: rgba(255, 255, 255, 0.04);
+  background-color: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: 3px;
   color: var(--text-primary);
   font-size: 0.72rem;
   padding: 3px 6px;
+  color-scheme: dark;
+}
+
+.encode-preset-select option {
+  background-color: var(--bg-elevated);
+  color: var(--text-primary);
 }
 
 .encode-preset-select:focus {

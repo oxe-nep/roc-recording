@@ -51,7 +51,7 @@ func main() {
 	}
 
 	hlsH := hlshandler.NewHandler(cfg.HLSDir, cfg.AllowedOrigins)
-	metrics := sysmetrics.NewCollector()
+	metrics := sysmetrics.NewCollector(cfg.RecordingsDir)
 	router := api.NewRouter(mgr, recMgr, hlsH, cfg.RecordingsDir, cfg.APIKey, cfg.AllowedOrigins, hlsBase, metrics)
 
 	srv := &http.Server{

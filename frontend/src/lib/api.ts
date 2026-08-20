@@ -57,6 +57,10 @@ export interface SystemMetrics {
   mem_used_bytes: number;
   mem_total_bytes: number;
   mem_percent: number;
+  disk_used_bytes: number;
+  disk_total_bytes: number;
+  disk_percent: number;
+  disk_path?: string;
   gpu_available: boolean;
   gpu_percent?: number;
   gpu_mem_used_mb?: number;

@@ -51,6 +51,15 @@ export default function SystemStatus() {
           </span>
         </span>
       </span>
+      <span className="sys-item" title={m.disk_path ? `Disk: ${m.disk_path}` : "Disk"}>
+        <span className="sys-label">DISK</span>
+        <span className="sys-value">
+          {(m.disk_percent ?? 0).toFixed(0)}%
+          <span className="sys-sub">
+            {fmtBytes(m.disk_used_bytes)}/{fmtBytes(m.disk_total_bytes)}
+          </span>
+        </span>
+      </span>
       {m.gpu_available ? (
         <span className="sys-item">
           <span className="sys-label">GPU</span>

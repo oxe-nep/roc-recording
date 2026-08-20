@@ -13,32 +13,40 @@ import (
 )
 
 type Snapshot struct {
-	CPUPercent   float64 `json:"cpu_percent"`
-	MemUsedBytes uint64  `json:"mem_used_bytes"`
-	MemTotalBytes uint64 `json:"mem_total_bytes"`
-	MemPercent   float64 `json:"mem_percent"`
-	GPUPercent   *float64 `json:"gpu_percent,omitempty"`
-	GPUMemUsedMB *float64 `json:"gpu_mem_used_mb,omitempty"`
-	GPUMemTotalMB *float64 `json:"gpu_mem_total_mb,omitempty"`
-	GPUAvailable bool    `json:"gpu_available"`
+	CPUPercent     float64  `json:"cpu_percent"`
+	MemUsedBytes   uint64   `json:"mem_used_bytes"`
+	MemTotalBytes  uint64   `json:"mem_total_bytes"`
+	MemPercent     float64  `json:"mem_percent"`
+	DiskUsedBytes  uint64   `json:"disk_used_bytes"`
+	DiskTotalBytes uint64   `json:"disk_total_bytes"`
+	DiskPercent    float64  `json:"disk_percent"`
+	DiskPath       string   `json:"disk_path,omitempty"`
+	GPUPercent     *float64 `json:"gpu_percent,omitempty"`
+	GPUMemUsedMB   *float64 `json:"gpu_mem_used_mb,omitempty"`
+	GPUMemTotalMB  *float64 `json:"gpu_mem_total_mb,omitempty"`
+	GPUAvailable   bool     `json:"gpu_available"`
 }
 
 type Collector struct {
-	mu       sync.Mutex
-	prevIdle uint64
+	mu        sync.Mutex
+	prevIdle  uint64
 	prevTotal uint64
-	havePrev bool
+	havePrev  bool
+	diskPath  string
 }
 
-func NewCollector() *Collector {
-	c := &Collector{}
+func NewCollector(diskPath string) *Collector {
+	if diskPath == "" {
+		diskPath = "/"
+	}
+	c := &Collector{diskPath: diskPath}
 	// Prime CPU counters so the first API call has a meaningful delta.
 	_, _ = c.cpuPercent()
 	return c
 }
 
 func (c *Collector) Snapshot() Snapshot {
-	s := Snapshot{}
+	s := Snapshot{DiskPath: c.diskPath}
 
 	if pct, err := c.cpuPercent(); err == nil {
 		s.CPUPercent = pct
@@ -47,6 +55,11 @@ func (c *Collector) Snapshot() Snapshot {
 		s.MemUsedBytes = used
 		s.MemTotalBytes = total
 		s.MemPercent = float64(used) / float64(total) * 100
+	}
+	if used, total, err := diskUsage(c.diskPath); err == nil && total > 0 {
+		s.DiskUsedBytes = used
+		s.DiskTotalBytes = total
+		s.DiskPercent = float64(used) / float64(total) * 100
 	}
 	if gpuUtil, memUsed, memTotal, ok := gpuStats(); ok {
 		s.GPUAvailable = true

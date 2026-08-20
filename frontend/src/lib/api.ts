@@ -50,6 +50,7 @@ export interface RecordingInfo {
   file_path?: string;
   elapsed_sec?: number;
   bitrate_kbps?: number;
+  encoding?: boolean;
 }
 
 export interface SystemMetrics {

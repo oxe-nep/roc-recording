@@ -189,16 +189,20 @@ export default function StreamGrid() {
         {streams.map((s) => {
           const rec = recordings[s.id];
           const isRecording = rec?.status === "recording";
+          const isEncoding = isRecording && !!rec?.encoding;
           const isListening = !!listening[s.id];
           return (
             <div key={s.id} className={`card-panel ${s.status}`}>
               <AudioMonitor id={s.id} active={s.status === "running"} listening={isListening} />
               <div className="card-thumb">
                 <Thumbnail id={s.id} active={s.status === "running"} />
-                {isRecording && (
+                {isEncoding && (
                   <div className="rec-badge">
                     ● REC {formatElapsed(rec?.elapsed_sec)} · {formatBitrate(rec?.bitrate_kbps)}
                   </div>
+                )}
+                {isRecording && !isEncoding && (
+                  <div className="rec-badge starting">● STARTING…</div>
                 )}
               </div>
 

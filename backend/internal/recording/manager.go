@@ -34,14 +34,15 @@ var (
 )
 
 type recState struct {
-	mu           sync.Mutex
-	status       RecordingStatus
-	startedAt    time.Time
-	filePath     string
-	label        string // user-facing recording name prefix
-	cmd          *exec.Cmd
-	elapsedSec   float64
-	bitrateKbps  float64
+	mu          sync.Mutex
+	status      RecordingStatus
+	startedAt   time.Time
+	filePath    string
+	label       string // user-facing recording name prefix
+	cmd         *exec.Cmd
+	elapsedSec  float64
+	bitrateKbps float64
+	encoding    bool // true after FFmpeg reports real progress
 }
 
 type Manager struct {
@@ -75,6 +76,7 @@ type ChannelInfo struct {
 	FilePath    string          `json:"file_path,omitempty"`
 	ElapsedSec  float64         `json:"elapsed_sec,omitempty"`
 	BitrateKbps float64         `json:"bitrate_kbps,omitempty"`
+	Encoding    bool            `json:"encoding"`
 }
 
 func (m *Manager) buildInfo(id int, st *recState) ChannelInfo {
@@ -87,11 +89,10 @@ func (m *Manager) buildInfo(id int, st *recState) ChannelInfo {
 		t := st.startedAt
 		info.StartedAt = &t
 		info.FilePath = st.filePath
-		info.ElapsedSec = st.elapsedSec
-		info.BitrateKbps = st.bitrateKbps
-		// Fallback wall-clock if FFmpeg has not reported time yet.
-		if info.ElapsedSec <= 0 && !st.startedAt.IsZero() {
-			info.ElapsedSec = time.Since(st.startedAt).Seconds()
+		info.Encoding = st.encoding
+		if st.encoding {
+			info.ElapsedSec = st.elapsedSec
+			info.BitrateKbps = st.bitrateKbps
 		}
 	}
 	return info
@@ -201,6 +202,7 @@ func (m *Manager) Start(id int) (ChannelInfo, error) {
 	st.cmd = cmd
 	st.elapsedSec = 0
 	st.bitrateKbps = 0
+	st.encoding = false
 
 	go m.watchProgress(id, st, stdout)
 	go m.watchStderr(id, stderr)
@@ -213,6 +215,7 @@ func (m *Manager) Start(id int) (ChannelInfo, error) {
 			state.status = StatusIdle
 			state.elapsedSec = 0
 			state.bitrateKbps = 0
+			state.encoding = false
 		}
 		if err != nil {
 			log.Printf("[recording %d] FFmpeg exited with error: %v", chID, err)
@@ -248,6 +251,11 @@ func (m *Manager) watchProgress(id int, st *recState, r io.Reader) {
 			}
 			if bitrate > 0 {
 				st.bitrateKbps = bitrate
+			}
+			// Consider encoding active once FFmpeg reports real media progress.
+			if !st.encoding && (elapsed > 0.2 || bitrate > 0) {
+				st.encoding = true
+				log.Printf("[recording %d] Encoding active (ffmpeg progress)", id)
 			}
 		}
 		st.mu.Unlock()
@@ -346,6 +354,7 @@ func (m *Manager) Stop(id int) (ChannelInfo, error) {
 	st.status = StatusIdle
 	st.elapsedSec = 0
 	st.bitrateKbps = 0
+	st.encoding = false
 	log.Printf("[recording %d] Stop requested", id)
 	return m.buildInfo(id, st), nil
 }

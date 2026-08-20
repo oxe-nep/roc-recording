@@ -136,16 +136,21 @@ body {
   position: absolute;
   top: 6px;
   left: 6px;
-  background: rgba(200, 30, 30, 0.85);
+  background: rgba(200, 30, 30, 0.9);
   color: #fff;
   font-size: 0.6rem;
   font-weight: 700;
   letter-spacing: 0.04em;
   padding: 2px 6px;
   border-radius: 3px;
-  animation: rec-pulse 1.4s ease-in-out infinite;
   pointer-events: none;
   font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 8px rgba(231, 76, 60, 0.55);
+}
+
+.rec-badge.starting {
+  background: rgba(240, 173, 78, 0.9);
+  box-shadow: 0 0 8px rgba(240, 173, 78, 0.4);
 }
 
 .compact-header h1 {

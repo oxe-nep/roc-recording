@@ -21,10 +21,11 @@ type Snapshot struct {
 	DiskTotalBytes uint64   `json:"disk_total_bytes"`
 	DiskPercent    float64  `json:"disk_percent"`
 	DiskPath       string   `json:"disk_path,omitempty"`
-	GPUPercent     *float64 `json:"gpu_percent,omitempty"`
+	GPUAvailable   bool     `json:"gpu_available"`
+	NVENCPercent   *float64 `json:"nvenc_percent,omitempty"` // utilization.encoder
+	GPUPercent     *float64 `json:"gpu_percent,omitempty"`   // CUDA/3D util (secondary)
 	GPUMemUsedMB   *float64 `json:"gpu_mem_used_mb,omitempty"`
 	GPUMemTotalMB  *float64 `json:"gpu_mem_total_mb,omitempty"`
-	GPUAvailable   bool     `json:"gpu_available"`
 }
 
 type Collector struct {
@@ -61,8 +62,9 @@ func (c *Collector) Snapshot() Snapshot {
 		s.DiskTotalBytes = total
 		s.DiskPercent = float64(used) / float64(total) * 100
 	}
-	if gpuUtil, memUsed, memTotal, ok := gpuStats(); ok {
+	if nvenc, gpuUtil, memUsed, memTotal, ok := gpuStats(); ok {
 		s.GPUAvailable = true
+		s.NVENCPercent = &nvenc
 		s.GPUPercent = &gpuUtil
 		s.GPUMemUsedMB = &memUsed
 		s.GPUMemTotalMB = &memTotal
@@ -184,25 +186,26 @@ func parseMemKB(line string) uint64 {
 	return v
 }
 
-func gpuStats() (util, memUsedMB, memTotalMB float64, ok bool) {
+func gpuStats() (nvenc, gpuUtil, memUsedMB, memTotalMB float64, ok bool) {
 	cmd := exec.Command("nvidia-smi",
-		"--query-gpu=utilization.gpu,memory.used,memory.total",
+		"--query-gpu=utilization.encoder,utilization.gpu,memory.used,memory.total",
 		"--format=csv,noheader,nounits",
 	)
 	out, err := cmd.Output()
 	if err != nil {
-		return 0, 0, 0, false
+		return 0, 0, 0, 0, false
 	}
 	line := strings.TrimSpace(string(bytes.Split(out, []byte("\n"))[0]))
 	parts := strings.Split(line, ",")
-	if len(parts) < 3 {
-		return 0, 0, 0, false
+	if len(parts) < 4 {
+		return 0, 0, 0, 0, false
 	}
-	util, err1 := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
-	memUsedMB, err2 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
-	memTotalMB, err3 := strconv.ParseFloat(strings.TrimSpace(parts[2]), 64)
-	if err1 != nil || err2 != nil || err3 != nil {
-		return 0, 0, 0, false
+	nvenc, err1 := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	gpuUtil, err2 := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	memUsedMB, err3 := strconv.ParseFloat(strings.TrimSpace(parts[2]), 64)
+	memTotalMB, err4 := strconv.ParseFloat(strings.TrimSpace(parts[3]), 64)
+	if err1 != nil || err2 != nil || err3 != nil || err4 != nil {
+		return 0, 0, 0, 0, false
 	}
-	return util, memUsedMB, memTotalMB, true
+	return nvenc, gpuUtil, memUsedMB, memTotalMB, true
 }

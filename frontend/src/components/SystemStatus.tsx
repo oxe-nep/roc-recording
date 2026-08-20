@@ -61,19 +61,22 @@ export default function SystemStatus() {
         </span>
       </span>
       {m.gpu_available ? (
-        <span className="sys-item">
-          <span className="sys-label">GPU</span>
+        <span
+          className="sys-item"
+          title={`NVENC encoder util. GPU compute ${(m.gpu_percent ?? 0).toFixed(0)}% · VRAM ${(m.gpu_mem_used_mb ?? 0).toFixed(0)}/${(m.gpu_mem_total_mb ?? 0).toFixed(0)} MB`}
+        >
+          <span className="sys-label">NVENC</span>
           <span className="sys-value">
-            {(m.gpu_percent ?? 0).toFixed(0)}%
+            {(m.nvenc_percent ?? 0).toFixed(0)}%
             <span className="sys-sub">
-              {(m.gpu_mem_used_mb ?? 0).toFixed(0)}/
-              {(m.gpu_mem_total_mb ?? 0).toFixed(0)} MB
+              VRAM {(m.gpu_mem_used_mb ?? 0).toFixed(0)}/
+              {(m.gpu_mem_total_mb ?? 0).toFixed(0)}
             </span>
           </span>
         </span>
       ) : (
         <span className="sys-item muted">
-          <span className="sys-label">GPU</span>
+          <span className="sys-label">NVENC</span>
           <span className="sys-value">n/a</span>
         </span>
       )}

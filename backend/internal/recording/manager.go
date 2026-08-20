@@ -110,6 +110,18 @@ func (m *Manager) ListAll() []ChannelInfo {
 	return out
 }
 
+func (m *Manager) IsRecording(id int) bool {
+	m.mu.RLock()
+	st, ok := m.states[id]
+	m.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return st.status == StatusRecording
+}
+
 func (m *Manager) SetName(id int, name string) (ChannelInfo, error) {
 	m.mu.RLock()
 	st, ok := m.states[id]
@@ -159,24 +171,19 @@ func (m *Manager) Start(id int) (ChannelInfo, error) {
 	}
 	baseName := fmt.Sprintf("%s_%s", label, ts.Format("2006-01-02_15-04-05"))
 	mp4Path := filepath.Join(outDir, baseName+".mp4")
+	// Remux master UDP feed (already encoded by capture). No second NVENC pass.
+	// aac_adtstoasc is required when copying AAC from MPEG-TS into MP4.
 	args := []string{
 		"-y",
-		"-fflags", "+genpts",
-		"-analyzeduration", "3M",
-		"-probesize", "3M",
+		"-fflags", "+genpts+discardcorrupt",
+		"-analyzeduration", "5M",
+		"-probesize", "5M",
+		"-f", "mpegts",
 		"-i", feedURL,
-		"-vf", "format=yuv420p",
-		"-c:v", "h264_nvenc",
-		"-b:v", "10M",
-		"-maxrate", "12M",
-		"-bufsize", "20M",
-		"-preset", "p4",
-		"-g", "50",
-		"-forced-idr", "1",
-		"-c:a", "aac",
-		"-b:a", "192k",
-		"-ar", "48000",
-		"-ac", "2",
+		"-map", "0:v:0",
+		"-map", "0:a:0?",
+		"-c", "copy",
+		"-bsf:a", "aac_adtstoasc",
 		"-movflags", "frag_keyframe+empty_moov+default_base_moof",
 		// Machine-readable progress on stdout (newline-delimited key=value).
 		"-progress", "pipe:1",
@@ -222,7 +229,7 @@ func (m *Manager) Start(id int) (ChannelInfo, error) {
 		}
 	}(id, st, cmd)
 
-	log.Printf("[recording %d] Started MP4 recording: %s", id, mp4Path)
+	log.Printf("[recording %d] Started MP4 remux (copy from feed): %s", id, mp4Path)
 	return m.buildInfo(id, st), nil
 }
 
@@ -255,7 +262,7 @@ func (m *Manager) watchProgress(id int, st *recState, r io.Reader) {
 			// Consider encoding active once FFmpeg reports real media progress.
 			if !st.encoding && (elapsed > 0.2 || bitrate > 0) {
 				st.encoding = true
-				log.Printf("[recording %d] Encoding active (ffmpeg progress)", id)
+				log.Printf("[recording %d] Remux active (ffmpeg progress)", id)
 			}
 		}
 		st.mu.Unlock()

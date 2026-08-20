@@ -2,6 +2,7 @@ package capture
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"log"
 	"math"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,45 +38,235 @@ var reAstatsPeak = regexp.MustCompile(`lavfi\.astats\.(\d+)\.Peak_level=([-\d.]+
 const audioSilence = -90.0 // treat -inf as this value
 
 type Stream struct {
-	ID          int
-	Name        string
-	Status      Status
-	Error       string
-	Format      string  // e.g. "1080i50" or "1080p50", empty when unknown
-	AudioL      float64 // dBFS sample-peak left
-	AudioR      float64 // dBFS sample-peak right
-	ffmpegInput string
-	feedURL     string
-	cmd         *exec.Cmd
-	stopCh      chan struct{}
-	mu          sync.Mutex
+	ID           int
+	Name         string
+	Status       Status
+	Error        string
+	Format       string  // e.g. "1080i50" or "1080p50", empty when unknown
+	AudioL       float64 // dBFS sample-peak left
+	AudioR       float64 // dBFS sample-peak right
+	EncodePreset string  // preset id applied to master UDP encode
+	ffmpegInput  string
+	feedURL      string
+	cmd          *exec.Cmd
+	stopCh       chan struct{}
+	mu           sync.Mutex
+}
+
+// EncodeProfile is the always-on master encode written to the local UDP feed.
+// Recording remuxes that feed with -c copy (no second encode).
+type EncodeProfile struct {
+	VideoCodec   string
+	VideoBitrate string
+	VideoMaxrate string
+	VideoBufsize string
+	VideoPreset  string
+	VideoGOP     int
+	AudioBitrate string
+}
+
+// NamedPreset is a selectable encode profile (id + label + settings).
+type NamedPreset struct {
+	ID      string
+	Label   string
+	Profile EncodeProfile
 }
 
 type Manager struct {
-	streams   map[int]*Stream
-	mu        sync.RWMutex
-	hlsDir    string
-	ffmpegBin string
+	streams         map[int]*Stream
+	mu              sync.RWMutex
+	hlsDir          string
+	ffmpegBin       string
+	presets         map[string]NamedPreset
+	defaultPreset   string
+	assignmentsPath string
 }
 
-func NewManager(hlsDir, ffmpegBin string) *Manager {
+func NewManager(hlsDir, ffmpegBin string, presets map[string]NamedPreset, defaultPreset, assignmentsPath string) *Manager {
+	if presets == nil {
+		presets = map[string]NamedPreset{}
+	}
+	if defaultPreset == "" || presets[defaultPreset].ID == "" {
+		for id := range presets {
+			defaultPreset = id
+			break
+		}
+	}
 	return &Manager{
-		streams:   make(map[int]*Stream),
-		hlsDir:    hlsDir,
-		ffmpegBin: ffmpegBin,
+		streams:         make(map[int]*Stream),
+		hlsDir:          hlsDir,
+		ffmpegBin:       ffmpegBin,
+		presets:         presets,
+		defaultPreset:   defaultPreset,
+		assignmentsPath: assignmentsPath,
 	}
 }
 
-func (m *Manager) Register(id int, name, ffmpegInput string) {
+func (m *Manager) Register(id int, name, ffmpegInput, encodePreset string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.streams[id] = &Stream{
-		ID:          id,
-		Name:        name,
-		Status:      StatusStopped,
-		ffmpegInput: ffmpegInput,
-		feedURL:     fmt.Sprintf("udp://127.0.0.1:%d?pkt_size=1316", 21000+id),
+	if encodePreset == "" || m.presets[encodePreset].ID == "" {
+		encodePreset = m.defaultPreset
 	}
+	m.streams[id] = &Stream{
+		ID:           id,
+		Name:         name,
+		Status:       StatusStopped,
+		EncodePreset: encodePreset,
+		ffmpegInput:  ffmpegInput,
+		// Larger FIFO + overrun_nonfatal so REC can join mid-stream without dropping the writer.
+		feedURL: fmt.Sprintf("udp://127.0.0.1:%d?pkt_size=1316&fifo_size=5000000&overrun_nonfatal=1", 21000+id),
+	}
+}
+
+// LoadAssignments overlays persisted UI preset choices onto registered channels.
+func (m *Manager) LoadAssignments() {
+	if m.assignmentsPath == "" {
+		return
+	}
+	data, err := os.ReadFile(m.assignmentsPath)
+	if err != nil {
+		return
+	}
+	var asg map[string]string
+	if err := json.Unmarshal(data, &asg); err != nil {
+		log.Printf("[encode] bad assignments file %s: %v", m.assignmentsPath, err)
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for idStr, preset := range asg {
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			continue
+		}
+		s, ok := m.streams[id]
+		if !ok {
+			continue
+		}
+		if m.presets[preset].ID == "" {
+			continue
+		}
+		s.EncodePreset = preset
+	}
+}
+
+func (m *Manager) saveAssignmentsLocked() error {
+	if m.assignmentsPath == "" {
+		return nil
+	}
+	asg := make(map[string]string, len(m.streams))
+	for id, s := range m.streams {
+		asg[strconv.Itoa(id)] = s.EncodePreset
+	}
+	data, err := json.MarshalIndent(asg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(m.assignmentsPath, data, 0o644)
+}
+
+func (m *Manager) ListPresets() []NamedPreset {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]NamedPreset, 0, len(m.presets))
+	for _, p := range m.presets {
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Profile.VideoBitrate == out[j].Profile.VideoBitrate {
+			return out[i].ID < out[j].ID
+		}
+		return bitrateSortKey(out[i].Profile.VideoBitrate) < bitrateSortKey(out[j].Profile.VideoBitrate)
+	})
+	return out
+}
+
+func bitrateSortKey(b string) float64 {
+	b = strings.TrimSpace(strings.ToUpper(b))
+	mult := 1.0
+	switch {
+	case strings.HasSuffix(b, "M"):
+		mult = 1000
+		b = strings.TrimSuffix(b, "M")
+	case strings.HasSuffix(b, "K"):
+		b = strings.TrimSuffix(b, "K")
+	}
+	v, _ := strconv.ParseFloat(b, 64)
+	return v * mult
+}
+
+func (m *Manager) profileFor(presetID string) EncodeProfile {
+	if p, ok := m.presets[presetID]; ok {
+		return p.Profile
+	}
+	if p, ok := m.presets[m.defaultPreset]; ok {
+		return p.Profile
+	}
+	return EncodeProfile{
+		VideoCodec:   "h264_nvenc",
+		VideoBitrate: "12M",
+		VideoMaxrate: "14M",
+		VideoBufsize: "20M",
+		VideoPreset:  "p4",
+		VideoGOP:     50,
+		AudioBitrate: "192k",
+	}
+}
+
+// SetEncodePreset changes the master encode preset for a channel.
+// If the channel is running, capture FFmpeg is restarted to apply settings.
+func (m *Manager) SetEncodePreset(id int, presetID string) error {
+	m.mu.RLock()
+	if m.presets[presetID].ID == "" {
+		m.mu.RUnlock()
+		return fmt.Errorf("unknown encode preset %q", presetID)
+	}
+	s, ok := m.streams[id]
+	m.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("channel %d not found", id)
+	}
+
+	s.mu.Lock()
+	prev := s.EncodePreset
+	wasRunning := s.Status == StatusRunning
+	s.EncodePreset = presetID
+	s.mu.Unlock()
+
+	m.mu.Lock()
+	err := m.saveAssignmentsLocked()
+	m.mu.Unlock()
+	if err != nil {
+		log.Printf("[encode] failed to persist assignments: %v", err)
+	}
+
+	if prev == presetID {
+		return nil
+	}
+	log.Printf("[channel %d] encode preset %s → %s", id, prev, presetID)
+	if !wasRunning {
+		return nil
+	}
+	return m.restart(id)
+}
+
+func (m *Manager) restart(id int) error {
+	if err := m.Stop(id); err != nil {
+		// Already stopped is fine for apply.
+		if !strings.Contains(err.Error(), "is not running") {
+			return err
+		}
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		st, ok := m.StatusByID(id)
+		if ok && st == StatusStopped {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return m.Start(id)
 }
 
 func (m *Manager) Start(id int) error {
@@ -274,9 +466,9 @@ func (m *Manager) runLoop(s *Stream) {
 	}
 }
 
-// runFFmpeg starts FFmpeg with three outputs:
+// runFFmpeg starts one FFmpeg per DeckLink channel with multiple outputs (fan-out):
 // 1) JPEG thumbnail for grid preview
-// 2) H264/AAC MPEG-TS UDP feed for recording
+// 2) Master H.264/AAC MPEG-TS UDP feed — recording remuxes this with -c copy
 // 3) HLS audio-only stream for browser monitoring
 // Audio levels are parsed from astats metadata on a shared stereo branch in filter_complex.
 func (m *Manager) runFFmpeg(s *Stream) error {
@@ -290,6 +482,11 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	audioPlaylist := filepath.Join(outDir, "audio.m3u8")
 	audioSegmentPattern := filepath.Join(outDir, "audio_%03d.ts")
 	inputArgs := sanitizeInputArgs(shellSplit(s.ffmpegInput))
+	s.mu.Lock()
+	presetID := s.EncodePreset
+	s.mu.Unlock()
+	enc := m.profileFor(presetID)
+	gop := strconv.Itoa(enc.VideoGOP)
 
 	// One decode for all audio consumers: recording, meters and browser monitor.
 	// astats on the shared stereo stream avoids inconsistent per-output audio decodes.
@@ -313,17 +510,21 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"-update", "1",
 		"-f", "image2",
 		thumbPath,
-		// Output #2: recording feed (single DeckLink reader)
+		// Output #2: master encode feed (single DeckLink reader; REC copies this)
 		"-map", "[vrecout]",
 		"-map", "[arec]",
-		"-c:v", "h264_nvenc",
-		"-b:v", "12M",
-		"-maxrate", "14M",
-		"-bufsize", "20M",
-		"-preset", "p4",
-		"-g", "50",
+		"-c:v", enc.VideoCodec,
+		"-b:v", enc.VideoBitrate,
+		"-maxrate", enc.VideoMaxrate,
+		"-bufsize", enc.VideoBufsize,
+		"-preset", enc.VideoPreset,
+		"-g", gop,
+		"-keyint_min", gop,
+		"-forced-idr", "1",
+		"-bf", "0",
+		"-repeat_headers", "1",
 		"-c:a", "aac",
-		"-b:a", "192k",
+		"-b:a", enc.AudioBitrate,
 		"-ar", "48000",
 		"-ac", "2",
 		"-f", "mpegts",
@@ -332,7 +533,7 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		// Output #3: HLS audio-only for browser monitoring
 		"-map", "[ahls]",
 		"-c:a", "aac",
-		"-b:a", "192k",
+		"-b:a", enc.AudioBitrate,
 		"-ar", "48000",
 		"-ac", "2",
 		"-f", "hls",

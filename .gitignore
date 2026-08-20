@@ -1,6 +1,8 @@
 # Go
 backend/roc-recording
 backend/hls/
+backend/encode-assignments.json
+backend/recordings/
 
 # Node
 frontend/node_modules/

@@ -6,6 +6,8 @@ import {
   startStream,
   fetchRecordings,
   fetchAudioLevels,
+  fetchEncodePresets,
+  setEncodePreset,
   startRecording,
   stopRecording,
   startAllRecordings,
@@ -14,6 +16,7 @@ import {
   type Stream,
   type AudioLevels,
   type RecordingInfo,
+  type EncodePreset,
 } from "@/lib/api";
 import Thumbnail from "@/components/Thumbnail";
 import AudioMonitor from "@/components/AudioMonitor";
@@ -35,11 +38,13 @@ function formatBitrate(kbps?: number): string {
 
 export default function StreamGrid() {
   const [streams, setStreams] = useState<Stream[]>([]);
+  const [presets, setPresets] = useState<EncodePreset[]>([]);
   const [recordings, setRecordings] = useState<Record<number, RecordingInfo>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Record<number, boolean>>({});
   const [recBusy, setRecBusy] = useState<Record<number, boolean>>({});
+  const [presetBusy, setPresetBusy] = useState<Record<number, boolean>>({});
   const [globalRecBusy, setGlobalRecBusy] = useState(false);
   const [audio, setAudio] = useState<Record<number, AudioLevels>>({});
   const [listening, setListening] = useState<Record<number, boolean>>({});
@@ -71,6 +76,9 @@ export default function StreamGrid() {
   }, []);
 
   useEffect(() => {
+    fetchEncodePresets()
+      .then(setPresets)
+      .catch((e) => setError(String(e)));
     load();
     const interval = setInterval(load, 1000);
     return () => clearInterval(interval);
@@ -131,6 +139,18 @@ export default function StreamGrid() {
     }
   };
 
+  const changePreset = async (id: number, preset: string) => {
+    setPresetBusy((b) => ({ ...b, [id]: true }));
+    try {
+      await setEncodePreset(id, preset);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setPresetBusy((b) => ({ ...b, [id]: false }));
+    }
+  };
+
   const commitName = async (id: number) => {
     const draft = (nameDraft[id] ?? "").trim();
     if (!draft) return;
@@ -170,7 +190,14 @@ export default function StreamGrid() {
   }
 
   if (error) {
-    return <div className="error-message">{error}</div>;
+    return (
+      <div className="error-message">
+        {error}
+        <button type="button" className="error-dismiss" onClick={() => setError(null)}>
+          Dismiss
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -191,6 +218,7 @@ export default function StreamGrid() {
           const isRecording = rec?.status === "recording";
           const isEncoding = isRecording && !!rec?.encoding;
           const isListening = !!listening[s.id];
+          const activePreset = presets.find((p) => p.id === s.encode_preset);
           return (
             <div key={s.id} className={`card-panel ${s.status}`}>
               <AudioMonitor id={s.id} active={s.status === "running"} listening={isListening} />
@@ -265,6 +293,37 @@ export default function StreamGrid() {
                     Files
                   </button>
                 </div>
+              </div>
+
+              <div className="rec-name-row">
+                <label className="rec-name-label" htmlFor={`encode-preset-${s.id}`}>
+                  Encode
+                </label>
+                <select
+                  id={`encode-preset-${s.id}`}
+                  className="encode-preset-select"
+                  value={s.encode_preset || ""}
+                  disabled={isRecording || !!presetBusy[s.id] || presets.length === 0}
+                  onChange={(e) => changePreset(s.id, e.target.value)}
+                  title={
+                    activePreset
+                      ? `${activePreset.label} · ${activePreset.video_bitrate} video / ${activePreset.audio_bitrate} audio`
+                      : "Master encode preset (restarts capture to apply)"
+                  }
+                >
+                  {presets.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+                <span className="encode-preset-hint">
+                  {presetBusy[s.id]
+                    ? "Applying…"
+                    : activePreset
+                      ? `${activePreset.video_bitrate} · ${activePreset.audio_bitrate}`
+                      : s.encode_preset}
+                </span>
               </div>
 
               <div className="rec-name-row">

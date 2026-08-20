@@ -4,30 +4,70 @@ allowed_origins: "*"
 hls_dir: "./hls"
 recordings_dir: "./recordings"
 ffmpeg_bin: "/usr/local/bin/ffmpeg"
-video_codec: "h264_nvenc"
+
+# Named master-encode presets (always-on UDP feed; recording remuxes with -c copy).
+# Pick per channel via encode_preset, or change in the UI (persisted to encode-assignments.json).
+default_encode_preset: hq
+
+encode_presets:
+  proxy:
+    label: "Proxy 4 Mbit"
+    video_codec: "h264_nvenc"
+    video_bitrate: "4M"
+    video_maxrate: "5M"
+    video_bufsize: "8M"
+    video_preset: "p4"
+    video_gop: 50
+    audio_bitrate: "128k"
+  hq:
+    label: "HQ 12 Mbit"
+    video_codec: "h264_nvenc"
+    video_bitrate: "12M"
+    video_maxrate: "14M"
+    video_bufsize: "20M"
+    video_preset: "p4"
+    video_gop: 50
+    audio_bitrate: "192k"
+  mezz:
+    label: "Mezz 20 Mbit"
+    video_codec: "h264_nvenc"
+    video_bitrate: "20M"
+    video_maxrate: "24M"
+    video_bufsize: "40M"
+    video_preset: "p4"
+    video_gop: 50
+    audio_bitrate: "256k"
 
 channels:
   - id: 1
     name: "Channel 1"
+    encode_preset: hq
     ffmpeg_input: "-f decklink -signal_loss_action repeat -i 'DeckLink IP 100G (1)'"
   - id: 2
     name: "Channel 2"
+    encode_preset: hq
     ffmpeg_input: "-f decklink -signal_loss_action repeat -i 'DeckLink IP 100G (2)'"
   - id: 3
     name: "Channel 3"
+    encode_preset: hq
     ffmpeg_input: "-f decklink -signal_loss_action repeat -i 'DeckLink IP 100G (3)'"
   - id: 4
     name: "Channel 4"
+    encode_preset: hq
     ffmpeg_input: "-f decklink -signal_loss_action repeat -i 'DeckLink IP 100G (4)'"
   - id: 5
     name: "Channel 5"
+    encode_preset: hq
     ffmpeg_input: "-f decklink -signal_loss_action repeat -i 'DeckLink IP 100G (5)'"
   - id: 6
     name: "Channel 6"
+    encode_preset: hq
     ffmpeg_input: "-f decklink -signal_loss_action repeat -i 'DeckLink IP 100G (6)'"
   - id: 7
     name: "Channel 7"
+    encode_preset: hq
     ffmpeg_input: "-f decklink -signal_loss_action repeat -i 'DeckLink IP 100G (7)'"
   - id: 8
     name: "Channel 8"
+    encode_preset: hq
     ffmpeg_input: "-f decklink -signal_loss_action repeat -i 'DeckLink IP 100G (8)'"

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -29,10 +30,30 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	mgr := capture.NewManager(cfg.HLSDir, cfg.FFmpegBin)
-	for _, ch := range cfg.Channels {
-		mgr.Register(ch.ID, ch.Name, ch.FFmpegInput)
+	presets := make(map[string]capture.NamedPreset, len(cfg.EncodePresets))
+	for id, p := range cfg.EncodePresets {
+		presets[id] = capture.NamedPreset{
+			ID:    id,
+			Label: p.Label,
+			Profile: capture.EncodeProfile{
+				VideoCodec:   p.VideoCodec,
+				VideoBitrate: p.VideoBitrate,
+				VideoMaxrate: p.VideoMaxrate,
+				VideoBufsize: p.VideoBufsize,
+				VideoPreset:  p.VideoPreset,
+				VideoGOP:     p.VideoGOP,
+				AudioBitrate: p.AudioBitrate,
+			},
+		}
 	}
+
+	assignmentsPath := filepath.Join(filepath.Dir(cfgPath), "encode-assignments.json")
+	mgr := capture.NewManager(cfg.HLSDir, cfg.FFmpegBin, presets, cfg.DefaultEncodePreset, assignmentsPath)
+	for _, ch := range cfg.Channels {
+		mgr.Register(ch.ID, ch.Name, ch.FFmpegInput, ch.EncodePreset)
+	}
+	mgr.LoadAssignments()
+
 	for _, ch := range cfg.Channels {
 		if err := mgr.Start(ch.ID); err != nil {
 			log.Printf("Failed to auto-start channel %d: %v", ch.ID, err)
@@ -60,7 +81,8 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("roc-recording backend starting on :%s", cfg.Port)
+		log.Printf("roc-recording backend starting on :%s (%d encode presets, default=%s)",
+			cfg.Port, len(presets), cfg.DefaultEncodePreset)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server error: %v", err)
 		}
@@ -71,7 +93,6 @@ func main() {
 	<-quit
 
 	log.Println("Shutting down...")
-	// Stop recordings first, then capture FFmpeg processes, then HTTP.
 	_ = recMgr.StopAll()
 	mgr.StopAll()
 	time.Sleep(1500 * time.Millisecond)

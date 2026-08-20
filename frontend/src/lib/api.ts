@@ -11,7 +11,20 @@ export interface Stream {
   status: "running" | "stopped" | "error";
   error?: string;
   format?: string;
+  encode_preset: string;
   hls_url: string;
+}
+
+export interface EncodePreset {
+  id: string;
+  label: string;
+  video_codec: string;
+  video_bitrate: string;
+  video_maxrate: string;
+  video_bufsize: string;
+  video_preset: string;
+  video_gop: number;
+  audio_bitrate: string;
 }
 
 async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
@@ -29,6 +42,24 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
 export async function fetchStreams(): Promise<Stream[]> {
   const res = await apiFetch("/api/streams");
   if (!res.ok) throw new Error(`fetchStreams: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchEncodePresets(): Promise<EncodePreset[]> {
+  const res = await apiFetch("/api/encode/presets");
+  if (!res.ok) throw new Error(`fetchEncodePresets: ${res.status}`);
+  return res.json();
+}
+
+export async function setEncodePreset(id: number, preset: string): Promise<Stream> {
+  const res = await apiFetch(`/api/streams/${id}/encode-preset`, {
+    method: "PUT",
+    body: JSON.stringify({ preset }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `setEncodePreset: ${res.status}`);
+  }
   return res.json();
 }
 

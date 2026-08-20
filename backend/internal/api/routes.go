@@ -20,12 +20,25 @@ import (
 )
 
 type streamResponse struct {
-	ID     int    `json:"id"`
-	Name   string `json:"name"`
-	Status string `json:"status"`
-	Error  string `json:"error,omitempty"`
-	Format string `json:"format,omitempty"`
-	HLSURL string `json:"hls_url"`
+	ID           int    `json:"id"`
+	Name         string `json:"name"`
+	Status       string `json:"status"`
+	Error        string `json:"error,omitempty"`
+	Format       string `json:"format,omitempty"`
+	EncodePreset string `json:"encode_preset"`
+	HLSURL       string `json:"hls_url"`
+}
+
+type encodePresetResponse struct {
+	ID           string `json:"id"`
+	Label        string `json:"label"`
+	VideoCodec   string `json:"video_codec"`
+	VideoBitrate string `json:"video_bitrate"`
+	VideoMaxrate string `json:"video_maxrate"`
+	VideoBufsize string `json:"video_bufsize"`
+	VideoPreset  string `json:"video_preset"`
+	VideoGOP     int    `json:"video_gop"`
+	AudioBitrate string `json:"audio_bitrate"`
 }
 
 type recordingFileResponse struct {
@@ -117,6 +130,54 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlsh
 				return
 			}
 			jsonOK(w, map[string]string{"status": "stopped"})
+		})
+
+		r.Get("/api/encode/presets", func(w http.ResponseWriter, r *http.Request) {
+			presets := mgr.ListPresets()
+			resp := make([]encodePresetResponse, 0, len(presets))
+			for _, p := range presets {
+				resp = append(resp, encodePresetResponse{
+					ID:           p.ID,
+					Label:        p.Label,
+					VideoCodec:   p.Profile.VideoCodec,
+					VideoBitrate: p.Profile.VideoBitrate,
+					VideoMaxrate: p.Profile.VideoMaxrate,
+					VideoBufsize: p.Profile.VideoBufsize,
+					VideoPreset:  p.Profile.VideoPreset,
+					VideoGOP:     p.Profile.VideoGOP,
+					AudioBitrate: p.Profile.AudioBitrate,
+				})
+			}
+			jsonOK(w, resp)
+		})
+
+		r.Put("/api/streams/{id}/encode-preset", func(w http.ResponseWriter, r *http.Request) {
+			id, err := strconv.Atoi(chi.URLParam(r, "id"))
+			if err != nil {
+				jsonError(w, "invalid channel id", http.StatusBadRequest)
+				return
+			}
+			var body struct {
+				Preset string `json:"preset"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Preset == "" {
+				jsonError(w, "invalid json body (need preset)", http.StatusBadRequest)
+				return
+			}
+			if recMgr.IsRecording(id) {
+				jsonError(w, "stop recording before changing encode preset", http.StatusConflict)
+				return
+			}
+			if err := mgr.SetEncodePreset(id, body.Preset); err != nil {
+				jsonError(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			s, ok := mgr.StreamByID(id)
+			if !ok {
+				jsonError(w, "channel not found", http.StatusNotFound)
+				return
+			}
+			jsonOK(w, toResponse(s, hlsBaseURL))
 		})
 
 		// Recording endpoints
@@ -358,7 +419,7 @@ func shouldSkipRequestLog(r *http.Request) bool {
 		strings.HasPrefix(path, "/audio/"),
 		strings.HasPrefix(path, "/hls/"):
 		return true
-	case path == "/api/streams", path == "/api/recordings", path == "/api/system":
+	case path == "/api/streams", path == "/api/recordings", path == "/api/system", path == "/api/encode/presets":
 		return true
 	case strings.HasPrefix(path, "/api/recordings/files/"):
 		return true
@@ -396,12 +457,13 @@ func apiKeyMiddleware(key string) func(http.Handler) http.Handler {
 
 func toResponse(s *capture.Stream, hlsBaseURL string) streamResponse {
 	return streamResponse{
-		ID:     s.ID,
-		Name:   s.Name,
-		Status: string(s.Status),
-		Error:  s.Error,
-		Format: s.Format,
-		HLSURL: hlsBaseURL + "/hls/" + strconv.Itoa(s.ID) + "/index.m3u8",
+		ID:           s.ID,
+		Name:         s.Name,
+		Status:       string(s.Status),
+		Error:        s.Error,
+		Format:       s.Format,
+		EncodePreset: s.EncodePreset,
+		HLSURL:       hlsBaseURL + "/hls/" + strconv.Itoa(s.ID) + "/index.m3u8",
 	}
 }
 

@@ -132,6 +132,46 @@ body {
   color: var(--text-muted);
 }
 
+.encode-preset-select {
+  min-width: 120px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-size: 0.72rem;
+  padding: 3px 6px;
+}
+
+.encode-preset-select:focus {
+  outline: none;
+  border-color: rgba(91, 159, 212, 0.5);
+}
+
+.encode-preset-select:disabled {
+  opacity: 0.55;
+}
+
+.encode-preset-hint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.58rem;
+  color: var(--text-muted);
+}
+
+.error-dismiss {
+  margin-left: 12px;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
 .rec-badge {
   position: absolute;
   top: 6px;

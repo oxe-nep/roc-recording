@@ -7,6 +7,16 @@ Live preview and recording UI for Blackmagic DeckLink IP (ST 2110).
 - **Backend** – Go + FFmpeg, runs on the capture host (DeckLink access)
 - **Frontend** – Next.js in k3s; nginx proxies API/media to the capture host
 
+Per running channel, one FFmpeg holds the DeckLink lock and fans out:
+
+1. JPEG thumbnail (preview grid)
+2. **Master encode** → local MPEG-TS UDP (named preset from `encode_presets:`)
+3. HLS audio-only (browser listen) + peak meters
+
+Recording starts a second FFmpeg that **remuxes** the UDP feed (`-c copy`) into fragmented MP4 — no second NVENC pass.
+
+Encode presets are defined in `config.yaml`. Per-channel selection is available in the UI and persisted to `encode-assignments.json` next to the config. Changing preset restarts that channel’s capture (blocked while recording).
+
 ## Quick start
 
 ### Backend (capture host, Linux) — recommended: systemd
@@ -79,6 +89,8 @@ All `/api/` endpoints require the header `X-API-Key: <key>`.
 | GET | `/api/streams` | List channels |
 | POST | `/api/streams/{id}/start` | Start preview |
 | POST | `/api/streams/{id}/stop` | Stop preview |
+| GET | `/api/encode/presets` | List encode presets |
+| PUT | `/api/streams/{id}/encode-preset` | Set channel preset (`{"preset":"hq"}`) |
 | GET | `/thumb/{id}` | JPEG thumbnail |
 | GET | `/audio/{id}` | Audio levels |
 | GET | `/hls/{id}/audio.m3u8` | Audio monitor HLS |

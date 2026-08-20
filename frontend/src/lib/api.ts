@@ -12,7 +12,6 @@ export interface Stream {
   error?: string;
   format?: string;
   encode_preset: string;
-  encode_bitrate_kbps?: number;
   hls_url: string;
 }
 

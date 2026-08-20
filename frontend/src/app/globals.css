@@ -372,12 +372,12 @@ body {
 .audio-meter {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   margin-left: auto;
   margin-right: 8px;
-  min-width: 72px;
+  min-width: 90px;
   flex: 1;
-  max-width: 110px;
+  max-width: 140px;
 }
 
 .audio-row {
@@ -386,22 +386,36 @@ body {
   gap: 4px;
 }
 
-.audio-bar {
+.audio-segments {
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
   flex: 1;
-  height: 6px;
-  position: relative;
-  background: linear-gradient(90deg, #5cb85c 0%, #f0ad4e 55%, #ff6a6a 100%);
-  border-radius: 3px;
-  overflow: hidden;
+  height: 8px;
+  min-width: 0;
 }
 
-.audio-mask {
-  position: absolute;
-  top: 0;
-  right: 0;
-  height: 100%;
-  background: rgba(28, 28, 28, 0.72);
-  transition: width 120ms linear;
+.audio-seg {
+  flex: 1;
+  min-width: 2px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.07);
+  transition: background 80ms linear, box-shadow 80ms linear;
+}
+
+.audio-seg.green.on {
+  background: #3fa34a;
+  box-shadow: 0 0 4px rgba(63, 163, 74, 0.45);
+}
+
+.audio-seg.yellow.on {
+  background: #d4a017;
+  box-shadow: 0 0 4px rgba(212, 160, 23, 0.4);
+}
+
+.audio-seg.red.on {
+  background: #e74c3c;
+  box-shadow: 0 0 4px rgba(231, 76, 60, 0.45);
 }
 
 .audio-label {

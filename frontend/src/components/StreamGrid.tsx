@@ -36,6 +36,54 @@ function formatBitrate(kbps?: number): string {
   return `${kbps.toFixed(0)} kbit/s`;
 }
 
+const METER_SEGMENTS = 24;
+const METER_MIN_DB = -50;
+const METER_MAX_DB = 0;
+
+function hasAudioLevel(db?: number): boolean {
+  return db !== undefined && !Number.isNaN(db) && db > -89;
+}
+
+function segmentZone(index: number): "green" | "yellow" | "red" {
+  // dBFS at the top edge of this segment
+  const db =
+    METER_MIN_DB + ((index + 1) / METER_SEGMENTS) * (METER_MAX_DB - METER_MIN_DB);
+  if (db <= -18) return "green";
+  if (db <= -9) return "yellow";
+  return "red";
+}
+
+function litSegmentCount(db?: number): number {
+  if (!hasAudioLevel(db)) return 0;
+  const clamped = Math.max(METER_MIN_DB, Math.min(METER_MAX_DB, db!));
+  const pct = (clamped - METER_MIN_DB) / (METER_MAX_DB - METER_MIN_DB);
+  return Math.round(pct * METER_SEGMENTS);
+}
+
+function SegmentedMeter({ db, label }: { db?: number; label: string }) {
+  const lit = litSegmentCount(db);
+  return (
+    <div className="audio-row">
+      <span className="audio-label">{label}</span>
+      <div
+        className="audio-segments"
+        aria-hidden
+        title="Green ≤ -18 dBFS · Yellow ≤ -9 · Red above -9"
+      >
+        {Array.from({ length: METER_SEGMENTS }, (_, i) => (
+          <span
+            key={i}
+            className={`audio-seg ${segmentZone(i)}${i < lit ? " on" : ""}`}
+          />
+        ))}
+      </div>
+      <span className="audio-db">
+        {hasAudioLevel(db) ? `${db!.toFixed(1)} dBFS` : "--.- dBFS"}
+      </span>
+    </div>
+  );
+}
+
 export default function StreamGrid() {
   const [streams, setStreams] = useState<Stream[]>([]);
   const [presets, setPresets] = useState<EncodePreset[]>([]);
@@ -103,20 +151,6 @@ export default function StreamGrid() {
     pollAudio();
     return () => clearInterval(interval);
   }, [streams]);
-
-  const hasLevel = (db?: number): boolean =>
-    db !== undefined && !Number.isNaN(db) && db > -89;
-
-  const levelPct = (db?: number): number => {
-    if (!hasLevel(db)) return 0;
-    const clamped = Math.max(-50, Math.min(0, db!));
-    return ((clamped + 50) / 50) * 100;
-  };
-
-  const formatDb = (db?: number): string => {
-    if (!hasLevel(db)) return "--.- dBFS";
-    return `${db!.toFixed(1)} dBFS`;
-  };
 
   const startPreview = async (s: Stream) => {
     setBusy((b) => ({ ...b, [s.id]: true }));
@@ -242,21 +276,9 @@ export default function StreamGrid() {
                     <span className="signal-format">{s.format}</span>
                   )}
                 </div>
-                <div className="audio-meter" title="Sample peak level (dBFS). Alignment tone at -18 dBFS peak should read ≈ -18.">
-                  <div className="audio-row">
-                    <span className="audio-label">L</span>
-                    <div className="audio-bar">
-                      <div className="audio-mask" style={{ width: `${100 - levelPct(audio[s.id]?.l)}%` }} />
-                    </div>
-                    <span className="audio-db">{formatDb(audio[s.id]?.l)}</span>
-                  </div>
-                  <div className="audio-row">
-                    <span className="audio-label">R</span>
-                    <div className="audio-bar">
-                      <div className="audio-mask" style={{ width: `${100 - levelPct(audio[s.id]?.r)}%` }} />
-                    </div>
-                    <span className="audio-db">{formatDb(audio[s.id]?.r)}</span>
-                  </div>
+                <div className="audio-meter" title="Sample peak (dBFS). Green ≤ -18 · Yellow ≤ -9 · Red above -9. Alignment tone ≈ -18.">
+                  <SegmentedMeter label="L" db={audio[s.id]?.l} />
+                  <SegmentedMeter label="R" db={audio[s.id]?.r} />
                 </div>
                 <div className="card-actions">
                   {s.status !== "running" && (
@@ -317,16 +339,12 @@ export default function StreamGrid() {
                     </option>
                   ))}
                 </select>
-                <span className="encode-preset-hint" title="Live master-encode bitrate from capture FFmpeg">
+                <span className="encode-preset-hint">
                   {presetBusy[s.id]
                     ? "Applying…"
-                    : s.status === "running"
-                      ? s.encode_bitrate_kbps && s.encode_bitrate_kbps > 0
-                        ? `Live ${formatBitrate(s.encode_bitrate_kbps)}${activePreset ? ` / ${activePreset.video_bitrate}` : ""}`
-                        : `Live …${activePreset ? ` / ${activePreset.video_bitrate}` : ""}`
-                      : activePreset
-                        ? `${activePreset.video_bitrate} · ${activePreset.audio_bitrate}`
-                        : s.encode_preset}
+                    : activePreset
+                      ? `${activePreset.video_bitrate} · ${activePreset.audio_bitrate}`
+                      : s.encode_preset}
                 </span>
               </div>
 

@@ -28,8 +28,9 @@ const (
 // FFmpeg progress lines look like:
 // frame= 100 fps=50 ... time=00:00:02.00 bitrate=5120.5kbits/s speed=1.0x
 var (
-	reFFTime    = regexp.MustCompile(`time=(\d+):(\d+):(\d+(?:\.\d+)?)`)
-	reFFBitrate = regexp.MustCompile(`bitrate=\s*([0-9.]+)kbits/s`)
+	reFFTime    = regexp.MustCompile(`(?:time|out_time)=(\d+):(\d+):(\d+(?:\.\d+)?)`)
+	reFFBitrate = regexp.MustCompile(`bitrate=\s*([0-9.]+)\s*([kKmM])?bits/s`)
+	reFFOutMS   = regexp.MustCompile(`out_time_ms=(\d+)`)
 )
 
 type recState struct {
@@ -176,9 +177,16 @@ func (m *Manager) Start(id int) (ChannelInfo, error) {
 		"-ar", "48000",
 		"-ac", "2",
 		"-movflags", "frag_keyframe+empty_moov+default_base_moof",
+		// Machine-readable progress on stdout (newline-delimited key=value).
+		"-progress", "pipe:1",
+		"-nostats",
 		mp4Path,
 	}
 	cmd := exec.Command(m.ffmpegBin, args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return ChannelInfo{}, fmt.Errorf("stdout pipe: %w", err)
+	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return ChannelInfo{}, fmt.Errorf("stderr pipe: %w", err)
@@ -194,7 +202,8 @@ func (m *Manager) Start(id int) (ChannelInfo, error) {
 	st.elapsedSec = 0
 	st.bitrateKbps = 0
 
-	go m.watchProgress(id, st, stderr)
+	go m.watchProgress(id, st, stdout)
+	go m.watchStderr(id, stderr)
 	go func(chID int, state *recState, c *exec.Cmd) {
 		err := c.Wait()
 		state.mu.Lock()
@@ -214,16 +223,22 @@ func (m *Manager) Start(id int) (ChannelInfo, error) {
 	return m.buildInfo(id, st), nil
 }
 
-func (m *Manager) watchProgress(id int, st *recState, stderr io.Reader) {
-	scanner := bufio.NewScanner(stderr)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+func (m *Manager) watchStderr(id int, stderr io.Reader) {
+	scanner := newProgressScanner(stderr)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.Contains(line, "Error") || strings.Contains(line, "error:") {
+			log.Printf("[recording %d] %s", id, line)
+		}
+	}
+}
+
+func (m *Manager) watchProgress(id int, st *recState, r io.Reader) {
+	scanner := newProgressScanner(r)
 	for scanner.Scan() {
 		line := scanner.Text()
 		elapsed, bitrate, ok := parseProgress(line)
 		if !ok {
-			if strings.Contains(line, "Error") || strings.Contains(line, "error:") {
-				log.Printf("[recording %d] %s", id, line)
-			}
 			continue
 		}
 		st.mu.Lock()
@@ -239,21 +254,69 @@ func (m *Manager) watchProgress(id int, st *recState, stderr io.Reader) {
 	}
 }
 
+// newProgressScanner splits on both \n and \r because FFmpeg status lines often use CR.
+func newProgressScanner(r io.Reader) *bufio.Scanner {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner.Split(func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+		if atEOF && len(data) == 0 {
+			return 0, nil, nil
+		}
+		if i := bytesIndexAny(data, "\r\n"); i >= 0 {
+			adv := i + 1
+			if data[i] == '\r' && i+1 < len(data) && data[i+1] == '\n' {
+				adv = i + 2
+			}
+			return adv, data[0:i], nil
+		}
+		if atEOF {
+			return len(data), data, nil
+		}
+		return 0, nil, nil
+	})
+	return scanner
+}
+
+func bytesIndexAny(data []byte, chars string) int {
+	for i, b := range data {
+		for j := 0; j < len(chars); j++ {
+			if b == chars[j] {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
 func parseProgress(line string) (elapsedSec, bitrateKbps float64, ok bool) {
-	tm := reFFTime.FindStringSubmatch(line)
-	br := reFFBitrate.FindStringSubmatch(line)
-	if tm == nil && br == nil {
+	line = strings.TrimSpace(line)
+	if line == "" {
 		return 0, 0, false
 	}
-	if tm != nil {
+
+	if mm := reFFOutMS.FindStringSubmatch(line); mm != nil {
+		ms, _ := strconv.ParseFloat(mm[1], 64)
+		elapsedSec = ms / 1000
+		ok = true
+	}
+	if tm := reFFTime.FindStringSubmatch(line); tm != nil {
 		h, _ := strconv.ParseFloat(tm[1], 64)
 		m, _ := strconv.ParseFloat(tm[2], 64)
 		s, _ := strconv.ParseFloat(tm[3], 64)
 		elapsedSec = h*3600 + m*60 + s
 		ok = true
 	}
-	if br != nil {
-		bitrateKbps, _ = strconv.ParseFloat(br[1], 64)
+	if br := reFFBitrate.FindStringSubmatch(line); br != nil {
+		val, _ := strconv.ParseFloat(br[1], 64)
+		unit := strings.ToLower(br[2])
+		switch unit {
+		case "m":
+			bitrateKbps = val * 1000
+		case "k", "":
+			bitrateKbps = val
+		default:
+			bitrateKbps = val
+		}
 		ok = true
 	}
 	return elapsedSec, bitrateKbps, ok

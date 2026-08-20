@@ -214,7 +214,7 @@ export default function StreamGrid() {
                     <span className="signal-format">{s.format}</span>
                   )}
                 </div>
-                <div className="audio-meter" title="Audio level (dBFS): 0 = max, -inf = silence">
+                <div className="audio-meter" title="Sample peak level (dBFS). Alignment tone at -18 dBFS peak should read ≈ -18.">
                   <div className="audio-row">
                     <span className="audio-label">L</span>
                     <div className="audio-bar">

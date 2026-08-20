@@ -27,9 +27,11 @@ const (
 // "Found Decklink mode 1920 x 1080 with rate 25.00(i)" or "50.00"
 var reSignalFormat = regexp.MustCompile(`Found Decklink mode (\d+) x (\d+) with rate ([\d.]+)(\(i\))?`)
 
-// reAstats matches ametadata print lines like:
+// reAstatsPeak matches per-channel sample peak only, e.g.:
 // "lavfi.astats.1.Peak_level=-18.32" (channel 1 = left, channel 2 = right)
-var reAstats = regexp.MustCompile(`lavfi\.astats\.(\d+)\.(?:Peak_level|RMS_level)=?\s*([-\d.]+|-?inf)`)
+// Do NOT also match RMS_level — ametadata can emit both and last-write would
+// make meters read ~3 dB low on sine tones (and worse on program).
+var reAstatsPeak = regexp.MustCompile(`lavfi\.astats\.(\d+)\.Peak_level=([-\d.]+|-?inf)`)
 
 const audioSilence = -90.0 // treat -inf as this value
 
@@ -39,8 +41,8 @@ type Stream struct {
 	Status      Status
 	Error       string
 	Format      string  // e.g. "1080i50" or "1080p50", empty when unknown
-	AudioL      float64 // dBFS RMS left channel
-	AudioR      float64 // dBFS RMS right channel
+	AudioL      float64 // dBFS sample-peak left
+	AudioR      float64 // dBFS sample-peak right
 	ffmpegInput string
 	feedURL     string
 	cmd         *exec.Cmd
@@ -295,7 +297,8 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"[vthumb]scale=640:360,format=yuv420p[vthumbout];" +
 		"[vrec]format=yuv420p[vrecout];" +
 		"[0:a]pan=stereo|c0=c0|c1=c1,asplit=3[arec][ameter][ahls];" +
-		"[ameter]astats=metadata=1:reset=0.25,ametadata=print,anullsink"
+		"[ameter]astats=metadata=1:reset=0.25:measure_perchannel=Peak_level:measure_overall=none," +
+		"ametadata=print:key=lavfi.astats.1.Peak_level:key=lavfi.astats.2.Peak_level,anullsink"
 
 	args := []string{"-y"}
 	args = append(args, inputArgs...)
@@ -379,8 +382,8 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 				s.mu.Unlock()
 				log.Printf("[channel %d] detected format: %s", s.ID, format)
 			}
-			// Parse per-channel peak audio levels from astats metadata.
-			if mm := reAstats.FindStringSubmatch(line); mm != nil {
+			// Parse per-channel sample-peak levels (dBFS) from astats metadata.
+			if mm := reAstatsPeak.FindStringSubmatch(line); mm != nil {
 				ch, _ := strconv.Atoi(mm[1])
 				val := audioSilence
 				raw := strings.TrimSpace(mm[2])

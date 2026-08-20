@@ -16,6 +16,7 @@ import (
 	"github.com/roc-recording/backend/internal/capture"
 	hlshandler "github.com/roc-recording/backend/internal/hls"
 	"github.com/roc-recording/backend/internal/recording"
+	"github.com/roc-recording/backend/internal/sysmetrics"
 )
 
 type streamResponse struct {
@@ -34,7 +35,7 @@ type recordingFileResponse struct {
 	URL     string    `json:"url"`
 }
 
-func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlshandler.Handler, recordingsDir, apiKey, allowedOrigins, hlsBaseURL string) http.Handler {
+func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlshandler.Handler, recordingsDir, apiKey, allowedOrigins, hlsBaseURL string, metrics *sysmetrics.Collector) http.Handler {
 	r := chi.NewRouter()
 	r.Use(quietRequestLogger())
 	r.Use(middleware.Recoverer)
@@ -119,10 +120,35 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlsh
 		})
 
 		// Recording endpoints
+		r.Get("/api/system", func(w http.ResponseWriter, r *http.Request) {
+			jsonOK(w, metrics.Snapshot())
+		})
+
 		r.Get("/api/recordings", func(w http.ResponseWriter, r *http.Request) {
 			infos := recMgr.ListAll()
 			sort.Slice(infos, func(i, j int) bool { return infos[i].ID < infos[j].ID })
 			jsonOK(w, infos)
+		})
+
+		r.Put("/api/recordings/{id}/name", func(w http.ResponseWriter, r *http.Request) {
+			id, err := strconv.Atoi(chi.URLParam(r, "id"))
+			if err != nil {
+				jsonError(w, "invalid channel id", http.StatusBadRequest)
+				return
+			}
+			var body struct {
+				Name string `json:"name"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				jsonError(w, "invalid json body", http.StatusBadRequest)
+				return
+			}
+			info, err := recMgr.SetName(id, body.Name)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			jsonOK(w, info)
 		})
 
 		r.Post("/api/recordings/{id}/start", func(w http.ResponseWriter, r *http.Request) {
@@ -332,7 +358,7 @@ func shouldSkipRequestLog(r *http.Request) bool {
 		strings.HasPrefix(path, "/audio/"),
 		strings.HasPrefix(path, "/hls/"):
 		return true
-	case path == "/api/streams", path == "/api/recordings":
+	case path == "/api/streams", path == "/api/recordings", path == "/api/system":
 		return true
 	case strings.HasPrefix(path, "/api/recordings/files/"):
 		return true
@@ -345,7 +371,7 @@ func corsMiddleware(allowedOrigins string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)

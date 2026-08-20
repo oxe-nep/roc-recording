@@ -45,8 +45,22 @@ export async function stopStream(id: number): Promise<void> {
 export interface RecordingInfo {
   id: number;
   status: "idle" | "recording";
+  name: string;
   started_at?: string;
   file_path?: string;
+  elapsed_sec?: number;
+  bitrate_kbps?: number;
+}
+
+export interface SystemMetrics {
+  cpu_percent: number;
+  mem_used_bytes: number;
+  mem_total_bytes: number;
+  mem_percent: number;
+  gpu_available: boolean;
+  gpu_percent?: number;
+  gpu_mem_used_mb?: number;
+  gpu_mem_total_mb?: number;
 }
 
 export interface RecordingFile {
@@ -59,6 +73,21 @@ export interface RecordingFile {
 export interface AudioLevels {
   l: number;
   r: number;
+}
+
+export async function fetchSystemMetrics(): Promise<SystemMetrics> {
+  const res = await apiFetch("/api/system");
+  if (!res.ok) throw new Error(`fetchSystemMetrics: ${res.status}`);
+  return res.json();
+}
+
+export async function setRecordingName(id: number, name: string): Promise<RecordingInfo> {
+  const res = await apiFetch(`/api/recordings/${id}/name`, {
+    method: "PUT",
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error(`setRecordingName: ${res.status}`);
+  return res.json();
 }
 
 export async function fetchRecordings(): Promise<RecordingInfo[]> {

@@ -48,6 +48,106 @@ body {
   border-bottom: 1px solid var(--border-subtle);
 }
 
+.sys-status {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.sys-status.muted,
+.sys-item.muted .sys-value {
+  color: var(--text-muted);
+}
+
+.sys-item {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.sys-label {
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.sys-value {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sys-sub {
+  margin-left: 4px;
+  font-size: 0.58rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
+.rec-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 8px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.rec-name-label {
+  flex-shrink: 0;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.rec-name-input {
+  width: 110px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-subtle);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-size: 0.72rem;
+  padding: 3px 6px;
+}
+
+.rec-name-input:focus {
+  outline: none;
+  border-color: rgba(91, 159, 212, 0.5);
+}
+
+.rec-name-input:disabled {
+  opacity: 0.55;
+}
+
+.rec-name-hint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.58rem;
+  color: var(--text-muted);
+}
+
+.rec-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  background: rgba(200, 30, 30, 0.85);
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  animation: rec-pulse 1.4s ease-in-out infinite;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+}
+
 .compact-header h1 {
   font-size: 1.25rem;
   font-weight: 600;
@@ -317,21 +417,6 @@ body {
 @keyframes rec-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.55; }
-}
-
-.rec-badge {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  background: rgba(200, 30, 30, 0.85);
-  color: #fff;
-  font-size: 0.6rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  padding: 2px 5px;
-  border-radius: 3px;
-  animation: rec-pulse 1.4s ease-in-out infinite;
-  pointer-events: none;
 }
 
 .global-rec-bar {

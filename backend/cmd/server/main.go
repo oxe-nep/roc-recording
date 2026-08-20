@@ -15,6 +15,7 @@ import (
 	"github.com/roc-recording/backend/internal/config"
 	hlshandler "github.com/roc-recording/backend/internal/hls"
 	"github.com/roc-recording/backend/internal/recording"
+	"github.com/roc-recording/backend/internal/sysmetrics"
 )
 
 func main() {
@@ -50,7 +51,8 @@ func main() {
 	}
 
 	hlsH := hlshandler.NewHandler(cfg.HLSDir, cfg.AllowedOrigins)
-	router := api.NewRouter(mgr, recMgr, hlsH, cfg.RecordingsDir, cfg.APIKey, cfg.AllowedOrigins, hlsBase)
+	metrics := sysmetrics.NewCollector()
+	router := api.NewRouter(mgr, recMgr, hlsH, cfg.RecordingsDir, cfg.APIKey, cfg.AllowedOrigins, hlsBase, metrics)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,

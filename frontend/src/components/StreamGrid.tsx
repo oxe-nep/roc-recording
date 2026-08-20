@@ -10,12 +10,28 @@ import {
   stopRecording,
   startAllRecordings,
   stopAllRecordings,
+  setRecordingName,
   type Stream,
   type AudioLevels,
   type RecordingInfo,
 } from "@/lib/api";
 import Thumbnail from "@/components/Thumbnail";
 import AudioMonitor from "@/components/AudioMonitor";
+
+function formatElapsed(sec?: number): string {
+  if (sec === undefined || Number.isNaN(sec) || sec < 0) return "00:00:00";
+  const s = Math.floor(sec);
+  const hh = Math.floor(s / 3600);
+  const mm = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  return [hh, mm, ss].map((n) => String(n).padStart(2, "0")).join(":");
+}
+
+function formatBitrate(kbps?: number): string {
+  if (!kbps || kbps <= 0) return "--";
+  if (kbps >= 1000) return `${(kbps / 1000).toFixed(1)} Mbit/s`;
+  return `${kbps.toFixed(0)} kbit/s`;
+}
 
 export default function StreamGrid() {
   const [streams, setStreams] = useState<Stream[]>([]);
@@ -27,6 +43,7 @@ export default function StreamGrid() {
   const [globalRecBusy, setGlobalRecBusy] = useState(false);
   const [audio, setAudio] = useState<Record<number, AudioLevels>>({});
   const [listening, setListening] = useState<Record<number, boolean>>({});
+  const [nameDraft, setNameDraft] = useState<Record<number, string>>({});
 
   const load = useCallback(async () => {
     try {
@@ -38,6 +55,13 @@ export default function StreamGrid() {
       const recMap: Record<number, RecordingInfo> = {};
       for (const r of recData) recMap[r.id] = r;
       setRecordings(recMap);
+      setNameDraft((prev) => {
+        const next = { ...prev };
+        for (const r of recData) {
+          if (next[r.id] === undefined) next[r.id] = r.name || `ch${r.id}`;
+        }
+        return next;
+      });
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -48,7 +72,7 @@ export default function StreamGrid() {
 
   useEffect(() => {
     load();
-    const interval = setInterval(load, 3000);
+    const interval = setInterval(load, 1000);
     return () => clearInterval(interval);
   }, [load]);
 
@@ -77,7 +101,6 @@ export default function StreamGrid() {
 
   const levelPct = (db?: number): number => {
     if (!hasLevel(db)) return 0;
-    // Keep meter stable and readable in the normal dialog range
     const clamped = Math.max(-50, Math.min(0, db!));
     return ((clamped + 50) / 50) * 100;
   };
@@ -108,6 +131,18 @@ export default function StreamGrid() {
     }
   };
 
+  const commitName = async (id: number) => {
+    const draft = (nameDraft[id] ?? "").trim();
+    if (!draft) return;
+    try {
+      const info = await setRecordingName(id, draft);
+      setRecordings((prev) => ({ ...prev, [id]: { ...prev[id], ...info } }));
+      setNameDraft((prev) => ({ ...prev, [id]: info.name }));
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   const anyRecording = Object.values(recordings).some((r) => r.status === "recording");
 
   const handleGlobalRec = async () => {
@@ -129,7 +164,7 @@ export default function StreamGrid() {
   const toggleListen = (id: number) => {
     setListening((prev) => ({ ...prev, [id]: !prev[id] }));
   };
-  
+
   if (loading) {
     return <div className="loading"><span>Connecting to backend…</span></div>;
   }
@@ -160,7 +195,11 @@ export default function StreamGrid() {
               <AudioMonitor id={s.id} active={s.status === "running"} listening={isListening} />
               <div className="card-thumb">
                 <Thumbnail id={s.id} active={s.status === "running"} />
-                {isRecording && <div className="rec-badge">● REC</div>}
+                {isRecording && (
+                  <div className="rec-badge">
+                    ● REC {formatElapsed(rec?.elapsed_sec)} · {formatBitrate(rec?.bitrate_kbps)}
+                  </div>
+                )}
               </div>
 
               <div className="card-footer">
@@ -222,6 +261,32 @@ export default function StreamGrid() {
                     Files
                   </button>
                 </div>
+              </div>
+
+              <div className="rec-name-row">
+                <label className="rec-name-label" htmlFor={`rec-name-${s.id}`}>
+                  Rec name
+                </label>
+                <input
+                  id={`rec-name-${s.id}`}
+                  className="rec-name-input"
+                  value={nameDraft[s.id] ?? ""}
+                  disabled={isRecording}
+                  placeholder={`ch${s.id}`}
+                  onChange={(e) =>
+                    setNameDraft((prev) => ({ ...prev, [s.id]: e.target.value }))
+                  }
+                  onBlur={() => commitName(s.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.currentTarget.blur();
+                    }
+                  }}
+                  title="Filename prefix: {name}_{date}_{time}.mp4"
+                />
+                <span className="rec-name-hint">
+                  {(nameDraft[s.id] || `ch${s.id}`).replace(/\s+/g, "_")}_YYYY-MM-DD_HH-MM-SS.mp4
+                </span>
               </div>
 
               {s.error && <div className="error-bar">{s.error}</div>}

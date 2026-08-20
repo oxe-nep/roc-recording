@@ -53,6 +53,13 @@ type Stream struct {
 	mu           sync.Mutex
 }
 
+// Snapshot returns mutable fields under the stream lock for safe API responses.
+func (s *Stream) Snapshot() (status Status, errStr, format, preset string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.Status, s.Error, s.Format, s.EncodePreset
+}
+
 // EncodeProfile is the always-on master encode written to the local UDP feed.
 // Recording remuxes that feed with -c copy (no second encode).
 type EncodeProfile struct {
@@ -81,6 +88,7 @@ type Manager struct {
 	defaultPreset   string
 	assignmentsPath string
 	presetsPath     string
+	codecCache      codecCache
 }
 
 func NewManager(hlsDir, ffmpegBin string, presets map[string]NamedPreset, defaultPreset, assignmentsPath, presetsPath string) *Manager {
@@ -199,6 +207,8 @@ func bitrateSortKey(b string) float64 {
 }
 
 func (m *Manager) profileFor(presetID string) EncodeProfile {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	if p, ok := m.presets[presetID]; ok {
 		return p.Profile
 	}
@@ -216,8 +226,9 @@ func (m *Manager) profileFor(presetID string) EncodeProfile {
 	}
 }
 
-// SetEncodePreset changes the master encode preset for a channel.
-// If the channel is running, capture FFmpeg is restarted to apply settings.
+// SetEncodePreset stores the encode preset for a channel.
+// Settings are applied the next time capture starts for that channel —
+// a running encode is left alone so recordings are not interrupted.
 func (m *Manager) SetEncodePreset(id int, presetID string) error {
 	m.mu.RLock()
 	if m.presets[presetID].ID == "" {
@@ -232,7 +243,6 @@ func (m *Manager) SetEncodePreset(id int, presetID string) error {
 
 	s.mu.Lock()
 	prev := s.EncodePreset
-	wasRunning := s.Status == StatusRunning
 	s.EncodePreset = presetID
 	s.mu.Unlock()
 
@@ -243,14 +253,10 @@ func (m *Manager) SetEncodePreset(id int, presetID string) error {
 		log.Printf("[encode] failed to persist assignments: %v", err)
 	}
 
-	if prev == presetID {
-		return nil
+	if prev != presetID {
+		log.Printf("[channel %d] encode preset %s → %s (applies on next start)", id, prev, presetID)
 	}
-	log.Printf("[channel %d] encode preset %s → %s", id, prev, presetID)
-	if !wasRunning {
-		return nil
-	}
-	return m.restart(id)
+	return nil
 }
 
 func (m *Manager) restart(id int) error {
@@ -422,12 +428,23 @@ func (m *Manager) runLoop(s *Stream) {
 			s.mu.Lock()
 			s.Status = StatusStopped
 			s.mu.Unlock()
+			m.removeThumb(s.ID)
 			return
 		default:
 		}
 
 		if err == nil {
 			consecutiveFails = 0
+			// Brief pause so a clean exit cannot tight-loop thrash DeckLink/NVENC.
+			select {
+			case <-s.stopCh:
+				s.mu.Lock()
+				s.Status = StatusStopped
+				s.mu.Unlock()
+				m.removeThumb(s.ID)
+				return
+			case <-time.After(500 * time.Millisecond):
+			}
 			continue
 		}
 

@@ -392,6 +392,9 @@ func (m *Manager) DeleteLibraryFile(category, name string) error {
 	if err != nil {
 		return err
 	}
+	if m.isActiveRecordingPath(path) {
+		return fmt.Errorf("cannot delete a file that is currently being recorded")
+	}
 	if err := os.Remove(path); err != nil {
 		if os.IsNotExist(err) {
 			return fmt.Errorf("file not found")
@@ -405,6 +408,9 @@ func (m *Manager) MoveLibraryFile(fromCat, toCat, name string) (LibraryFile, err
 	src, err := m.LibraryFilePath(fromCat, name)
 	if err != nil {
 		return LibraryFile{}, err
+	}
+	if m.isActiveRecordingPath(src) {
+		return LibraryFile{}, fmt.Errorf("cannot move a file that is currently being recorded")
 	}
 	dstCat := sanitizeCategory(toCat)
 	if dstCat == "" {
@@ -444,6 +450,33 @@ func (m *Manager) MoveLibraryFile(fromCat, toCat, name string) (LibraryFile, err
 		ModTime:  info.ModTime(),
 		URL:      "/api/library/file/" + dstCat + "/" + name,
 	}, nil
+}
+
+// isActiveRecordingPath reports whether path is the output of a live remux.
+func (m *Manager) isActiveRecordingPath(path string) bool {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		abs = path
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, st := range m.states {
+		st.mu.Lock()
+		active := st.status == StatusRecording && st.filePath != ""
+		fp := st.filePath
+		st.mu.Unlock()
+		if !active {
+			continue
+		}
+		fpAbs, err := filepath.Abs(fp)
+		if err != nil {
+			fpAbs = fp
+		}
+		if fpAbs == abs {
+			return true
+		}
+	}
+	return false
 }
 
 // sanitizeCategory keeps filesystem-safe category folder names.

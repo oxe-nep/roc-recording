@@ -34,6 +34,13 @@ type Collector struct {
 	prevTotal uint64
 	havePrev  bool
 	diskPath  string
+
+	gpuAt       time.Time
+	gpuOK       bool
+	gpuNVENC    float64
+	gpuUtil     float64
+	gpuMemUsed  float64
+	gpuMemTotal float64
 }
 
 func NewCollector(diskPath string) *Collector {
@@ -74,7 +81,7 @@ func (c *Collector) Snapshot() Snapshot {
 		s.DiskTotalBytes = total
 		s.DiskPercent = float64(used) / float64(total) * 100
 	}
-	if nvenc, gpuUtil, memUsed, memTotal, ok := gpuStats(); ok {
+	if nvenc, gpuUtil, memUsed, memTotal, ok := c.cachedGPUStats(); ok {
 		s.GPUAvailable = true
 		s.NVENCPercent = &nvenc
 		s.GPUPercent = &gpuUtil
@@ -82,6 +89,28 @@ func (c *Collector) Snapshot() Snapshot {
 		s.GPUMemTotalMB = &memTotal
 	}
 	return s
+}
+
+func (c *Collector) cachedGPUStats() (nvenc, gpuUtil, memUsedMB, memTotalMB float64, ok bool) {
+	c.mu.Lock()
+	if time.Since(c.gpuAt) < 2*time.Second && !c.gpuAt.IsZero() {
+		nvenc, gpuUtil, memUsedMB, memTotalMB, ok = c.gpuNVENC, c.gpuUtil, c.gpuMemUsed, c.gpuMemTotal, c.gpuOK
+		c.mu.Unlock()
+		return
+	}
+	c.mu.Unlock()
+
+	nvenc, gpuUtil, memUsedMB, memTotalMB, ok = gpuStats()
+
+	c.mu.Lock()
+	c.gpuAt = time.Now()
+	c.gpuOK = ok
+	c.gpuNVENC = nvenc
+	c.gpuUtil = gpuUtil
+	c.gpuMemUsed = memUsedMB
+	c.gpuMemTotal = memTotalMB
+	c.mu.Unlock()
+	return
 }
 
 func (c *Collector) cpuPercent() (float64, error) {

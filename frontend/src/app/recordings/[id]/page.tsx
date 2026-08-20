@@ -6,7 +6,11 @@ import { useRouter } from "next/navigation";
 export default function LegacyChannelRecordingsRedirect() {
   const router = useRouter();
   useEffect(() => {
-    router.replace("/recordings");
+    router.replace("/");
+    const t = window.setTimeout(() => {
+      window.dispatchEvent(new Event("roc-open-library"));
+    }, 50);
+    return () => window.clearTimeout(t);
   }, [router]);
-  return <div className="recordings-page">Redirecting to library…</div>;
+  return null;
 }

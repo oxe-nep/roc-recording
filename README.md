@@ -15,7 +15,7 @@ Per running channel, one FFmpeg holds the DeckLink lock and fans out:
 
 Recording starts a second FFmpeg that **remuxes** the UDP feed (`-c copy`) into fragmented MP4 — no second NVENC pass.
 
-Encode presets are defined in `config.yaml`. Per-channel selection is available in the UI and persisted to `encode-assignments.json` next to the config. Changing preset restarts that channel’s capture (blocked while recording).
+Encode presets are defined in `config.yaml` (and live-edited via the UI into `encode-presets.json`). Per-channel selection is persisted to `encode-assignments.json`. Encode settings are applied when that channel’s capture starts — editing a preset or switching assignment does not restart a running channel.
 
 Recordings land in global category folders under a configurable storage root
 (default `recordings_dir` in config, overridable in the library UI → saved to

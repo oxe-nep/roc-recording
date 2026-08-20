@@ -401,24 +401,47 @@ func (m *Manager) Stop(id int) (ChannelInfo, error) {
 	}
 
 	st.mu.Lock()
-	defer st.mu.Unlock()
-
 	if st.status != StatusRecording {
+		st.mu.Unlock()
 		return ChannelInfo{}, fmt.Errorf("channel %d is not recording", id)
 	}
-
-	if st.cmd != nil && st.cmd.Process != nil {
-		if err := st.cmd.Process.Signal(os.Interrupt); err != nil {
-			_ = st.cmd.Process.Kill()
+	cmd := st.cmd
+	if cmd != nil && cmd.Process != nil {
+		if err := cmd.Process.Signal(os.Interrupt); err != nil {
+			_ = cmd.Process.Kill()
 		}
+	}
+	st.mu.Unlock()
+	log.Printf("[recording %d] Stop requested – waiting for remux to exit", id)
+
+	// Wait for the existing Wait-goroutine to clear state (do not Wait twice).
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		st.mu.Lock()
+		done := st.status == StatusIdle && st.cmd == nil
+		info := m.buildInfo(id, st)
+		st.mu.Unlock()
+		if done {
+			log.Printf("[recording %d] Stopped", id)
+			return info, nil
+		}
+		time.Sleep(40 * time.Millisecond)
+	}
+
+	// Last resort: hard-kill and force idle so Start can proceed.
+	st.mu.Lock()
+	if st.cmd != nil && st.cmd.Process != nil {
+		_ = st.cmd.Process.Kill()
 	}
 	st.cmd = nil
 	st.status = StatusIdle
 	st.elapsedSec = 0
 	st.bitrateKbps = 0
 	st.encoding = false
-	log.Printf("[recording %d] Stop requested", id)
-	return m.buildInfo(id, st), nil
+	info := m.buildInfo(id, st)
+	st.mu.Unlock()
+	log.Printf("[recording %d] Stop forced after timeout", id)
+	return info, nil
 }
 
 func (m *Manager) StartAll() []error {
@@ -430,6 +453,11 @@ func (m *Manager) StartAll() []error {
 	m.mu.RUnlock()
 	var errs []error
 	for _, id := range ids {
+		status, ok := m.captureMgr.StatusByID(id)
+		if !ok || status != capture.StatusRunning {
+			errs = append(errs, fmt.Errorf("ch%d: channel must be running before recording can start", id))
+			continue
+		}
 		if _, err := m.Start(id); err != nil {
 			errs = append(errs, fmt.Errorf("ch%d: %w", id, err))
 		}

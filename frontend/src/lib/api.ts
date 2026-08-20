@@ -27,6 +27,12 @@ export interface EncodePreset {
   audio_bitrate: string;
 }
 
+export interface EncodeCodecOption {
+  id: string;
+  label: string;
+  presets: { id: string; label: string }[];
+}
+
 async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
@@ -49,6 +55,13 @@ export async function fetchEncodePresets(): Promise<EncodePreset[]> {
   const res = await apiFetch("/api/encode/presets");
   if (!res.ok) throw new Error(`fetchEncodePresets: ${res.status}`);
   return res.json();
+}
+
+export async function fetchEncodeOptions(): Promise<EncodeCodecOption[]> {
+  const res = await apiFetch("/api/encode/options");
+  if (!res.ok) throw new Error(`fetchEncodeOptions: ${res.status}`);
+  const body = await res.json();
+  return (body.codecs ?? []) as EncodeCodecOption[];
 }
 
 export async function setEncodePreset(id: number, preset: string): Promise<Stream> {
@@ -197,16 +210,6 @@ export async function stopRecording(id: number): Promise<RecordingInfo> {
   return res.json();
 }
 
-export async function startAllRecordings(): Promise<void> {
-  const res = await apiFetch("/api/recordings/start-all", { method: "POST" });
-  if (!res.ok) throw new Error(`startAllRecordings: ${res.status}`);
-}
-
-export async function stopAllRecordings(): Promise<void> {
-  const res = await apiFetch("/api/recordings/stop-all", { method: "POST" });
-  if (!res.ok) throw new Error(`stopAllRecordings: ${res.status}`);
-}
-
 export async function fetchRecordingsPath(): Promise<string> {
   const res = await apiFetch("/api/settings/recordings-path");
   if (!res.ok) throw new Error(`fetchRecordingsPath: ${res.status}`);
@@ -227,6 +230,7 @@ export async function setRecordingsPath(path: string): Promise<string> {
   return body.path as string;
 }
 
+export async function fetchLibraryCategories(): Promise<LibraryCategory[]> {
   const res = await apiFetch("/api/library/categories");
   if (!res.ok) throw new Error(`fetchLibraryCategories: ${res.status}`);
   return res.json();
@@ -271,12 +275,14 @@ export async function fetchLibraryFiles(category?: string): Promise<LibraryFile[
   return res.json();
 }
 
-export async function fetchLibraryBlob(category: string, name: string): Promise<Blob> {
-  const res = await apiFetch(
-    `/api/library/file/${encodeURIComponent(category)}/${encodeURIComponent(name)}`,
-  );
-  if (!res.ok) throw new Error(`fetchLibraryBlob: ${res.status}`);
-  return res.blob();
+/** Direct media URL for <video>/<a download>. Supports Range; uses api_key query when needed locally. */
+export function libraryFileURL(category: string, name: string, opts?: { download?: boolean }): string {
+  const path = `/api/library/file/${encodeURIComponent(category)}/${encodeURIComponent(name)}`;
+  const params = new URLSearchParams();
+  if (API_KEY) params.set("api_key", API_KEY);
+  if (opts?.download) params.set("download", "1");
+  const q = params.toString();
+  return `${BASE}${path}${q ? `?${q}` : ""}`;
 }
 
 export async function deleteLibraryFile(category: string, name: string): Promise<void> {

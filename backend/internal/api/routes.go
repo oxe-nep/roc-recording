@@ -136,6 +136,10 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlsh
 			jsonOK(w, presetsToResponse(mgr.ListPresets()))
 		})
 
+		r.Get("/api/encode/options", func(w http.ResponseWriter, r *http.Request) {
+			jsonOK(w, map[string]any{"codecs": mgr.ListEncodeOptions()})
+		})
+
 		r.Post("/api/encode/presets", func(w http.ResponseWriter, r *http.Request) {
 			var body capture.PresetInput
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -346,6 +350,9 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, hlsHandler *hlsh
 			}
 			w.Header().Set("Content-Type", "video/mp4")
 			w.Header().Set("Cache-Control", "no-store")
+			if r.URL.Query().Get("download") == "1" {
+				w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(info.Name()))
+			}
 			http.ServeContent(w, r, info.Name(), info.ModTime(), f)
 		})
 
@@ -608,6 +615,7 @@ func shouldSkipRequestLog(r *http.Request) bool {
 		strings.HasPrefix(path, "/hls/"):
 		return true
 	case path == "/api/streams", path == "/api/recordings", path == "/api/system", path == "/api/encode/presets",
+		path == "/api/encode/options",
 		path == "/api/library/categories", path == "/api/library/files":
 		return true
 	case strings.HasPrefix(path, "/api/recordings/files/"):
@@ -635,7 +643,11 @@ func corsMiddleware(allowedOrigins string) func(http.Handler) http.Handler {
 func apiKeyMiddleware(key string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Header.Get("X-API-Key") != key {
+			got := r.Header.Get("X-API-Key")
+			if got == "" {
+				got = r.URL.Query().Get("api_key")
+			}
+			if got != key {
 				jsonError(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
@@ -645,13 +657,14 @@ func apiKeyMiddleware(key string) func(http.Handler) http.Handler {
 }
 
 func toResponse(s *capture.Stream, hlsBaseURL string) streamResponse {
+	status, errStr, format, preset := s.Snapshot()
 	return streamResponse{
 		ID:           s.ID,
 		Name:         s.Name,
-		Status:       string(s.Status),
-		Error:        s.Error,
-		Format:       s.Format,
-		EncodePreset: s.EncodePreset,
+		Status:       string(status),
+		Error:        errStr,
+		Format:       format,
+		EncodePreset: preset,
 		HLSURL:       hlsBaseURL + "/hls/" + strconv.Itoa(s.ID) + "/index.m3u8",
 	}
 }

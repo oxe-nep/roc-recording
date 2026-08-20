@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import {
   fetchStreams,
   startStream,
@@ -12,8 +12,6 @@ import {
   setRecordingCategory,
   startRecording,
   stopRecording,
-  startAllRecordings,
-  stopAllRecordings,
   setRecordingName,
   type Stream,
   type AudioLevels,
@@ -97,21 +95,24 @@ export default function StreamGrid() {
   const [busy, setBusy] = useState<Record<number, boolean>>({});
   const [recBusy, setRecBusy] = useState<Record<number, boolean>>({});
   const [presetBusy, setPresetBusy] = useState<Record<number, boolean>>({});
-  const [globalRecBusy, setGlobalRecBusy] = useState(false);
   const [audio, setAudio] = useState<Record<number, AudioLevels>>({});
   const [listening, setListening] = useState<Record<number, boolean>>({});
   const [nameDraft, setNameDraft] = useState<Record<number, string>>({});
+  const streamsRef = useRef<Stream[]>([]);
+  streamsRef.current = streams;
 
   const load = useCallback(async () => {
     try {
-      const [streamData, recData] = await Promise.all([
+      const [streamData, recData, cats] = await Promise.all([
         fetchStreams(),
         fetchRecordings(),
+        fetchLibraryCategories().catch(() => null),
       ]);
       setStreams(streamData);
       const recMap: Record<number, RecordingInfo> = {};
       for (const r of recData) recMap[r.id] = r;
       setRecordings(recMap);
+      if (cats) setCategories(cats);
       setNameDraft((prev) => {
         const next = { ...prev };
         for (const r of recData) {
@@ -133,42 +134,51 @@ export default function StreamGrid() {
         .then(setPresets)
         .catch(() => {});
     };
+    const refreshCategories = () => {
+      fetchLibraryCategories()
+        .then(setCategories)
+        .catch(() => {});
+    };
     fetchEncodePresets()
       .then(setPresets)
       .catch((e) => setError(String(e)));
-    fetchLibraryCategories()
-      .then(setCategories)
-      .catch(() => {
-        /* library may be empty until backend restart */
-      });
+    refreshCategories();
     window.addEventListener("roc-presets-changed", refreshPresets);
+    window.addEventListener("roc-library-changed", refreshCategories);
     load();
     const interval = setInterval(load, 1000);
     return () => {
       clearInterval(interval);
       window.removeEventListener("roc-presets-changed", refreshPresets);
+      window.removeEventListener("roc-library-changed", refreshCategories);
     };
   }, [load]);
 
   useEffect(() => {
+    let alive = true;
     const pollAudio = async () => {
-      const running = streams.filter((s) => s.status === "running");
+      const running = streamsRef.current.filter((s) => s.status === "running");
       if (running.length === 0) return;
+      const updates: Record<number, AudioLevels> = {};
       await Promise.all(
         running.map(async (s) => {
           try {
-            const levels = await fetchAudioLevels(s.id);
-            setAudio((prev) => ({ ...prev, [s.id]: levels }));
+            updates[s.id] = await fetchAudioLevels(s.id);
           } catch {
             // ignore transient audio fetch errors
           }
         }),
       );
+      if (!alive || Object.keys(updates).length === 0) return;
+      setAudio((prev) => ({ ...prev, ...updates }));
     };
-    const interval = setInterval(pollAudio, 250);
+    const interval = setInterval(pollAudio, 500);
     pollAudio();
-    return () => clearInterval(interval);
-  }, [streams]);
+    return () => {
+      alive = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   const startPreview = async (s: Stream) => {
     setBusy((b) => ({ ...b, [s.id]: true }));
@@ -228,55 +238,34 @@ export default function StreamGrid() {
 
   const anyRecording = Object.values(recordings).some((r) => r.status === "recording");
 
-  const handleGlobalRec = async () => {
-    setGlobalRecBusy(true);
-    try {
-      if (anyRecording) await stopAllRecordings();
-      else await startAllRecordings();
-      await load();
-    } finally {
-      setGlobalRecBusy(false);
-    }
-  };
+  useEffect(() => {
+    window.dispatchEvent(
+      new CustomEvent("roc-recording-state", { detail: { anyRecording } }),
+    );
+  }, [anyRecording]);
 
   const openLibrary = () => {
-    if (typeof window === "undefined") return;
-    window.open("/recordings", "_blank", "noopener,noreferrer");
+    window.dispatchEvent(new Event("roc-open-library"));
   };
 
   const toggleListen = (id: number) => {
     setListening((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  if (loading) {
+  if (loading && streams.length === 0) {
     return <div className="loading"><span>Connecting to backend…</span></div>;
-  }
-
-  if (error) {
-    return (
-      <div className="error-message">
-        {error}
-        <button type="button" className="error-dismiss" onClick={() => setError(null)}>
-          Dismiss
-        </button>
-      </div>
-    );
   }
 
   return (
     <>
-      <div className="global-rec-bar">
-        <button
-          className={`global-rec-btn ${anyRecording ? "recording" : ""}`}
-          onClick={handleGlobalRec}
-          disabled={globalRecBusy}
-        >
-          {globalRecBusy ? "…" : anyRecording ? "⏹ Stop all recordings" : "⏺ Record all"}
-        </button>
-        <button type="button" className="badge files-btn" onClick={openLibrary}>
-          Library
-        </button>
-      </div>
+      {error && (
+        <div className="error-message">
+          {error}
+          <button type="button" className="error-dismiss" onClick={() => setError(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div className="cards-grid">
         {streams.map((s) => {
@@ -349,82 +338,97 @@ export default function StreamGrid() {
                 </div>
               </div>
 
-              <div className="rec-name-row">
-                <label className="rec-name-label" htmlFor={`encode-preset-${s.id}`}>
-                  Encode
-                </label>
-                <select
-                  id={`encode-preset-${s.id}`}
-                  className="encode-preset-select"
-                  value={s.encode_preset || ""}
-                  disabled={isRecording || !!presetBusy[s.id] || presets.length === 0}
-                  onChange={(e) => changePreset(s.id, e.target.value)}
-                  title={
-                    activePreset
-                      ? `${activePreset.label} · ${activePreset.video_bitrate} video / ${activePreset.audio_bitrate} audio`
-                      : "Master encode preset (restarts capture to apply)"
-                  }
-                >
-                  {presets.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.label}
-                    </option>
-                  ))}
-                </select>
-                <span className="encode-preset-hint">
-                  {presetBusy[s.id]
-                    ? "Applying…"
-                    : activePreset
+              <div
+                className={`rec-settings ${isRecording ? "locked" : ""}`}
+                title={isRecording ? "Locked while recording" : undefined}
+              >
+                <div className="rec-name-row">
+                  <label className="rec-name-label" htmlFor={`encode-preset-${s.id}`}>
+                    Encode
+                  </label>
+                  <select
+                    id={`encode-preset-${s.id}`}
+                    className="encode-preset-select"
+                    value={s.encode_preset || ""}
+                    disabled={isRecording || !!presetBusy[s.id] || presets.length === 0}
+                    onChange={(e) => changePreset(s.id, e.target.value)}
+                    title={
+                      isRecording
+                        ? "Locked while recording"
+                        : activePreset
+                          ? `${activePreset.label} · ${activePreset.video_bitrate} video / ${activePreset.audio_bitrate} audio · applies on next start`
+                          : "Encode preset (applied when capture starts)"
+                    }
+                  >
+                    {presets.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.label}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="encode-preset-hint">
+                    {activePreset
                       ? `${activePreset.video_bitrate} · ${activePreset.audio_bitrate}`
                       : s.encode_preset}
-                </span>
-              </div>
+                  </span>
+                </div>
 
-              <div className="rec-name-row">
-                <label className="rec-name-label" htmlFor={`rec-cat-${s.id}`}>
-                  Category
-                </label>
-                <select
-                  id={`rec-cat-${s.id}`}
-                  className="encode-preset-select"
-                  value={rec?.category || "_unsorted"}
-                  disabled={isRecording || categories.length === 0}
-                  onChange={(e) => changeCategory(s.id, e.target.value)}
-                  title="Recordings are stored in recordings/{category}/"
-                >
-                  {categories.map((c) => (
-                    <option key={c.name} value={c.name}>
-                      {c.name === "_unsorted" ? "Unsorted" : c.name}
-                    </option>
-                  ))}
-                </select>
-                <span className="encode-preset-hint">recordings/{rec?.category || "_unsorted"}/</span>
-              </div>
-
-              <div className="rec-name-row">
-                <label className="rec-name-label" htmlFor={`rec-name-${s.id}`}>
-                  Rec name
-                </label>
-                <input
-                  id={`rec-name-${s.id}`}
-                  className="rec-name-input"
-                  value={nameDraft[s.id] ?? ""}
-                  disabled={isRecording}
-                  placeholder={`ch${s.id}`}
-                  onChange={(e) =>
-                    setNameDraft((prev) => ({ ...prev, [s.id]: e.target.value }))
-                  }
-                  onBlur={() => commitName(s.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.currentTarget.blur();
+                <div className="rec-name-row">
+                  <label className="rec-name-label" htmlFor={`rec-cat-${s.id}`}>
+                    Category
+                  </label>
+                  <select
+                    id={`rec-cat-${s.id}`}
+                    className="encode-preset-select"
+                    value={rec?.category || "_unsorted"}
+                    disabled={isRecording || categories.length === 0}
+                    onChange={(e) => changeCategory(s.id, e.target.value)}
+                    title={
+                      isRecording
+                        ? "Locked while recording"
+                        : "Recordings are stored in recordings/{category}/"
                     }
-                  }}
-                  title="Filename prefix: {name}_{date}_{time}.mp4"
-                />
-                <span className="rec-name-hint">
-                  {(nameDraft[s.id] || `ch${s.id}`).replace(/\s+/g, "_")}_YYYY-MM-DD_HH-MM-SS.mp4
-                </span>
+                  >
+                    {categories.map((c) => (
+                      <option key={c.name} value={c.name}>
+                        {c.name === "_unsorted" ? "Unsorted" : c.name}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="encode-preset-hint">
+                    recordings/{rec?.category || "_unsorted"}/
+                  </span>
+                </div>
+
+                <div className="rec-name-row">
+                  <label className="rec-name-label" htmlFor={`rec-name-${s.id}`}>
+                    Rec name
+                  </label>
+                  <input
+                    id={`rec-name-${s.id}`}
+                    className="rec-name-input"
+                    value={nameDraft[s.id] ?? ""}
+                    disabled={isRecording}
+                    placeholder={`ch${s.id}`}
+                    onChange={(e) =>
+                      setNameDraft((prev) => ({ ...prev, [s.id]: e.target.value }))
+                    }
+                    onBlur={() => commitName(s.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.currentTarget.blur();
+                      }
+                    }}
+                    title={
+                      isRecording
+                        ? "Locked while recording"
+                        : "Filename prefix: {name}_{date}_{time}.mp4"
+                    }
+                  />
+                  <span className="rec-name-hint">
+                    {(nameDraft[s.id] || `ch${s.id}`).replace(/\s+/g, "_")}_YYYY-MM-DD_HH-MM-SS.mp4
+                  </span>
+                </div>
               </div>
 
               {s.error && <div className="error-bar">{s.error}</div>}

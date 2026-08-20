@@ -519,10 +519,8 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"-bufsize", enc.VideoBufsize,
 		"-preset", enc.VideoPreset,
 		"-g", gop,
-		"-keyint_min", gop,
-		"-forced-idr", "1",
-		"-bf", "0",
-		"-repeat_headers", "1",
+		// Avoid libx264-only / encoder-private flags here — this FFmpeg build
+		// rejects unknown options with "Error splitting the argument list".
 		"-c:a", "aac",
 		"-b:a", enc.AudioBitrate,
 		"-ar", "48000",

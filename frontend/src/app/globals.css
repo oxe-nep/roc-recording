@@ -220,20 +220,6 @@ body {
   color: #1a1208;
 }
 
-.srt-badge {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  background: rgba(46, 125, 160, 0.92);
-  color: #fff;
-  font-size: 0.62rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  padding: 3px 7px;
-  border-radius: 4px;
-  pointer-events: none;
-}
-
 .compact-header h1 {
   font-size: 1.25rem;
   font-weight: 600;
@@ -788,6 +774,55 @@ body {
 
 .rec-btn.recording:hover:not(:disabled) {
   background: rgba(220, 40, 40, 0.98);
+}
+
+.stream-btn {
+  flex-shrink: 0;
+  height: 1.7rem;
+  min-width: 3.6rem;
+  padding: 0 10px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: var(--transition);
+  font-variant-numeric: tabular-nums;
+}
+
+.stream-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.stream-btn.idle {
+  color: var(--text-secondary);
+}
+
+.stream-btn.idle:hover:not(:disabled) {
+  border-color: rgba(46, 125, 160, 0.55);
+  background: rgba(46, 125, 160, 0.14);
+  color: #9fd4e8;
+}
+
+.stream-btn.streaming {
+  border-color: rgba(46, 125, 160, 0.7);
+  background: rgba(46, 125, 160, 0.92);
+  color: #fff;
+  box-shadow: 0 0 10px rgba(46, 125, 160, 0.4);
+  animation: stream-pulse 1.4s ease-in-out infinite;
+}
+
+.stream-btn.streaming:hover:not(:disabled) {
+  background: rgba(37, 106, 136, 0.98);
+}
+
+@keyframes stream-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 
 @keyframes rec-pulse {

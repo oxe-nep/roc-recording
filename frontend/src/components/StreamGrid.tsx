@@ -11,6 +11,8 @@ import {
   fetchSrtAll,
   startRecording,
   stopRecording,
+  startSrt,
+  stopSrt,
   type Stream,
   type AudioLevels,
   type RecordingInfo,
@@ -91,6 +93,7 @@ export default function StreamGrid() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Record<number, boolean>>({});
   const [recBusy, setRecBusy] = useState<Record<number, boolean>>({});
+  const [srtBusy, setSrtBusy] = useState<Record<number, boolean>>({});
   const [audio, setAudio] = useState<Record<number, AudioLevels>>({});
   const [listening, setListening] = useState<Record<number, boolean>>({});
   const [settingsId, setSettingsId] = useState<number | null>(null);
@@ -196,6 +199,19 @@ export default function StreamGrid() {
     }
   };
 
+  const toggleSrt = async (id: number) => {
+    setSrtBusy((b) => ({ ...b, [id]: true }));
+    try {
+      if (srtById[id]?.status === "streaming") await stopSrt(id);
+      else await startSrt(id);
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSrtBusy((b) => ({ ...b, [id]: false }));
+    }
+  };
+
   const anyRecording = Object.values(recordings).some((r) => r.status === "recording");
 
   useEffect(() => {
@@ -248,7 +264,6 @@ export default function StreamGrid() {
                   {isRecording && !isEncoding && (
                     <div className="rec-badge starting">STARTING…</div>
                   )}
-                  {srtOn && <div className="srt-badge" title={srtById[s.id]?.publish_url || "SRT"}>SRT</div>}
                 </div>
                 <div
                   className="audio-meter"
@@ -313,6 +328,21 @@ export default function StreamGrid() {
                       }
                     >
                       {recBusy[s.id] ? "…" : "REC"}
+                    </button>
+                    <button
+                      type="button"
+                      className={`stream-btn ${srtOn ? "streaming" : "idle"}`}
+                      onClick={() => toggleSrt(s.id)}
+                      disabled={srtBusy[s.id] || (s.status !== "running" && !srtOn)}
+                      title={
+                        srtOn
+                          ? srtById[s.id]?.publish_url || "Stop SRT stream"
+                          : s.status !== "running"
+                            ? "Start channel before streaming"
+                            : "Start SRT stream (configure in settings)"
+                      }
+                    >
+                      {srtBusy[s.id] ? "…" : "STREAM"}
                     </button>
                     {s.status !== "running" && (
                       <button

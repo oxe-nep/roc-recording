@@ -178,7 +178,7 @@ export default function DecodeGrid() {
     };
   }, []);
 
-  const withBusy = async (id: number, fn: () => Promise<void>) => {
+  const withBusy = async (id: number, fn: () => Promise<unknown>) => {
     setBusy((b) => ({ ...b, [id]: true }));
     setError(null);
     try {

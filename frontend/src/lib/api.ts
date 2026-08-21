@@ -418,6 +418,7 @@ export interface PlayoutClient {
   status: "stopped" | "waiting" | "running";
   device: string;
   format_code: string;
+  decklink_out?: boolean;
   mode: "listener" | "caller";
   port: number;
   target: string;
@@ -434,6 +435,7 @@ export type PlayoutCreateInput = {
   name?: string;
   device?: string;
   format_code?: string;
+  decklink_out?: boolean;
   mode?: "listener" | "caller";
   port?: number;
   target?: string;
@@ -445,6 +447,7 @@ export type PlayoutUpdateInput = {
   name?: string;
   device?: string;
   format_code?: string;
+  decklink_out?: boolean;
   mode?: "listener" | "caller";
   port?: number;
   target?: string;

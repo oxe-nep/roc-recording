@@ -22,6 +22,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
   const [name, setName] = useState("");
   const [device, setDevice] = useState("");
   const [formatCode, setFormatCode] = useState("");
+  const [deckLinkOut, setDeckLinkOut] = useState(false);
   const [mode, setMode] = useState<"listener" | "caller">("listener");
   const [port, setPort] = useState(9201);
   const [target, setTarget] = useState("");
@@ -43,6 +44,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
     setName(client.name || `Decode ${channelId}`);
     setDevice(client.device || "");
     setFormatCode(client.format_code || "");
+    setDeckLinkOut(!!client.decklink_out);
     setMode(client.mode || "listener");
     setPort(client.port || 9200 + channelId);
     setTarget(client.target || "");
@@ -127,7 +129,8 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
       const body: Parameters<typeof updatePlayoutClient>[1] = {
         name: name.trim() || `Decode ${client.id}`,
         device,
-        format_code: device ? formatCode : "",
+        format_code: deckLinkOut && device ? formatCode : "",
+        decklink_out: deckLinkOut,
         mode,
         port,
         target,
@@ -195,8 +198,21 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
             <input value={name} onChange={(e) => setName(e.target.value)} disabled={busy || active} />
           </label>
 
+          <label className="presets-field" style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <input
+              type="checkbox"
+              checked={deckLinkOut}
+              onChange={(e) => setDeckLinkOut(e.target.checked)}
+              disabled={busy || active}
+            />
+            <span>Enable DeckLink output</span>
+          </label>
+          <span className="channel-settings-hint" style={{ marginTop: -8 }}>
+            Leave off to verify SRT decode first (thumb + meters only).
+          </span>
+
           <label className="presets-field">
-            <span>DeckLink output (optional)</span>
+            <span>DeckLink output</span>
             <div className="channel-settings-actions" style={{ marginTop: 0, marginBottom: 4 }}>
               <select
                 value={device}
@@ -206,10 +222,10 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                   if (next?.formats?.length) setFormatCode(next.formats[0].code);
                   else setFormatCode("");
                 }}
-                disabled={busy || active}
+                disabled={busy || active || !deckLinkOut}
                 style={{ flex: 1 }}
               >
-                <option value="">None — SRT preview only</option>
+                <option value="">Select device…</option>
                 {devices.map((d) => (
                   <option key={d.name} value={d.name}>
                     {d.label || d.name}
@@ -217,27 +233,24 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                   </option>
                 ))}
               </select>
-              <button type="button" className="badge" onClick={refreshDevices} disabled={busy || active}>
+              <button type="button" className="badge" onClick={refreshDevices} disabled={busy || active || !deckLinkOut}>
                 Re-probe
               </button>
             </div>
-            <span className="channel-settings-hint">
-              Leave empty to verify SRT decode (thumb + meters) before enabling DeckLink out.
-            </span>
-            {devices.length === 0 && (
+            {deckLinkOut && devices.length === 0 && (
               <span className="channel-settings-hint">No devices probed — is FFmpeg+DeckLink available on the host?</span>
             )}
           </label>
 
           <label className="presets-field">
-            <span>Output format {device ? "" : "(when DeckLink is set)"}</span>
+            <span>Output format</span>
             <select
               value={formats.some((f) => f.code === formatCode) ? formatCode : ""}
               onChange={(e) => setFormatCode(e.target.value)}
-              disabled={busy || active || !device || formats.length === 0}
+              disabled={busy || active || !deckLinkOut || !device || formats.length === 0}
             >
               <option value="">
-                {!device ? "Not needed for SRT preview" : formats.length ? "Select format…" : "No formats probed"}
+                {!deckLinkOut ? "Enable DeckLink first" : formats.length ? "Select format…" : "No formats probed"}
               </option>
               {formats.map((f) => (
                 <option key={f.code} value={f.code}>
@@ -245,12 +258,10 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                 </option>
               ))}
             </select>
-            {device && formats.length === 0 && (
-              <span className="channel-settings-hint">
-                No modes from FFmpeg for this device. Try Re-probe.
-              </span>
+            {deckLinkOut && device && formats.length === 0 && (
+              <span className="channel-settings-hint">No modes from FFmpeg for this device. Try Re-probe.</span>
             )}
-            {probeLog && device && formats.length === 0 && (
+            {probeLog && deckLinkOut && device && formats.length === 0 && (
               <pre className="channel-settings-logbox" style={{ marginTop: 8, maxHeight: 120 }}>
                 {probeLog}
               </pre>

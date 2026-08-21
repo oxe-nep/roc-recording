@@ -44,16 +44,17 @@ var (
 )
 
 type Client struct {
-	ID         int
-	Name       string
-	Status     Status
-	Device     string
-	FormatCode string
-	Mode       Mode
-	Port       int
-	Target     string
-	Passphrase string
-	LatencyMS  int
+	ID          int
+	Name        string
+	Status      Status
+	Device      string
+	FormatCode  string
+	DeckLinkOut bool // when false, SRT preview only (thumb/meters) — ignore Device
+	Mode        Mode
+	Port        int
+	Target      string
+	Passphrase  string
+	LatencyMS   int
 
 	AudioL      float64
 	AudioR      float64
@@ -74,6 +75,7 @@ type ClientInfo struct {
 	Status      Status  `json:"status"`
 	Device      string  `json:"device"`
 	FormatCode  string  `json:"format_code"`
+	DeckLinkOut bool    `json:"decklink_out"`
 	Mode        Mode    `json:"mode"`
 	Port        int     `json:"port"`
 	Target      string  `json:"target"`
@@ -103,14 +105,15 @@ type persistedFile struct {
 }
 
 type persistedCli struct {
-	Name       string `json:"name"`
-	Device     string `json:"device"`
-	FormatCode string `json:"format_code"`
-	Mode       Mode   `json:"mode"`
-	Port       int    `json:"port"`
-	Target     string `json:"target"`
-	Passphrase string `json:"passphrase"`
-	LatencyMS  int    `json:"latency_ms"`
+	Name        string `json:"name"`
+	Device      string `json:"device"`
+	FormatCode  string `json:"format_code"`
+	DeckLinkOut bool   `json:"decklink_out"`
+	Mode        Mode   `json:"mode"`
+	Port        int    `json:"port"`
+	Target      string `json:"target"`
+	Passphrase  string `json:"passphrase"`
+	LatencyMS   int    `json:"latency_ms"`
 }
 
 func NewManager(ffmpegBin, hlsDir, settingsPath, publicHost string) *Manager {
@@ -163,19 +166,20 @@ func (m *Manager) Load() {
 			name = fmt.Sprintf("Decode %d", id)
 		}
 		m.clients[id] = &Client{
-			ID:         id,
-			Name:       name,
-			Status:     StatusStopped,
-			Device:     NormalizeOpenDevice(cfg.Device),
-			FormatCode: cfg.FormatCode,
-			Mode:       mode,
-			Port:       port,
-			Target:     strings.TrimSpace(cfg.Target),
-			Passphrase: cfg.Passphrase,
-			LatencyMS:  lat,
-			AudioL:     audioSilence,
-			AudioR:     audioSilence,
-			logLines:   make([]string, 0, 32),
+			ID:          id,
+			Name:        name,
+			Status:      StatusStopped,
+			Device:      NormalizeOpenDevice(cfg.Device),
+			FormatCode:  cfg.FormatCode,
+			DeckLinkOut: cfg.DeckLinkOut, // default false — SRT preview until explicitly enabled
+			Mode:        mode,
+			Port:        port,
+			Target:      strings.TrimSpace(cfg.Target),
+			Passphrase:  cfg.Passphrase,
+			LatencyMS:   lat,
+			AudioL:      audioSilence,
+			AudioR:      audioSilence,
+			logLines:    make([]string, 0, 32),
 		}
 		if id >= m.nextID {
 			m.nextID = id + 1
@@ -194,14 +198,15 @@ func (m *Manager) saveLocked() error {
 	for id, c := range m.clients {
 		c.mu.Lock()
 		f.Clients[strconv.Itoa(id)] = persistedCli{
-			Name:       c.Name,
-			Device:     c.Device,
-			FormatCode: c.FormatCode,
-			Mode:       c.Mode,
-			Port:       c.Port,
-			Target:     c.Target,
-			Passphrase: c.Passphrase,
-			LatencyMS:  c.LatencyMS,
+			Name:        c.Name,
+			Device:      c.Device,
+			FormatCode:  c.FormatCode,
+			DeckLinkOut: c.DeckLinkOut,
+			Mode:        c.Mode,
+			Port:        c.Port,
+			Target:      c.Target,
+			Passphrase:  c.Passphrase,
+			LatencyMS:   c.LatencyMS,
 		}
 		c.mu.Unlock()
 	}
@@ -213,25 +218,27 @@ func (m *Manager) saveLocked() error {
 }
 
 type CreateInput struct {
-	Name       string `json:"name"`
-	Device     string `json:"device"`
-	FormatCode string `json:"format_code"`
-	Mode       string `json:"mode"`
-	Port       int    `json:"port"`
-	Target     string `json:"target"`
-	Passphrase string `json:"passphrase"`
-	LatencyMS  int    `json:"latency_ms"`
+	Name        string `json:"name"`
+	Device      string `json:"device"`
+	FormatCode  string `json:"format_code"`
+	DeckLinkOut bool   `json:"decklink_out"`
+	Mode        string `json:"mode"`
+	Port        int    `json:"port"`
+	Target      string `json:"target"`
+	Passphrase  string `json:"passphrase"`
+	LatencyMS   int    `json:"latency_ms"`
 }
 
 type UpdateInput struct {
-	Name       *string `json:"name"`
-	Device     *string `json:"device"`
-	FormatCode *string `json:"format_code"`
-	Mode       *string `json:"mode"`
-	Port       *int    `json:"port"`
-	Target     *string `json:"target"`
-	Passphrase *string `json:"passphrase"`
-	LatencyMS  *int    `json:"latency_ms"`
+	Name        *string `json:"name"`
+	Device      *string `json:"device"`
+	FormatCode  *string `json:"format_code"`
+	DeckLinkOut *bool   `json:"decklink_out"`
+	Mode        *string `json:"mode"`
+	Port        *int    `json:"port"`
+	Target      *string `json:"target"`
+	Passphrase  *string `json:"passphrase"`
+	LatencyMS   *int    `json:"latency_ms"`
 }
 
 func (m *Manager) Create(in CreateInput) (ClientInfo, error) {
@@ -259,19 +266,20 @@ func (m *Manager) Create(in CreateInput) (ClientInfo, error) {
 	}
 
 	c := &Client{
-		ID:         id,
-		Name:       name,
-		Status:     StatusStopped,
-		Device:     NormalizeOpenDevice(in.Device),
-		FormatCode: strings.TrimSpace(in.FormatCode),
-		Mode:       mode,
-		Port:       port,
-		Target:     strings.TrimSpace(in.Target),
-		Passphrase: in.Passphrase,
-		LatencyMS:  lat,
-		AudioL:     audioSilence,
-		AudioR:     audioSilence,
-		logLines:   make([]string, 0, 32),
+		ID:          id,
+		Name:        name,
+		Status:      StatusStopped,
+		Device:      NormalizeOpenDevice(in.Device),
+		FormatCode:  strings.TrimSpace(in.FormatCode),
+		DeckLinkOut: in.DeckLinkOut,
+		Mode:        mode,
+		Port:        port,
+		Target:      strings.TrimSpace(in.Target),
+		Passphrase:  in.Passphrase,
+		LatencyMS:   lat,
+		AudioL:      audioSilence,
+		AudioR:      audioSilence,
+		logLines:    make([]string, 0, 32),
 	}
 	m.clients[id] = c
 	if err := m.saveLocked(); err != nil {
@@ -303,6 +311,9 @@ func (m *Manager) Update(id int, in UpdateInput) (ClientInfo, error) {
 	}
 	if in.FormatCode != nil {
 		c.FormatCode = strings.TrimSpace(*in.FormatCode)
+	}
+	if in.DeckLinkOut != nil {
+		c.DeckLinkOut = *in.DeckLinkOut
 	}
 	if in.Mode != nil {
 		mode := Mode(strings.TrimSpace(*in.Mode))
@@ -443,6 +454,7 @@ func (m *Manager) infoLocked(c *Client) ClientInfo {
 		Status:      c.Status,
 		Device:      c.Device,
 		FormatCode:  c.FormatCode,
+		DeckLinkOut: c.DeckLinkOut,
 		Mode:        c.Mode,
 		Port:        c.Port,
 		Target:      c.Target,
@@ -491,12 +503,20 @@ func (m *Manager) Start(id int) (ClientInfo, error) {
 		c.mu.Unlock()
 		return ClientInfo{}, fmt.Errorf("decode client %d already active", id)
 	}
-	// DeckLink is optional — SRT preview (thumb/meters) can run without it.
+	// DeckLink is opt-in (decklink_out). Existing clients keep a saved device but
+	// default decklink_out=false so SRT preview works without opening sinks.
+	wantDeckLink := c.DeckLinkOut
 	deviceRaw := strings.TrimSpace(c.Device)
 	formatCode := strings.TrimSpace(c.FormatCode)
-	if deviceRaw != "" && formatCode == "" {
-		c.mu.Unlock()
-		return ClientInfo{}, fmt.Errorf("output format is required when a DeckLink device is set")
+	if wantDeckLink {
+		if deviceRaw == "" {
+			c.mu.Unlock()
+			return ClientInfo{}, fmt.Errorf("DeckLink output device is required when decklink_out is enabled")
+		}
+		if formatCode == "" {
+			c.mu.Unlock()
+			return ClientInfo{}, fmt.Errorf("output format is required when decklink_out is enabled")
+		}
 	}
 	if c.Mode == ModeCaller && strings.TrimSpace(c.Target) == "" {
 		c.mu.Unlock()
@@ -507,7 +527,7 @@ func (m *Manager) Start(id int) (ClientInfo, error) {
 	c.mu.Unlock()
 
 	device := ""
-	if deviceRaw != "" {
+	if wantDeckLink {
 		device = m.ResolveOpenDevice(deviceRaw)
 	}
 
@@ -516,7 +536,9 @@ func (m *Manager) Start(id int) (ClientInfo, error) {
 	}
 
 	c.mu.Lock()
-	c.Device = device
+	if wantDeckLink {
+		c.Device = device
+	}
 	if c.Status != StatusStopped {
 		c.mu.Unlock()
 		return ClientInfo{}, fmt.Errorf("decode client %d already active", id)
@@ -531,10 +553,10 @@ func (m *Manager) Start(id int) (ClientInfo, error) {
 	info := m.infoLocked(c)
 	c.mu.Unlock()
 
-	if device == "" {
-		c.appendLog("start requested – SRT preview only (no DeckLink)")
+	if wantDeckLink {
+		c.appendLog("start requested – waiting for SRT (+ DeckLink out)")
 	} else {
-		c.appendLog("start requested – waiting for SRT")
+		c.appendLog("start requested – SRT preview only (DeckLink out disabled)")
 	}
 	go m.runLoop(c)
 	return info, nil
@@ -697,6 +719,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	audioSeg := filepath.Join(outDir, "audio_%03d.ts")
 
 	c.mu.Lock()
+	wantDeckLink := c.DeckLinkOut
 	deviceRaw := strings.TrimSpace(c.Device)
 	formatCode := strings.TrimSpace(c.FormatCode)
 	mode := c.Mode
@@ -706,7 +729,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		return err
 	}
 
-	useDeckLink := deviceRaw != "" && formatCode != ""
+	useDeckLink := wantDeckLink && deviceRaw != "" && formatCode != ""
 	device := ""
 	if useDeckLink {
 		device = m.ResolveOpenDevice(deviceRaw)

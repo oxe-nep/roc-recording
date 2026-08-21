@@ -193,7 +193,12 @@ export default function DecodeGrid() {
 
   const toggleLoop = async (c: PlayoutClient) => {
     await withBusy(c.id, async () => {
-      await updatePlayoutClient(c.id, { loop: !c.loop });
+      const next = !c.loop;
+      const wasOn = isPlayoutOn(c.status);
+      // -stream_loop is set when FFmpeg starts, so apply LOOP via a clean restart.
+      if (wasOn) await stopPlayout(c.id);
+      await updatePlayoutClient(c.id, { loop: next });
+      if (wasOn) await startPlayout(c.id);
     });
   };
 

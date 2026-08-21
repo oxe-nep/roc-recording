@@ -2,6 +2,10 @@ server {
     listen 80;
     server_name _;
 
+    # Media uploads (playout library) can be multi-GB; nginx default is 1m.
+    client_max_body_size 16g;
+    client_body_timeout 3600s;
+
     # Proxy capture-host backend (outside k3s) through same origin to avoid mixed content.
     location /api/ {
         proxy_pass http://${BACKEND_HOST}:${BACKEND_PORT};
@@ -11,7 +15,10 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-API-Key ${API_KEY};
-        proxy_read_timeout 300s;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+        # Stream large multipart bodies instead of buffering to disk first.
+        proxy_request_buffering off;
     }
 
     location /thumb/ {

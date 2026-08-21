@@ -575,6 +575,15 @@ export async function uploadPlayoutMedia(file: File): Promise<PlayoutMediaItem> 
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
+    if (res.status === 413) {
+      throw new Error("File too large for proxy (nginx body limit). Redeploy frontend with 16g limit.");
+    }
+    if (res.status === 401) {
+      throw new Error("Unauthorized — check API key / nginx inject");
+    }
+    if (res.status === 404) {
+      throw new Error("Upload endpoint missing — rebuild/restart backend on capture host");
+    }
     throw new Error(err.error || `uploadPlayoutMedia: ${res.status}`);
   }
   return res.json();

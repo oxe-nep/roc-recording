@@ -26,7 +26,9 @@ func registerPlayoutRoutes(r chi.Router, playMgr *playout.Manager) {
 	})
 
 	r.Post("/api/playout/media", func(w http.ResponseWriter, r *http.Request) {
-		const maxMem = 64 << 20 // 64 MiB form buffer; file streams to disk
+		// Cap total request body (16 GiB) so ParseMultipartForm cannot fill the disk unbounded.
+		r.Body = http.MaxBytesReader(w, r.Body, 16<<30)
+		const maxMem = 64 << 20 // 64 MiB in-memory; remainder spills to temp files
 		if err := r.ParseMultipartForm(maxMem); err != nil {
 			jsonError(w, "invalid multipart form: "+err.Error(), http.StatusBadRequest)
 			return

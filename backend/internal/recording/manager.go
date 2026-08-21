@@ -53,16 +53,22 @@ type Manager struct {
 	recordingDir       string
 	ffmpegBin          string
 	categoryAssignPath string
+	namesAssignPath    string
 	pathSettingsPath   string
 }
 
 func NewManager(recordingDir, ffmpegBin string, captureMgr *capture.Manager, categoryAssignPath, pathSettingsPath string) *Manager {
+	namesPath := ""
+	if categoryAssignPath != "" {
+		namesPath = filepath.Join(filepath.Dir(categoryAssignPath), "channel-names.json")
+	}
 	m := &Manager{
 		states:             make(map[int]*recState),
 		captureMgr:         captureMgr,
 		recordingDir:       recordingDir,
 		ffmpegBin:          ffmpegBin,
 		categoryAssignPath: categoryAssignPath,
+		namesAssignPath:    namesPath,
 		pathSettingsPath:   pathSettingsPath,
 	}
 	m.loadRecordingPath()
@@ -70,19 +76,24 @@ func NewManager(recordingDir, ffmpegBin string, captureMgr *capture.Manager, cat
 	return m
 }
 
-func (m *Manager) Register(id int) {
+func (m *Manager) Register(id int, defaultName string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	label := sanitizeLabel(defaultName)
+	if label == "" {
+		label = fmt.Sprintf("ch%d", id)
+	}
 	m.states[id] = &recState{
 		status:   StatusIdle,
-		label:    fmt.Sprintf("ch%d", id),
+		label:    label,
 		category: DefaultCategory,
 	}
 }
 
-// LoadCategoryAssignments applies persisted per-channel category choices.
+// LoadCategoryAssignments applies persisted per-channel category and name choices.
 func (m *Manager) LoadCategoryAssignments() {
 	m.loadChannelCategories()
+	m.loadChannelNames()
 }
 
 type ChannelInfo struct {
@@ -156,9 +167,14 @@ func (m *Manager) SetName(id int, name string) (ChannelInfo, error) {
 		return ChannelInfo{}, fmt.Errorf("invalid recording name")
 	}
 	st.mu.Lock()
-	defer st.mu.Unlock()
 	st.label = clean
-	return m.buildInfo(id, st), nil
+	info := m.buildInfo(id, st)
+	st.mu.Unlock()
+
+	m.mu.Lock()
+	_ = m.saveChannelNamesLocked()
+	m.mu.Unlock()
+	return info, nil
 }
 
 func (m *Manager) SetCategory(id int, category string) (ChannelInfo, error) {

@@ -7,6 +7,7 @@ import {
   uploadPlayoutMedia,
   type PlayoutMediaItem,
 } from "@/lib/api";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 
 type Props = {
   open: boolean;
@@ -25,6 +26,8 @@ export default function MediaLibraryModal({ open, onClose }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useBodyScrollLock(open);
 
   const load = async () => {
     try {

@@ -181,6 +181,57 @@ func (m *Manager) saveChannelCategoriesLocked() error {
 	return os.WriteFile(m.categoryAssignPath, data, 0o644)
 }
 
+func (m *Manager) loadChannelNames() {
+	if m.namesAssignPath == "" {
+		return
+	}
+	data, err := os.ReadFile(m.namesAssignPath)
+	if err != nil {
+		return
+	}
+	var asg map[string]string
+	if err := json.Unmarshal(data, &asg); err != nil {
+		log.Printf("[recording] bad names file %s: %v", m.namesAssignPath, err)
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for idStr, name := range asg {
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			continue
+		}
+		st, ok := m.states[id]
+		if !ok {
+			continue
+		}
+		clean := sanitizeLabel(name)
+		if clean == "" {
+			continue
+		}
+		st.mu.Lock()
+		st.label = clean
+		st.mu.Unlock()
+	}
+}
+
+func (m *Manager) saveChannelNamesLocked() error {
+	if m.namesAssignPath == "" {
+		return nil
+	}
+	asg := make(map[string]string, len(m.states))
+	for id, st := range m.states {
+		st.mu.Lock()
+		asg[fmt.Sprintf("%d", id)] = st.label
+		st.mu.Unlock()
+	}
+	data, err := json.MarshalIndent(asg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(m.namesAssignPath, data, 0o644)
+}
+
 func (m *Manager) ListCategories() ([]CategoryInfo, error) {
 	if err := m.EnsureLibrary(); err != nil {
 		return nil, err

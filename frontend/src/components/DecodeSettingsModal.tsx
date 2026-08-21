@@ -16,6 +16,7 @@ import {
   type PlayoutMediaItem,
 } from "@/lib/api";
 import LibraryModal from "@/components/LibraryModal";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 
 type Props = {
   open: boolean;
@@ -53,6 +54,8 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
   const [logsOpen, setLogsOpen] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const logBoxRef = useRef<HTMLPreElement>(null);
+
+  useBodyScrollLock(open);
 
   const channelId = client?.id;
   const active = client ? isPlayoutOn(client.status) : false;

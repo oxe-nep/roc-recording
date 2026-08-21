@@ -108,7 +108,7 @@ func main() {
 		filepath.Join(filepath.Dir(cfgPath), "recordings-path.json"),
 	)
 	for _, ch := range cfg.Channels {
-		recMgr.Register(ch.ID)
+		recMgr.Register(ch.ID, ch.Name)
 	}
 	recMgr.LoadCategoryAssignments()
 	playMgr.SetLibraryResolver(func(category, name string) (string, error) {

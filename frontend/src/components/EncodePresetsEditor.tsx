@@ -10,6 +10,7 @@ import {
   type EncodeCodecOption,
   type EncodePreset,
 } from "@/lib/api";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 
 /** Target average video bitrate in Mbps — maxrate/bufsize derived automatically. */
 const VIDEO_MBPS = [3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40] as const;
@@ -107,6 +108,8 @@ export default function EncodePresetsEditor({ open, onClose, onChanged }: Props)
   const [editingId, setEditingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useBodyScrollLock(open);
 
   const load = useCallback(async () => {
     try {

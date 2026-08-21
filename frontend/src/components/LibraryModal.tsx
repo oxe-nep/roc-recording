@@ -15,6 +15,7 @@ import {
   type LibraryCategory,
   type LibraryFile,
 } from "@/lib/api";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 
 type Props = {
   open: boolean;
@@ -37,6 +38,8 @@ export default function LibraryModal({ open, onClose, pickMode, onPick }: Props)
   const [pathBusy, setPathBusy] = useState(false);
   const [playerURL, setPlayerURL] = useState<string | null>(null);
   const [playingKey, setPlayingKey] = useState<string | null>(null);
+
+  useBodyScrollLock(open);
 
   const load = useCallback(async () => {
     try {

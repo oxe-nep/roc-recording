@@ -31,6 +31,10 @@ body {
   line-height: 1.5;
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
 .container {
   max-width: 100%;
   margin: 0 auto;
@@ -1122,6 +1126,7 @@ body {
   justify-content: center;
   z-index: 1000;
   padding: 20px;
+  overscroll-behavior: contain;
 }
 
 .modal-panel {

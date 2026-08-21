@@ -19,6 +19,7 @@ import {
   type Stream,
   isCaptureOn,
 } from "@/lib/api";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 
 type Props = {
   open: boolean;
@@ -56,6 +57,8 @@ export default function ChannelSettingsModal({
   const [logsOpen, setLogsOpen] = useState(false);
   const logBoxRef = useRef<HTMLPreElement>(null);
   const baselineRef = useRef({ name: "", category: "", preset: "" });
+
+  useBodyScrollLock(open);
 
   const isRunning = stream?.status === "running";
   const captureOn = stream ? isCaptureOn(stream.status) : false;

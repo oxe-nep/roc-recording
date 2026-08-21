@@ -8,11 +8,15 @@ const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? "";
 export interface Stream {
   id: number;
   name: string;
-  status: "running" | "stopped" | "error";
+  status: "running" | "waiting" | "stopped" | "error";
   error?: string;
   format?: string;
   encode_preset: string;
   hls_url: string;
+}
+
+export function isCaptureOn(status: Stream["status"]): boolean {
+  return status === "running" || status === "waiting";
 }
 
 export interface EncodePreset {
@@ -117,6 +121,13 @@ export async function startStream(id: number): Promise<void> {
 export async function stopStream(id: number): Promise<void> {
   const res = await apiFetch(`/api/streams/${id}/stop`, { method: "POST" });
   if (!res.ok) throw new Error(`stopStream: ${res.status}`);
+}
+
+export async function fetchStreamLogs(id: number): Promise<string[]> {
+  const res = await apiFetch(`/api/streams/${id}/logs`);
+  if (!res.ok) throw new Error(`fetchStreamLogs: ${res.status}`);
+  const body = await res.json();
+  return (body.lines ?? []) as string[];
 }
 
 export interface RecordingInfo {

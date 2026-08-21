@@ -21,9 +21,14 @@ type Status string
 
 const (
 	StatusStopped Status = "stopped"
-	StatusRunning Status = "running"
+	StatusWaiting Status = "waiting" // capture loop on, no valid input yet
+	StatusRunning Status = "running" // DeckLink format detected / signal present
 	StatusError   Status = "error"
 )
+
+func isActiveStatus(st Status) bool {
+	return st == StatusRunning || st == StatusWaiting
+}
 
 // reSignalFormat matches lines like:
 // "Found Decklink mode 1920 x 1080 with rate 25.00(i)" or "50.00"
@@ -36,6 +41,8 @@ var reSignalFormat = regexp.MustCompile(`Found Decklink mode (\d+) x (\d+) with 
 var reAstatsPeak = regexp.MustCompile(`lavfi\.astats\.(\d+)\.Peak_level=([-\d.]+|-?inf)`)
 
 const audioSilence = -90.0 // treat -inf as this value
+
+const streamLogCap = 200
 
 type Stream struct {
 	ID           int
@@ -50,14 +57,41 @@ type Stream struct {
 	feedURL      string
 	cmd          *exec.Cmd
 	stopCh       chan struct{}
+	logLines     []string
 	mu           sync.Mutex
 }
 
 // Snapshot returns mutable fields under the stream lock for safe API responses.
+// Error is intentionally omitted from the operator UI path — use Logs() for detail.
 func (s *Stream) Snapshot() (status Status, errStr, format, preset string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.Status, s.Error, s.Format, s.EncodePreset
+	return s.Status, "", s.Format, s.EncodePreset
+}
+
+func (s *Stream) appendLog(msg string) {
+	line := time.Now().Format("15:04:05") + " " + msg
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.logLines = append(s.logLines, line)
+	if len(s.logLines) > streamLogCap {
+		s.logLines = append([]string(nil), s.logLines[len(s.logLines)-streamLogCap:]...)
+	}
+}
+
+// Logs returns a copy of recent channel log lines (newest last).
+func (m *Manager) Logs(id int) ([]string, bool) {
+	m.mu.RLock()
+	s, ok := m.streams[id]
+	m.mu.RUnlock()
+	if !ok {
+		return nil, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, len(s.logLines))
+	copy(out, s.logLines)
+	return out, true
 }
 
 // EncodeProfile is the always-on master encode written to the local UDP feed.
@@ -125,7 +159,8 @@ func (m *Manager) Register(id int, name, ffmpegInput, encodePreset string) {
 		EncodePreset: encodePreset,
 		ffmpegInput:  ffmpegInput,
 		// Larger FIFO + overrun_nonfatal so REC can join mid-stream without dropping the writer.
-		feedURL: fmt.Sprintf("udp://127.0.0.1:%d?pkt_size=1316&fifo_size=5000000&overrun_nonfatal=1", 21000+id),
+		feedURL:  fmt.Sprintf("udp://127.0.0.1:%d?pkt_size=1316&fifo_size=5000000&overrun_nonfatal=1", 21000+id),
+		logLines: make([]string, 0, 32),
 	}
 }
 
@@ -286,18 +321,21 @@ func (m *Manager) Start(id int) error {
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.Status == StatusRunning {
+	if isActiveStatus(s.Status) {
+		s.mu.Unlock()
 		return fmt.Errorf("channel %d is already running", id)
 	}
 
 	s.stopCh = make(chan struct{})
-	s.Status = StatusRunning
+	// Stay in waiting until DeckLink reports a format — then flip to running.
+	s.Status = StatusWaiting
 	s.Error = ""
+	s.Format = ""
 	s.AudioL = audioSilence
 	s.AudioR = audioSilence
+	s.mu.Unlock()
 
+	s.appendLog("channel start requested – waiting for signal")
 	go m.runLoop(s)
 	return nil
 }
@@ -311,22 +349,25 @@ func (m *Manager) Stop(id int) error {
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.Status != StatusRunning {
+	if !isActiveStatus(s.Status) {
+		s.mu.Unlock()
 		return fmt.Errorf("channel %d is not running", id)
 	}
 
 	if s.stopCh == nil {
+		s.mu.Unlock()
 		return fmt.Errorf("channel %d stop channel is not initialized", id)
 	}
 	// Idempotent stop: if another request already closed stopCh, do nothing.
 	select {
 	case <-s.stopCh:
+		s.mu.Unlock()
 		return nil
 	default:
 		close(s.stopCh)
 	}
+	s.mu.Unlock()
+	s.appendLog("channel stop requested")
 	return nil
 }
 
@@ -335,9 +376,9 @@ func (m *Manager) StopAll() {
 	ids := make([]int, 0, len(m.streams))
 	for id, s := range m.streams {
 		s.mu.Lock()
-		running := s.Status == StatusRunning
+		active := isActiveStatus(s.Status)
 		s.mu.Unlock()
-		if running {
+		if active {
 			ids = append(ids, id)
 		}
 	}
@@ -383,7 +424,7 @@ func (m *Manager) AudioLevels(id int) (l, r float64, ok bool) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.AudioL, s.AudioR, s.Status == StatusRunning
+	return s.AudioL, s.AudioR, isActiveStatus(s.Status)
 }
 
 func (m *Manager) StatusByID(id int) (Status, bool) {
@@ -413,13 +454,16 @@ func (m *Manager) runLoop(s *Stream) {
 			s.mu.Lock()
 			s.Status = StatusStopped
 			s.Format = ""
+			s.Error = ""
 			s.AudioL = audioSilence
 			s.AudioR = audioSilence
 			s.mu.Unlock()
+			s.appendLog("channel stopped")
 			return
 		default:
 		}
 
+		s.appendLog("starting FFmpeg")
 		start := time.Now()
 		err := m.runFFmpeg(s)
 
@@ -427,21 +471,37 @@ func (m *Manager) runLoop(s *Stream) {
 		case <-s.stopCh:
 			s.mu.Lock()
 			s.Status = StatusStopped
+			s.Format = ""
+			s.Error = ""
+			s.AudioL = audioSilence
+			s.AudioR = audioSilence
 			s.mu.Unlock()
 			m.removeThumb(s.ID)
+			s.appendLog("channel stopped")
 			return
 		default:
 		}
 
+		// No signal / FFmpeg exited — stay in waiting until DeckLink reports a format again.
+		s.mu.Lock()
+		s.Format = ""
+		s.Error = ""
+		s.AudioL = audioSilence
+		s.AudioR = audioSilence
+		s.Status = StatusWaiting
+		s.mu.Unlock()
+		m.removeThumb(s.ID)
+
 		if err == nil {
 			consecutiveFails = 0
-			// Brief pause so a clean exit cannot tight-loop thrash DeckLink/NVENC.
+			s.appendLog("FFmpeg exited cleanly – restarting")
 			select {
 			case <-s.stopCh:
 				s.mu.Lock()
 				s.Status = StatusStopped
 				s.mu.Unlock()
 				m.removeThumb(s.ID)
+				s.appendLog("channel stopped")
 				return
 			case <-time.After(500 * time.Millisecond):
 			}
@@ -460,14 +520,10 @@ func (m *Manager) runLoop(s *Stream) {
 			delay = 15 * time.Second
 		}
 
-		s.mu.Lock()
-		s.Status = StatusError
-		s.Error = err.Error()
-		s.mu.Unlock()
-		m.removeThumb(s.ID)
-
-		log.Printf("[channel %d] FFmpeg exited after %s: %v (fail #%d) – restarting in %s",
-			s.ID, uptime.Round(time.Millisecond), err, consecutiveFails, delay)
+		msg := fmt.Sprintf("FFmpeg exited after %s: %v (fail #%d) – retry in %s",
+			uptime.Round(time.Millisecond), err, consecutiveFails, delay)
+		log.Printf("[channel %d] %s", s.ID, msg)
+		s.appendLog(msg)
 
 		select {
 		case <-s.stopCh:
@@ -475,12 +531,9 @@ func (m *Manager) runLoop(s *Stream) {
 			s.Status = StatusStopped
 			s.mu.Unlock()
 			m.removeThumb(s.ID)
+			s.appendLog("channel stopped")
 			return
 		case <-time.After(delay):
-			s.mu.Lock()
-			s.Status = StatusRunning
-			s.Error = ""
-			s.mu.Unlock()
 		}
 	}
 }
@@ -581,8 +634,13 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for scanner.Scan() {
 			line := scanner.Text()
-			if strings.Contains(line, "Error") || strings.Contains(line, "error:") {
+			notable := strings.Contains(line, "Error") ||
+				strings.Contains(line, "error:") ||
+				strings.Contains(line, "No input signal") ||
+				reSignalFormat.MatchString(line)
+			if notable {
 				log.Printf("[channel %d] %s", s.ID, line)
+				s.appendLog(line)
 			}
 			if mm := reSignalFormat.FindStringSubmatch(line); mm != nil {
 				height := mm[2]
@@ -599,8 +657,13 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 				}
 				format := fmt.Sprintf("%s%s%d", height, scanType, rateInt)
 				s.mu.Lock()
+				wasWaiting := s.Status == StatusWaiting
 				s.Format = format
+				s.Status = StatusRunning
 				s.mu.Unlock()
+				if wasWaiting {
+					s.appendLog(fmt.Sprintf("signal acquired: %s", format))
+				}
 				log.Printf("[channel %d] detected format: %s", s.ID, format)
 			}
 			if mm := reAstatsPeak.FindStringSubmatch(line); mm != nil {
@@ -627,10 +690,12 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 			}
 			if strings.Contains(line, "No input signal detected") {
 				s.mu.Lock()
+				s.Status = StatusWaiting
 				s.Format = ""
 				s.AudioL = audioSilence
 				s.AudioR = audioSilence
 				s.mu.Unlock()
+				m.removeThumb(s.ID)
 				if cmd.Process != nil {
 					_ = cmd.Process.Kill()
 				}

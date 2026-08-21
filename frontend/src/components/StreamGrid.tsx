@@ -19,6 +19,7 @@ import {
   type EncodePreset,
   type LibraryCategory,
   type SrtInfo,
+  isCaptureOn,
 } from "@/lib/api";
 import Thumbnail from "@/components/Thumbnail";
 import AudioMonitor from "@/components/AudioMonitor";
@@ -155,7 +156,7 @@ export default function StreamGrid() {
   useEffect(() => {
     let alive = true;
     const pollAudio = async () => {
-      const running = streamsRef.current.filter((s) => s.status === "running");
+      const running = streamsRef.current.filter((s) => isCaptureOn(s.status));
       if (running.length === 0) return;
       const updates: Record<number, AudioLevels> = {};
       await Promise.all(
@@ -250,12 +251,14 @@ export default function StreamGrid() {
           const srtOn = srtById[s.id]?.status === "streaming";
           const activePreset = presets.find((p) => p.id === s.encode_preset);
           const cat = rec?.category || "_unsorted";
+          const captureOn = isCaptureOn(s.status);
+          const hasSignal = s.status === "running";
           return (
             <div key={s.id} className={`card-panel ${s.status}`}>
-              <AudioMonitor id={s.id} active={s.status === "running"} listening={isListening} />
+              <AudioMonitor id={s.id} active={hasSignal} listening={isListening} />
               <div className="card-stage">
                 <div className="card-thumb">
-                  <Thumbnail id={s.id} active={s.status === "running"} />
+                  <Thumbnail id={s.id} active={captureOn} />
                   {isEncoding && (
                     <div className="rec-badge">
                       {formatElapsed(rec?.elapsed_sec)} · {formatBitrate(rec?.bitrate_kbps)}
@@ -291,19 +294,24 @@ export default function StreamGrid() {
                     <div
                       className="card-meta"
                       title={[
-                        s.format || null,
+                        s.format || (s.status === "waiting" ? "Waiting for signal" : null),
                         cat === "_unsorted" ? "Unsorted" : cat,
                         activePreset?.label || s.encode_preset || null,
                       ]
                         .filter(Boolean)
                         .join(" · ")}
                     >
-                      {s.format && (
+                      {s.format ? (
                         <>
                           <span className="card-meta-item card-meta-format">{s.format}</span>
                           <span className="card-meta-sep">·</span>
                         </>
-                      )}
+                      ) : s.status === "waiting" ? (
+                        <>
+                          <span className="card-meta-item card-meta-waiting">Waiting for signal</span>
+                          <span className="card-meta-sep">·</span>
+                        </>
+                      ) : null}
                       <span className="card-meta-item">
                         {cat === "_unsorted" ? "Unsorted" : cat}
                       </span>
@@ -318,13 +326,15 @@ export default function StreamGrid() {
                       type="button"
                       className={`rec-btn ${isRecording ? "recording" : "idle"}`}
                       onClick={() => toggleRecording(s.id)}
-                      disabled={recBusy[s.id] || (s.status !== "running" && !isRecording)}
+                      disabled={recBusy[s.id] || (!hasSignal && !isRecording)}
                       title={
                         isRecording
                           ? "Stop recording"
-                          : s.status !== "running"
-                            ? "Start channel before recording"
-                            : "Start recording"
+                          : s.status === "waiting"
+                            ? "Waiting for input signal"
+                            : !hasSignal
+                              ? "Start channel before recording"
+                              : "Start recording"
                       }
                     >
                       {recBusy[s.id] ? "…" : "REC"}
@@ -333,18 +343,20 @@ export default function StreamGrid() {
                       type="button"
                       className={`stream-btn ${srtOn ? "streaming" : "idle"}`}
                       onClick={() => toggleSrt(s.id)}
-                      disabled={srtBusy[s.id] || (s.status !== "running" && !srtOn)}
+                      disabled={srtBusy[s.id] || (!hasSignal && !srtOn)}
                       title={
                         srtOn
                           ? srtById[s.id]?.publish_url || "Stop SRT stream"
-                          : s.status !== "running"
-                            ? "Start channel before streaming"
-                            : "Start SRT stream (configure in settings)"
+                          : s.status === "waiting"
+                            ? "Waiting for input signal"
+                            : !hasSignal
+                              ? "Start channel before streaming"
+                              : "Start SRT stream (configure in settings)"
                       }
                     >
                       {srtBusy[s.id] ? "…" : "STREAM"}
                     </button>
-                    {s.status !== "running" && (
+                    {!captureOn && (
                       <button
                         className={`badge ${s.status}`}
                         onClick={() => startPreview(s)}
@@ -353,7 +365,7 @@ export default function StreamGrid() {
                         {busy[s.id] ? "…" : "Start"}
                       </button>
                     )}
-                    {s.status === "running" && (
+                    {hasSignal && (
                       <button
                         className={`badge listen-btn ${isListening ? "active" : ""}`}
                         onClick={() => toggleListen(s.id)}
@@ -374,8 +386,6 @@ export default function StreamGrid() {
                   </div>
                 </div>
               </div>
-
-              {s.error && <div className="error-bar">{s.error}</div>}
             </div>
           );
         })}

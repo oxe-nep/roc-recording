@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   fetchSrt,
+  fetchStreamLogs,
   setEncodePreset,
   setRecordingCategory,
   setRecordingName,
@@ -16,6 +17,7 @@ import {
   type RecordingInfo,
   type SrtInfo,
   type Stream,
+  isCaptureOn,
 } from "@/lib/api";
 
 type Props = {
@@ -50,9 +52,13 @@ export default function ChannelSettingsModal({
   const [srtLatency, setSrtLatency] = useState(120);
   const [srtPassphrase, setSrtPassphrase] = useState("");
   const [srtPassDirty, setSrtPassDirty] = useState(false);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [logsOpen, setLogsOpen] = useState(false);
+  const logBoxRef = useRef<HTMLPreElement>(null);
   const baselineRef = useRef({ name: "", category: "", preset: "" });
 
   const isRunning = stream?.status === "running";
+  const captureOn = stream ? isCaptureOn(stream.status) : false;
   const isRecording = recording?.status === "recording";
   const channelId = stream?.id;
   const srtStreaming = srt?.status === "streaming";
@@ -74,6 +80,8 @@ export default function ChannelSettingsModal({
     setError(null);
     setSrtPassphrase("");
     setSrtPassDirty(false);
+    setLogsOpen(false);
+    setLogs([]);
 
     fetchSrt(channelId)
       .then((info) => {
@@ -98,6 +106,30 @@ export default function ChannelSettingsModal({
     const interval = setInterval(tick, 2000);
     return () => clearInterval(interval);
   }, [open, channelId]);
+
+  useEffect(() => {
+    if (!open || channelId == null || !logsOpen) return;
+    let alive = true;
+    const tick = async () => {
+      try {
+        const lines = await fetchStreamLogs(channelId);
+        if (alive) setLogs(lines);
+      } catch {
+        // ignore transient log fetch errors
+      }
+    };
+    tick();
+    const interval = setInterval(tick, 1500);
+    return () => {
+      alive = false;
+      clearInterval(interval);
+    };
+  }, [open, channelId, logsOpen]);
+
+  useEffect(() => {
+    if (!logsOpen || !logBoxRef.current) return;
+    logBoxRef.current.scrollTop = logBoxRef.current.scrollHeight;
+  }, [logs, logsOpen]);
 
   useEffect(() => {
     if (!open) return;
@@ -132,8 +164,8 @@ export default function ChannelSettingsModal({
         await setEncodePreset(stream.id, preset);
       }
 
-      // Always restart a running capture so encode takes effect now.
-      if (isRunning) {
+      // Always restart an active capture so encode takes effect now.
+      if (captureOn) {
         try {
           await stopSrt(stream.id);
         } catch {
@@ -292,7 +324,7 @@ export default function ChannelSettingsModal({
               {activePreset
                 ? `${activePreset.video_codec} · ${activePreset.video_bitrate} video · ${activePreset.audio_bitrate} audio`
                 : "Choose a preset"}
-              {isRunning && !isRecording ? " — Apply restarts capture so encode takes effect" : ""}
+              {captureOn && !isRecording ? " — Apply restarts capture so encode takes effect" : ""}
             </span>
           </label>
         </div>
@@ -309,12 +341,12 @@ export default function ChannelSettingsModal({
             title={
               isRecording
                 ? "Stop recording first"
-                : isRunning
+                : captureOn
                   ? "Save and restart capture so the encode preset applies now"
                   : "Save channel settings"
             }
           >
-            {busy ? "…" : isRunning ? "Apply (restart)" : "Apply"}
+            {busy ? "…" : captureOn ? "Apply (restart)" : "Apply"}
           </button>
         </div>
 
@@ -437,6 +469,25 @@ export default function ChannelSettingsModal({
               {srtBusy ? "…" : srtStreaming ? "Stop SRT" : "Start SRT"}
             </button>
           </div>
+        </div>
+
+        <div className="channel-settings-logs">
+          <div className="channel-settings-logs-head">
+            <h3>Channel logs</h3>
+            <button
+              type="button"
+              className="badge"
+              onClick={() => setLogsOpen((v) => !v)}
+              title={logsOpen ? "Hide channel logs" : "Show recent capture / FFmpeg lines"}
+            >
+              {logsOpen ? "Hide" : "Show"}
+            </button>
+          </div>
+          {logsOpen && (
+            <pre ref={logBoxRef} className="channel-settings-logbox">
+              {logs.join("\n")}
+            </pre>
+          )}
         </div>
       </div>
     </div>

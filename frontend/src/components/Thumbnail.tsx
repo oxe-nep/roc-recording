@@ -11,30 +11,35 @@ interface ThumbnailProps {
 
 export default function Thumbnail({ id, active }: ThumbnailProps) {
   const [src, setSrc] = useState(`${BASE}/thumb/${id}?t=${Date.now()}`);
-  const [hasError, setHasError] = useState(false);
+  const [hasError, setHasError] = useState(!active);
 
   useEffect(() => {
     if (!active) {
       setHasError(true);
       return;
     }
-    setHasError(false);
+    setSrc(`${BASE}/thumb/${id}?t=${Date.now()}`);
     const interval = setInterval(() => {
-      setHasError(false);
       setSrc(`${BASE}/thumb/${id}?t=${Date.now()}`);
     }, 1000);
     return () => clearInterval(interval);
   }, [id, active]);
 
-  if (!active || hasError) {
+  if (!active) {
     return <span className="no-signal">No signal</span>;
   }
 
   return (
-    <img
-      src={src}
-      alt={`Channel ${id}`}
-      onError={() => setHasError(true)}
-    />
+    <>
+      {hasError && <span className="no-signal">No signal</span>}
+      {/* Keep img mounted so retries can succeed when signal returns */}
+      <img
+        className={hasError ? "thumb-hidden" : undefined}
+        src={src}
+        alt={`Channel ${id}`}
+        onLoad={() => setHasError(false)}
+        onError={() => setHasError(true)}
+      />
+    </>
   );
 }

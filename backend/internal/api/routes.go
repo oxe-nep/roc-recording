@@ -134,6 +134,20 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 			jsonOK(w, map[string]string{"status": "stopped"})
 		})
 
+		r.Get("/api/streams/{id}/logs", func(w http.ResponseWriter, r *http.Request) {
+			id, err := strconv.Atoi(chi.URLParam(r, "id"))
+			if err != nil {
+				jsonError(w, "invalid channel id", http.StatusBadRequest)
+				return
+			}
+			lines, ok := mgr.Logs(id)
+			if !ok {
+				jsonError(w, "channel not found", http.StatusNotFound)
+				return
+			}
+			jsonOK(w, map[string]any{"id": id, "lines": lines})
+		})
+
 		r.Get("/api/srt", func(w http.ResponseWriter, r *http.Request) {
 			list := srtMgr.ListAll()
 			sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })
@@ -686,6 +700,8 @@ func shouldSkipRequestLog(r *http.Request) bool {
 	case path == "/api/streams", path == "/api/recordings", path == "/api/srt", path == "/api/system", path == "/api/encode/presets",
 		path == "/api/encode/options",
 		path == "/api/library/categories", path == "/api/library/files":
+		return true
+	case strings.HasPrefix(path, "/api/streams/") && strings.HasSuffix(path, "/logs"):
 		return true
 	case strings.HasPrefix(path, "/api/recordings/files/"):
 		return true

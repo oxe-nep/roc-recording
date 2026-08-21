@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -25,6 +26,7 @@ const (
 	StatusStopped Status = "stopped"
 	StatusWaiting Status = "waiting"
 	StatusRunning Status = "running"
+	StatusPaused  Status = "paused"
 )
 
 type Mode string
@@ -79,10 +81,11 @@ type Client struct {
 	// deviceTryAlt: next DeckLink open uses the alternate of unique-id vs open_name.
 	deviceTryAlt bool
 
-	cmd      *exec.Cmd
-	stopCh   chan struct{}
-	logLines []string
-	mu       sync.Mutex
+	cmd        *exec.Cmd
+	previewCmd *exec.Cmd
+	stopCh     chan struct{}
+	logLines   []string
+	mu         sync.Mutex
 }
 
 type ClientInfo struct {
@@ -521,7 +524,7 @@ func (m *Manager) AudioLevels(id int) (l, r float64, ok bool) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.AudioL, c.AudioR, c.Status == StatusRunning || c.Status == StatusWaiting
+	return c.AudioL, c.AudioR, c.Status == StatusRunning || c.Status == StatusWaiting || c.Status == StatusPaused
 }
 
 func (m *Manager) StatusByID(id int) (Status, bool) {
@@ -579,7 +582,7 @@ func (m *Manager) infoLocked(c *Client) ClientInfo {
 		HasPass:     c.Passphrase != "",
 		LatencyMS:   c.LatencyMS,
 		BitrateKbps: c.BitrateKbps,
-		Sending:     c.Sending && (c.Status == StatusRunning || c.Status == StatusWaiting),
+		Sending:     c.Sending && (c.Status == StatusRunning || c.Status == StatusWaiting || c.Status == StatusPaused),
 		Reconnects:  c.Reconnects,
 		Error:       c.LastError,
 	}
@@ -754,17 +757,15 @@ func (m *Manager) Stop(id int) (ClientInfo, error) {
 			close(c.stopCh)
 		}
 	}
-	cmd := c.cmd
-	if cmd != nil && cmd.Process != nil {
-		_ = cmd.Process.Kill()
-	}
+	killProc(c.cmd)
+	killProc(c.previewCmd)
 	c.mu.Unlock()
 	c.appendLog("stop requested")
 
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		c.mu.Lock()
-		done := c.Status == StatusStopped && c.cmd == nil
+		done := c.Status == StatusStopped && c.cmd == nil && c.previewCmd == nil
 		if done {
 			c.AudioL = audioSilence
 			c.AudioR = audioSilence
@@ -780,6 +781,7 @@ func (m *Manager) Stop(id int) (ClientInfo, error) {
 	}
 	c.mu.Lock()
 	c.cmd = nil
+	c.previewCmd = nil
 	c.Status = StatusStopped
 	c.stopCh = nil
 	c.Sending = false
@@ -789,6 +791,67 @@ func (m *Manager) Stop(id int) (ClientInfo, error) {
 	info := m.infoLocked(c)
 	c.mu.Unlock()
 	return info, nil
+}
+
+func killProc(cmd *exec.Cmd) {
+	if cmd != nil && cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
+}
+
+func (m *Manager) Pause(id int) (ClientInfo, error) {
+	c, err := m.get(id)
+	if err != nil {
+		return ClientInfo{}, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.Status != StatusRunning && c.Status != StatusWaiting {
+		return ClientInfo{}, fmt.Errorf("decode client %d is not playing", id)
+	}
+	if err := signalProc(c.cmd, syscall.SIGSTOP); err != nil {
+		return ClientInfo{}, fmt.Errorf("pause failed: %w", err)
+	}
+	_ = signalProc(c.previewCmd, syscall.SIGSTOP)
+	c.Status = StatusPaused
+	c.Sending = false
+	c.appendLogUnlocked("paused")
+	return m.infoLocked(c), nil
+}
+
+func (m *Manager) Resume(id int) (ClientInfo, error) {
+	c, err := m.get(id)
+	if err != nil {
+		return ClientInfo{}, err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.Status != StatusPaused {
+		return ClientInfo{}, fmt.Errorf("decode client %d is not paused", id)
+	}
+	if err := signalProc(c.cmd, syscall.SIGCONT); err != nil {
+		return ClientInfo{}, fmt.Errorf("resume failed: %w", err)
+	}
+	_ = signalProc(c.previewCmd, syscall.SIGCONT)
+	c.Status = StatusRunning
+	c.Sending = true
+	c.appendLogUnlocked("resumed")
+	return m.infoLocked(c), nil
+}
+
+func signalProc(cmd *exec.Cmd, sig os.Signal) error {
+	if cmd == nil || cmd.Process == nil {
+		return nil
+	}
+	return cmd.Process.Signal(sig)
+}
+
+func (c *Client) appendLogUnlocked(msg string) {
+	line := time.Now().Format("15:04:05") + " " + msg
+	c.logLines = append(c.logLines, line)
+	if len(c.logLines) > logCap {
+		c.logLines = append([]string(nil), c.logLines[len(c.logLines)-logCap:]...)
+	}
 }
 
 func (m *Manager) StopAll() {
@@ -807,10 +870,10 @@ func (m *Manager) runLoop(c *Client) {
 	const restartDelay = 1500 * time.Millisecond
 	defer func() {
 		c.mu.Lock()
-		if c.cmd != nil && c.cmd.Process != nil {
-			_ = c.cmd.Process.Kill()
-			c.cmd = nil
-		}
+		killProc(c.cmd)
+		killProc(c.previewCmd)
+		c.cmd = nil
+		c.previewCmd = nil
 		c.Status = StatusStopped
 		c.stopCh = nil
 		c.BitrateKbps = 0
@@ -1008,7 +1071,9 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		"-probesize", "2M",
 	}
 	audioSrc := "[0:a]"
+	silenceInput := false
 	if source == SourceFile {
+		args = append(args, "-hwaccel", "cuda")
 		if loop {
 			args = append(args, "-stream_loop", "-1")
 		}
@@ -1019,11 +1084,95 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 				"-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
 			)
 			audioSrc = "[1:a]"
+			silenceInput = true
 			c.appendLog("file has no audio – using silent track")
 		}
 	} else {
-		// Encode STREAM remuxes MPEG-TS over SRT — force demuxer so probe does not stall.
-		args = append(args, "-f", "mpegts", "-i", srtURL)
+		args = append(args, "-hwaccel", "cuda", "-f", "mpegts", "-i", srtURL)
+	}
+
+	// File → DeckLink: keep a single DeckLink output (proven path). Preview runs separately
+	// so image2/HLS cannot stall the DeckLink consumer after preroll.
+	if useDeckLink && source == SourceFile {
+		var vdl string
+		if fmtInfo.Interlaced {
+			vdl = fmt.Sprintf(
+				"[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,tinterlace=interleave_top,format=yuv422p10le[v]",
+				w, h, w, h, fps*2,
+			)
+		} else {
+			vdl = fmt.Sprintf(
+				"[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,format=yuv422p10le[v]",
+				w, h, w, h, fps,
+			)
+		}
+		filter := vdl + ";" + fmt.Sprintf(
+			"%saresample=48000:async=1:first_pts=0,aformat=channel_layouts=stereo,asetnsamples=n=%d:p=0[a]",
+			audioSrc, samplesPerFrame,
+		)
+		dlArgs := append([]string{}, args...)
+		dlArgs = append(dlArgs,
+			"-filter_complex", filter,
+			"-map", "[v]",
+			"-map", "[a]",
+			"-c:v", "v210",
+			"-c:a", "pcm_s16le",
+			"-ar", "48000",
+			"-ac", "2",
+			"-fps_mode", "cfr",
+			"-r", fmt.Sprintf("%g", fps),
+			"-s", fmt.Sprintf("%dx%d", w, h),
+		)
+		if fmtInfo.Interlaced {
+			dlArgs = append(dlArgs, "-flags", "+ilme+ildct", "-field_order", "tt")
+		}
+		if formatCode != "" && !isAllDigits(formatCode) {
+			dlArgs = append(dlArgs, "-format_code", strings.TrimSpace(formatCode))
+		}
+		dlArgs = append(dlArgs, "-preroll", "0.5", "-f", "decklink", openDevice)
+
+		previewArgs := []string{
+			"-hide_banner", "-loglevel", "info",
+			"-fflags", "+genpts+discardcorrupt",
+			"-nostats",
+			"-re",
+		}
+		if loop {
+			previewArgs = append(previewArgs, "-stream_loop", "-1")
+		}
+		// Soft decode for UI preview — NVDEC reserved for the DeckLink process.
+		previewArgs = append(previewArgs, "-i", filePath)
+		prevAudio := "[0:a]"
+		if silenceInput {
+			previewArgs = append(previewArgs, "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000")
+			prevAudio = "[1:a]"
+		}
+		prevFilter :=
+			"[0:v]fps=1,scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,format=yuv420p[vthumb];" +
+				fmt.Sprintf("%sasplit=2[ahls][ameter];", prevAudio) +
+				"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
+				"ametadata=print,anullsink"
+		previewArgs = append(previewArgs,
+			"-filter_complex", prevFilter,
+			"-map", "[vthumb]",
+			"-q:v", "4",
+			"-update", "1",
+			"-f", "image2",
+			thumbPath,
+			"-map", "[ahls]",
+			"-c:a", "aac",
+			"-b:a", "128k",
+			"-ar", "48000",
+			"-ac", "2",
+			"-f", "hls",
+			"-hls_time", "1",
+			"-hls_list_size", "4",
+			"-hls_flags", "delete_segments+independent_segments+omit_endlist",
+			"-hls_segment_filename", audioSeg,
+			audioPlaylist,
+		)
+
+		return m.runFileDeckLinkAndPreview(c, stopCh, openDevice, formatCode, w, h, fps, fmtInfo.Interlaced, loop, dlArgs, previewArgs)
 	}
 
 	var filter string
@@ -1171,6 +1320,122 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			c.mu.Unlock()
 		}
 		return err
+	}
+}
+
+func (m *Manager) runFileDeckLinkAndPreview(
+	c *Client,
+	stopCh <-chan struct{},
+	openDevice, formatCode string,
+	w, h int, fps float64, interlaced, loop bool,
+	dlArgs, previewArgs []string,
+) error {
+	dlCmd := exec.Command(m.ffmpegBin, dlArgs...)
+	dlStdout, err := dlCmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	dlStderr, err := dlCmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+
+	prevCmd := exec.Command(m.ffmpegBin, previewArgs...)
+	prevStderr, err := prevCmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+
+	c.mu.Lock()
+	c.cmd = dlCmd
+	c.previewCmd = prevCmd
+	c.LastError = ""
+	c.mu.Unlock()
+
+	c.appendLog(fmt.Sprintf(
+		"starting file DeckLink (%q format=%s %dx%d@%g interlaced=%v loop=%v) + preview",
+		openDevice, formatCode, w, h, fps, interlaced, loop,
+	))
+	c.appendLog("decklink args: " + strings.Join(decklinkArgSummary(dlArgs, openDevice), " "))
+
+	if err := dlCmd.Start(); err != nil {
+		c.mu.Lock()
+		c.cmd = nil
+		c.previewCmd = nil
+		c.mu.Unlock()
+		return err
+	}
+	if err := prevCmd.Start(); err != nil {
+		killProc(dlCmd)
+		c.mu.Lock()
+		c.cmd = nil
+		c.previewCmd = nil
+		c.mu.Unlock()
+		return fmt.Errorf("preview start: %w", err)
+	}
+
+	go m.watchStderr(c, dlStderr)
+	go m.watchStderr(c, prevStderr)
+	go m.watchProgress(c, dlStdout)
+
+	dlDone := make(chan error, 1)
+	prevDone := make(chan error, 1)
+	go func() { dlDone <- dlCmd.Wait() }()
+	go func() { prevDone <- prevCmd.Wait() }()
+
+	select {
+	case <-stopCh:
+		killProc(dlCmd)
+		killProc(prevCmd)
+		<-dlDone
+		<-prevDone
+		c.mu.Lock()
+		c.cmd = nil
+		c.previewCmd = nil
+		c.mu.Unlock()
+		return nil
+	case err := <-dlDone:
+		killProc(prevCmd)
+		select {
+		case <-prevDone:
+		case <-time.After(2 * time.Second):
+			killProc(prevCmd)
+		}
+		c.mu.Lock()
+		c.cmd = nil
+		c.previewCmd = nil
+		c.Sending = false
+		c.BitrateKbps = 0
+		if c.Status != StatusPaused {
+			c.Status = StatusWaiting
+		}
+		c.mu.Unlock()
+		return err
+	case <-prevDone:
+		// Preview exit is non-fatal while DeckLink still runs.
+		c.mu.Lock()
+		c.previewCmd = nil
+		c.mu.Unlock()
+		c.appendLog("preview ffmpeg exited – DeckLink continues")
+		select {
+		case <-stopCh:
+			killProc(dlCmd)
+			<-dlDone
+			c.mu.Lock()
+			c.cmd = nil
+			c.mu.Unlock()
+			return nil
+		case err := <-dlDone:
+			c.mu.Lock()
+			c.cmd = nil
+			c.Sending = false
+			c.BitrateKbps = 0
+			if c.Status != StatusPaused {
+				c.Status = StatusWaiting
+			}
+			c.mu.Unlock()
+			return err
+		}
 	}
 }
 

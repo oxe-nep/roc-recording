@@ -154,6 +154,34 @@ func registerPlayoutRoutes(r chi.Router, playMgr *playout.Manager) {
 		jsonOK(w, info)
 	})
 
+	r.Post("/api/playout/{id}/pause", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.Atoi(chi.URLParam(r, "id"))
+		if err != nil {
+			jsonError(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		info, err := playMgr.Pause(id)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusConflict)
+			return
+		}
+		jsonOK(w, info)
+	})
+
+	r.Post("/api/playout/{id}/resume", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.Atoi(chi.URLParam(r, "id"))
+		if err != nil {
+			jsonError(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		info, err := playMgr.Resume(id)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusConflict)
+			return
+		}
+		jsonOK(w, info)
+	})
+
 	r.Get("/api/playout/{id}/logs", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.Atoi(chi.URLParam(r, "id"))
 		if err != nil {

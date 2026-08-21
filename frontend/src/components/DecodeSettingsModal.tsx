@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   encodeLibraryPlayRef,
-  fetchLibraryFiles,
   fetchPlayoutDevices,
   fetchPlayoutLogs,
   fetchPlayoutMedia,
@@ -16,6 +15,7 @@ import {
   type PlayoutDevice,
   type PlayoutMediaItem,
 } from "@/lib/api";
+import LibraryModal from "@/components/LibraryModal";
 
 type Props = {
   open: boolean;
@@ -24,11 +24,20 @@ type Props = {
   onSaved: () => void;
 };
 
+function displayFileLabel(fileId: string, fileName?: string, media?: PlayoutMediaItem[]): string {
+  if (fileName) return fileName;
+  if (!fileId) return "";
+  const uploaded = media?.find((m) => m.id === fileId);
+  if (uploaded) return uploaded.name;
+  return fileId.startsWith("lib:") ? fileId.slice(4) : fileId;
+}
+
 export default function DecodeSettingsModal({ open, client, onClose, onSaved }: Props) {
   const [name, setName] = useState("");
   const [formatCode, setFormatCode] = useState("");
   const [source, setSource] = useState<"srt" | "file">("srt");
   const [fileId, setFileId] = useState("");
+  const [fileLabel, setFileLabel] = useState("");
   const [loop, setLoop] = useState(false);
   const [mode, setMode] = useState<"listener" | "caller">("caller");
   const [port, setPort] = useState(9201);
@@ -38,7 +47,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
   const [passDirty, setPassDirty] = useState(false);
   const [devices, setDevices] = useState<PlayoutDevice[]>([]);
   const [media, setMedia] = useState<PlayoutMediaItem[]>([]);
-  const [recordings, setRecordings] = useState<LibraryFile[]>([]);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -56,6 +65,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
     setFormatCode(client.format_code || "");
     setSource(client.source === "file" ? "file" : "srt");
     setFileId(client.file_id || "");
+    setFileLabel(displayFileLabel(client.file_id || "", client.file_name));
     setLoop(!!client.loop);
     setMode(client.mode || "caller");
     setPort(client.port || 9200 + channelId);
@@ -66,11 +76,12 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
     setError(null);
     setLogsOpen(false);
     setLogs([]);
-    Promise.all([fetchPlayoutDevices(), fetchPlayoutMedia(), fetchLibraryFiles()])
-      .then(([devs, files, recs]) => {
+    setLibraryOpen(false);
+    Promise.all([fetchPlayoutDevices(), fetchPlayoutMedia()])
+      .then(([devs, files]) => {
         setDevices(devs);
         setMedia(files);
-        setRecordings(recs);
+        setFileLabel((prev) => prev || displayFileLabel(client.file_id || "", client.file_name, files));
       })
       .catch((e) => setError(String(e)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -103,11 +114,11 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !busy) onClose();
+      if (e.key === "Escape" && !busy && !libraryOpen) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose, busy]);
+  }, [open, onClose, busy, libraryOpen]);
 
   if (!open || !client) return null;
 
@@ -155,7 +166,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
 
   const validate = (): string | null => {
     if (!formatCode) return "Select an output format";
-    if (source === "file" && !fileId) return "Select a media file for File mode";
+    if (source === "file" && !fileId) return "Select a recording or media file";
     if (source === "srt" && mode === "caller" && !target.trim()) return "Caller mode requires a target";
     return null;
   };
@@ -206,234 +217,243 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
     }
   };
 
+  const onPickRecording = (f: LibraryFile) => {
+    const id = encodeLibraryPlayRef(f.category, f.name);
+    setFileId(id);
+    setFileLabel(`${f.category}/${f.name}`);
+  };
+
   return (
-    <div className="modal-backdrop" onClick={() => !busy && onClose()} role="presentation">
-      <div
-        className="modal-panel channel-settings-modal"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-label={`Decode settings for ${client.name}`}
-      >
-        <div className="modal-header">
-          <h2>
-            <span className="input-badge decode">{client.id}</span>
-            <span>{name.trim() || `Decode ${client.id}`}</span>
-          </h2>
-          <button type="button" className="modal-close" onClick={onClose} aria-label="Close" disabled={busy}>
-            ×
-          </button>
-        </div>
-
-        {error && <div className="error-message">{error}</div>}
-
-        {active && (
-          <div className="channel-settings-lock">
-            Decode is active — stop it before changing format, source, or SRT/file settings.
-          </div>
-        )}
-
-        <div className="channel-settings-form">
-          <label className="presets-field">
-            <span>Name</span>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              disabled={busy || active}
-              placeholder={`Decode ${client.id}`}
-            />
-          </label>
-
-          <label className="presets-field">
-            <span>Output format</span>
-            <div className="channel-settings-actions" style={{ marginTop: 0, marginBottom: 4 }}>
-              <select
-                value={formats.some((f) => f.code === formatCode) ? formatCode : formatCode || ""}
-                onChange={(e) => setFormatCode(e.target.value)}
-                disabled={busy || active || formats.length === 0}
-                style={{ flex: 1 }}
-              >
-                <option value="">{formats.length ? "Select format…" : "No formats probed"}</option>
-                {formats.map((f) => (
-                  <option key={f.code} value={f.code}>
-                    {f.label}
-                  </option>
-                ))}
-              </select>
-              <button type="button" className="badge" onClick={refreshDevices} disabled={busy || active}>
-                Re-probe
-              </button>
-            </div>
-            {formats.length === 0 && (
-              <span className="channel-settings-hint">No modes probed for this output. Try Re-probe.</span>
-            )}
-            {probeLog && formats.length === 0 && (
-              <pre className="channel-settings-logbox" style={{ marginTop: 8, maxHeight: 120 }}>
-                {probeLog}
-              </pre>
-            )}
-          </label>
-
-          <label className="presets-field">
-            <span>Source</span>
-            <select
-              value={source}
-              onChange={(e) => setSource(e.target.value as "srt" | "file")}
-              disabled={busy || active}
-            >
-              <option value="srt">SRT</option>
-              <option value="file">File</option>
-            </select>
-          </label>
-
-          {source === "file" ? (
-            <>
-              <label className="presets-field">
-                <span>Media file</span>
-                <select
-                  value={fileId}
-                  onChange={(e) => setFileId(e.target.value)}
-                  disabled={busy || active}
-                >
-                  <option value="">Select file…</option>
-                  {recordings.length > 0 && (
-                    <optgroup label="Recordings">
-                      {recordings.map((f) => {
-                        const id = encodeLibraryPlayRef(f.category, f.name);
-                        return (
-                          <option key={id} value={id}>
-                            {f.category}/{f.name}
-                          </option>
-                        );
-                      })}
-                    </optgroup>
-                  )}
-                  {media.length > 0 && (
-                    <optgroup label="Uploaded">
-                      {media.map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                </select>
-                <span className="channel-settings-hint">
-                  Pick a recorded clip, or upload via Decode → Media.
-                </span>
-              </label>
-              <label className="presets-field" style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                <input
-                  type="checkbox"
-                  checked={loop}
-                  onChange={(e) => setLoop(e.target.checked)}
-                  disabled={busy || active}
-                />
-                <span>Loop</span>
-              </label>
-            </>
-          ) : (
-            <>
-              <label className="presets-field">
-                <span>SRT mode</span>
-                <select
-                  value={mode}
-                  onChange={(e) => setMode(e.target.value as "listener" | "caller")}
-                  disabled={busy || active}
-                >
-                  <option value="listener">Listener (publishers connect to us)</option>
-                  <option value="caller">Caller (we pull from a target)</option>
-                </select>
-              </label>
-
-              {mode === "listener" ? (
-                <label className="presets-field">
-                  <span>Listen port</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={65535}
-                    value={port}
-                    onChange={(e) => setPort(Number(e.target.value) || 0)}
-                    disabled={busy || active}
-                  />
-                </label>
-              ) : (
-                <label className="presets-field">
-                  <span>Target</span>
-                  <input
-                    value={target}
-                    onChange={(e) => setTarget(e.target.value)}
-                    disabled={busy || active}
-                    placeholder="127.0.0.1:9101 or srt://…"
-                  />
-                  <span className="channel-settings-hint">
-                    Same host as encode STREAM: use 127.0.0.1 and the channel port (often 9100+id). Start STREAM first.
-                  </span>
-                </label>
-              )}
-
-              <label className="presets-field">
-                <span>Latency (ms)</span>
-                <input
-                  type="number"
-                  min={20}
-                  max={8000}
-                  value={latency}
-                  onChange={(e) => setLatency(Number(e.target.value) || 120)}
-                  disabled={busy || active}
-                />
-              </label>
-
-              <label className="presets-field">
-                <span>Passphrase {client.has_passphrase && !passDirty ? "(set)" : ""}</span>
-                <input
-                  type="password"
-                  value={passphrase}
-                  onChange={(e) => {
-                    setPassphrase(e.target.value);
-                    setPassDirty(true);
-                  }}
-                  disabled={busy || active}
-                  placeholder={client.has_passphrase ? "••••••••" : "optional"}
-                  autoComplete="new-password"
-                />
-              </label>
-            </>
-          )}
-        </div>
-
-        <div className="channel-settings-actions">
-          <button
-            type="button"
-            className={`stream-btn ${active ? "streaming" : "idle"}`}
-            onClick={toggleRun}
-            disabled={busy}
-            title={active ? "Stop decode" : "Save settings and start decode"}
-          >
-            {busy ? "…" : active ? "STOP" : "START"}
-          </button>
-          <button type="button" className="badge" onClick={onClose} disabled={busy}>
-            Cancel
-          </button>
-          <button type="button" className="global-rec-btn" onClick={apply} disabled={busy || active}>
-            {busy ? "…" : "Save"}
-          </button>
-        </div>
-
-        <div className="channel-settings-logs">
-          <div className="channel-settings-logs-head">
-            <h3>Decode logs</h3>
-            <button type="button" className="badge" onClick={() => setLogsOpen((v) => !v)}>
-              {logsOpen ? "Hide" : "Show"}
+    <>
+      <div className="modal-backdrop" onClick={() => !busy && onClose()} role="presentation">
+        <div
+          className="modal-panel channel-settings-modal"
+          onClick={(e) => e.stopPropagation()}
+          role="dialog"
+          aria-label={`Decode settings for ${client.name}`}
+        >
+          <div className="modal-header">
+            <h2>
+              <span className="input-badge decode">{client.id}</span>
+              <span>{name.trim() || `Decode ${client.id}`}</span>
+            </h2>
+            <button type="button" className="modal-close" onClick={onClose} aria-label="Close" disabled={busy}>
+              ×
             </button>
           </div>
-          {logsOpen && (
-            <pre ref={logBoxRef} className="channel-settings-logbox">
-              {logs.join("\n")}
-            </pre>
+
+          {error && <div className="error-message">{error}</div>}
+
+          {active && (
+            <div className="channel-settings-lock">
+              Decode is active — stop it before changing format, source, or SRT/file settings.
+            </div>
           )}
+
+          <div className="channel-settings-form">
+            <label className="presets-field">
+              <span>Name</span>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                disabled={busy || active}
+                placeholder={`Decode ${client.id}`}
+              />
+            </label>
+
+            <label className="presets-field">
+              <span>Output format</span>
+              <div className="channel-settings-actions" style={{ marginTop: 0, marginBottom: 4 }}>
+                <select
+                  value={formats.some((f) => f.code === formatCode) ? formatCode : formatCode || ""}
+                  onChange={(e) => setFormatCode(e.target.value)}
+                  disabled={busy || active || formats.length === 0}
+                  style={{ flex: 1 }}
+                >
+                  <option value="">{formats.length ? "Select format…" : "No formats probed"}</option>
+                  {formats.map((f) => (
+                    <option key={f.code} value={f.code}>
+                      {f.label}
+                    </option>
+                  ))}
+                </select>
+                <button type="button" className="badge" onClick={refreshDevices} disabled={busy || active}>
+                  Re-probe
+                </button>
+              </div>
+              {formats.length === 0 && (
+                <span className="channel-settings-hint">No modes probed. Try Re-probe.</span>
+              )}
+              {probeLog && formats.length === 0 && (
+                <pre className="channel-settings-logbox" style={{ marginTop: 8, maxHeight: 120 }}>
+                  {probeLog}
+                </pre>
+              )}
+            </label>
+
+            <label className="presets-field">
+              <span>Source</span>
+              <select
+                value={source}
+                onChange={(e) => setSource(e.target.value as "srt" | "file")}
+                disabled={busy || active}
+              >
+                <option value="srt">SRT</option>
+                <option value="file">File</option>
+              </select>
+            </label>
+
+            {source === "file" ? (
+              <>
+                <label className="presets-field">
+                  <span>Media file</span>
+                  <input value={fileLabel || "No file selected"} disabled readOnly />
+                  <div className="channel-settings-actions" style={{ marginTop: 8 }}>
+                    <button
+                      type="button"
+                      className="global-rec-btn"
+                      disabled={busy || active}
+                      onClick={() => setLibraryOpen(true)}
+                    >
+                      Browse recordings…
+                    </button>
+                    {media.length > 0 && (
+                      <select
+                        value={fileId.startsWith("lib:") ? "" : fileId}
+                        disabled={busy || active}
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          setFileId(id);
+                          setFileLabel(displayFileLabel(id, undefined, media));
+                        }}
+                      >
+                        <option value="">Or uploaded…</option>
+                        {media.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                </label>
+                <label className="presets-field" style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                  <input
+                    type="checkbox"
+                    checked={loop}
+                    onChange={(e) => setLoop(e.target.checked)}
+                    disabled={busy || active}
+                  />
+                  <span>Loop</span>
+                </label>
+              </>
+            ) : (
+              <>
+                <label className="presets-field">
+                  <span>SRT mode</span>
+                  <select
+                    value={mode}
+                    onChange={(e) => setMode(e.target.value as "listener" | "caller")}
+                    disabled={busy || active}
+                  >
+                    <option value="listener">Listener (publishers connect to us)</option>
+                    <option value="caller">Caller (we pull from a target)</option>
+                  </select>
+                </label>
+
+                {mode === "listener" ? (
+                  <label className="presets-field">
+                    <span>Listen port</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={port}
+                      onChange={(e) => setPort(Number(e.target.value) || 0)}
+                      disabled={busy || active}
+                    />
+                  </label>
+                ) : (
+                  <label className="presets-field">
+                    <span>Target</span>
+                    <input
+                      value={target}
+                      onChange={(e) => setTarget(e.target.value)}
+                      disabled={busy || active}
+                      placeholder="127.0.0.1:9101 or srt://…"
+                    />
+                  </label>
+                )}
+
+                <label className="presets-field">
+                  <span>Latency (ms)</span>
+                  <input
+                    type="number"
+                    min={20}
+                    max={8000}
+                    value={latency}
+                    onChange={(e) => setLatency(Number(e.target.value) || 120)}
+                    disabled={busy || active}
+                  />
+                </label>
+
+                <label className="presets-field">
+                  <span>Passphrase {client.has_passphrase && !passDirty ? "(set)" : ""}</span>
+                  <input
+                    type="password"
+                    value={passphrase}
+                    onChange={(e) => {
+                      setPassphrase(e.target.value);
+                      setPassDirty(true);
+                    }}
+                    disabled={busy || active}
+                    placeholder={client.has_passphrase ? "••••••••" : "optional"}
+                    autoComplete="new-password"
+                  />
+                </label>
+              </>
+            )}
+          </div>
+
+          <div className="channel-settings-actions">
+            <button
+              type="button"
+              className={`stream-btn ${active ? "streaming" : "idle"}`}
+              onClick={toggleRun}
+              disabled={busy}
+            >
+              {busy ? "…" : active ? "STOP" : source === "file" ? "PLAY" : "START"}
+            </button>
+            <button type="button" className="badge" onClick={onClose} disabled={busy}>
+              Cancel
+            </button>
+            <button type="button" className="global-rec-btn" onClick={apply} disabled={busy || active}>
+              {busy ? "…" : "Save"}
+            </button>
+          </div>
+
+          <div className="channel-settings-logs">
+            <div className="channel-settings-logs-head">
+              <h3>Decode logs</h3>
+              <button type="button" className="badge" onClick={() => setLogsOpen((v) => !v)}>
+                {logsOpen ? "Hide" : "Show"}
+              </button>
+            </div>
+            {logsOpen && (
+              <pre ref={logBoxRef} className="channel-settings-logbox">
+                {logs.join("\n")}
+              </pre>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+
+      <LibraryModal
+        open={libraryOpen}
+        onClose={() => setLibraryOpen(false)}
+        pickMode
+        onPick={onPickRecording}
+      />
+    </>
   );
 }

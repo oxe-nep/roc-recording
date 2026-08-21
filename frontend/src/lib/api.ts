@@ -422,7 +422,7 @@ export interface PlayoutDevice {
 export interface PlayoutClient {
   id: number;
   name: string;
-  status: "stopped" | "waiting" | "running";
+	status: "stopped" | "waiting" | "running" | "paused";
   device: string;
   device_label?: string;
   format_code: string;
@@ -484,7 +484,11 @@ export interface PlayoutMediaItem {
 }
 
 export function isPlayoutOn(status: PlayoutClient["status"]): boolean {
-  return status === "running" || status === "waiting";
+  return status === "running" || status === "waiting" || status === "paused";
+}
+
+export function isPlayoutPaused(status: PlayoutClient["status"]): boolean {
+  return status === "paused";
 }
 
 export async function fetchPlayoutDevices(refresh = false): Promise<PlayoutDevice[]> {
@@ -546,6 +550,24 @@ export async function stopPlayout(id: number): Promise<PlayoutClient> {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || `stopPlayout: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function pausePlayout(id: number): Promise<PlayoutClient> {
+  const res = await apiFetch(`/api/playout/${id}/pause`, { method: "POST" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `pausePlayout: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function resumePlayout(id: number): Promise<PlayoutClient> {
+  const res = await apiFetch(`/api/playout/${id}/resume`, { method: "POST" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `resumePlayout: ${res.status}`);
   }
   return res.json();
 }

@@ -5,8 +5,12 @@ import {
   fetchPlayoutAudioLevels,
   fetchPlayoutClients,
   isPlayoutOn,
+  isPlayoutPaused,
+  pausePlayout,
+  resumePlayout,
   startPlayout,
   stopPlayout,
+  updatePlayoutClient,
   type AudioLevels,
   type PlayoutClient,
 } from "@/lib/api";
@@ -57,10 +61,6 @@ function SegmentedMeter({ db, label }: { db?: number; label: string }) {
   );
 }
 
-function sourceLabel(c: PlayoutClient): string {
-  return (c.source || "srt").toUpperCase();
-}
-
 function formatDisplay(code?: string): string {
   if (!code) return "—";
   const map: Record<string, string> = {
@@ -75,17 +75,26 @@ function formatDisplay(code?: string): string {
   return map[code] || code;
 }
 
-function metaLine(c: PlayoutClient): string {
-  const parts = [formatDisplay(c.format_code), sourceLabel(c)];
-  if (c.source === "file" && c.file_name) {
-    const short = c.file_name.includes("/") ? c.file_name.split("/").pop()! : c.file_name;
-    parts.push(short);
-  } else if (c.source !== "file" && c.mode === "caller" && c.target) {
-    parts.push(c.target);
-  } else if (c.source !== "file" && c.mode === "listener") {
-    parts.push(`:${c.port}`);
+function basename(path: string): string {
+  const parts = path.split(/[/\\]/);
+  return parts[parts.length - 1] || path;
+}
+
+/** Primary card title: file name or SRT stream target. */
+function cardTitle(c: PlayoutClient): string {
+  if (c.source === "file") {
+    if (c.file_name) return basename(c.file_name);
+    return c.name?.trim() || `Decode ${c.id}`;
   }
-  return parts.filter(Boolean).join(" · ");
+  if (c.mode === "caller" && c.target?.trim()) return c.target.trim();
+  if (c.mode === "listener") return `SRT :${c.port}`;
+  return c.name?.trim() || `Decode ${c.id}`;
+}
+
+function cardMeta(c: PlayoutClient): string {
+  const bits = [formatDisplay(c.format_code), (c.source || "srt").toUpperCase()];
+  if (c.source === "file" && c.loop) bits.push("LOOP");
+  return bits.join(" · ");
 }
 
 function waitingLabel(c: PlayoutClient): string {
@@ -131,11 +140,11 @@ export default function DecodeGrid() {
       const all = clientsRef.current;
       const updates: Record<number, AudioLevels> = {};
       for (const c of all) {
-        if (!isPlayoutOn(c.status)) {
+        if (!isPlayoutOn(c.status) || isPlayoutPaused(c.status)) {
           updates[c.id] = silence;
         }
       }
-      const active = all.filter((c) => isPlayoutOn(c.status));
+      const active = all.filter((c) => isPlayoutOn(c.status) && !isPlayoutPaused(c.status));
       await Promise.all(
         active.map(async (c) => {
           try {
@@ -157,18 +166,27 @@ export default function DecodeGrid() {
     };
   }, []);
 
-  const toggle = async (c: PlayoutClient) => {
-    setBusy((b) => ({ ...b, [c.id]: true }));
+  const withBusy = async (id: number, fn: () => Promise<void>) => {
+    setBusy((b) => ({ ...b, [id]: true }));
     setError(null);
     try {
-      if (isPlayoutOn(c.status)) await stopPlayout(c.id);
-      else await startPlayout(c.id);
+      await fn();
       await load();
     } catch (e) {
       setError(String(e));
     } finally {
-      setBusy((b) => ({ ...b, [c.id]: false }));
+      setBusy((b) => ({ ...b, [id]: false }));
     }
+  };
+
+  const toggleLoop = async (c: PlayoutClient) => {
+    await withBusy(c.id, async () => {
+      const next = !c.loop;
+      const wasOn = isPlayoutOn(c.status);
+      if (wasOn) await stopPlayout(c.id);
+      await updatePlayoutClient(c.id, { loop: next });
+      if (wasOn) await startPlayout(c.id);
+    });
   };
 
   const settingsClient = settingsId != null ? clients.find((c) => c.id === settingsId) ?? null : null;
@@ -196,21 +214,22 @@ export default function DecodeGrid() {
           <span>Loading decode channels…</span>
         </div>
       ) : clients.length === 0 ? (
-        <p className="io-section-empty">
-          No decode channels yet — waiting for DeckLink sinks to be probed on the host.
-        </p>
+        <p className="io-section-empty">No decode channels yet — waiting for sinks on the host.</p>
       ) : (
         <div className="cards-grid">
           {clients.map((c) => {
             const on = isPlayoutOn(c.status);
+            const paused = isPlayoutPaused(c.status);
+            const playing = on && !paused;
             const hasMedia = c.status === "running";
             const isListening = !!listening[c.id];
-            const title = c.name?.trim() || `Decode ${c.id}`;
+            const isFile = c.source === "file";
+            const title = cardTitle(c);
             return (
               <div key={c.id} className={`card-panel ${c.status}`}>
                 <AudioMonitor
                   id={c.id}
-                  active={on}
+                  active={playing}
                   listening={isListening}
                   playlistPath={`/hls/playout/${c.id}/audio.m3u8`}
                 />
@@ -220,13 +239,12 @@ export default function DecodeGrid() {
                     {on && (
                       <div className="thumb-badges">
                         <div className={`stream-badge${hasMedia || c.sending ? "" : " waiting"}`}>
-                          {hasMedia || c.sending
-                            ? `DECODE · ${formatBitrate(c.bitrate_kbps) === "--" ? "live" : formatBitrate(c.bitrate_kbps)}`
-                            : waitingLabel(c)}
+                          {paused
+                            ? "DECODE · paused"
+                            : hasMedia || c.sending
+                              ? `DECODE · ${formatBitrate(c.bitrate_kbps) === "--" ? "live" : formatBitrate(c.bitrate_kbps)}`
+                              : waitingLabel(c)}
                         </div>
-                        {(c.reconnects ?? 0) > 0 && !(hasMedia || c.sending) && (
-                          <div className="stream-badge waiting">reconnects {c.reconnects}</div>
-                        )}
                       </div>
                     )}
                   </div>
@@ -247,31 +265,77 @@ export default function DecodeGrid() {
                           {title}
                         </span>
                       </div>
-                      <div className="card-meta" title={metaLine(c)}>
+                      <div className="card-meta" title={cardMeta(c)}>
                         <span className="card-meta-item">{formatDisplay(c.format_code)}</span>
                         <span className="card-meta-sep">·</span>
-                        <span className="card-meta-item">{sourceLabel(c)}</span>
-                        {c.source === "file" && c.file_name && (
-                          <>
-                            <span className="card-meta-sep">·</span>
-                            <span className="card-meta-item">
-                              {c.file_name.includes("/") ? c.file_name.split("/").pop() : c.file_name}
-                            </span>
-                          </>
-                        )}
+                        <span className="card-meta-item">{(c.source || "srt").toUpperCase()}</span>
                       </div>
                     </div>
                     <div className="card-actions">
-                      <button
-                        type="button"
-                        className={`stream-btn ${on ? "streaming" : "idle"}`}
-                        onClick={() => toggle(c)}
-                        disabled={busy[c.id]}
-                        title={on ? "Stop decode" : "Start decode"}
-                      >
-                        {busy[c.id] ? "…" : on ? "STOP" : "START"}
-                      </button>
-                      {hasMedia && (
+                      {isFile ? (
+                        <>
+                          {!on || paused ? (
+                            <button
+                              type="button"
+                              className="stream-btn idle"
+                              disabled={busy[c.id] || (!c.file_id && !paused)}
+                              onClick={() =>
+                                withBusy(c.id, async () => {
+                                  if (paused) await resumePlayout(c.id);
+                                  else await startPlayout(c.id);
+                                })
+                              }
+                              title={paused ? "Resume" : "Play"}
+                            >
+                              {busy[c.id] ? "…" : "PLAY"}
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="stream-btn streaming"
+                              disabled={busy[c.id]}
+                              onClick={() => withBusy(c.id, async () => pausePlayout(c.id))}
+                              title="Pause"
+                            >
+                              {busy[c.id] ? "…" : "PAUSE"}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="badge"
+                            disabled={busy[c.id] || !on}
+                            onClick={() => withBusy(c.id, async () => stopPlayout(c.id))}
+                            title="Stop"
+                          >
+                            STOP
+                          </button>
+                          <button
+                            type="button"
+                            className={`badge${c.loop ? " active" : ""}`}
+                            disabled={busy[c.id]}
+                            onClick={() => toggleLoop(c)}
+                            title="Toggle loop"
+                          >
+                            LOOP
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          className={`stream-btn ${on ? "streaming" : "idle"}`}
+                          onClick={() =>
+                            withBusy(c.id, async () => {
+                              if (on) await stopPlayout(c.id);
+                              else await startPlayout(c.id);
+                            })
+                          }
+                          disabled={busy[c.id]}
+                          title={on ? "Stop" : "Start"}
+                        >
+                          {busy[c.id] ? "…" : on ? "STOP" : "START"}
+                        </button>
+                      )}
+                      {playing && (
                         <button
                           type="button"
                           className={`badge listen-btn ${isListening ? "active" : ""}`}

@@ -19,9 +19,12 @@ import {
 type Props = {
   open: boolean;
   onClose: () => void;
+  /** When set, picking a file calls onPick and closes (for decode File mode). */
+  pickMode?: boolean;
+  onPick?: (file: LibraryFile) => void;
 };
 
-export default function LibraryModal({ open, onClose }: Props) {
+export default function LibraryModal({ open, onClose, pickMode, onPick }: Props) {
   const [categories, setCategories] = useState<LibraryCategory[]>([]);
   const [files, setFiles] = useState<LibraryFile[]>([]);
   const [selectedCat, setSelectedCat] = useState<string>("");
@@ -195,10 +198,10 @@ export default function LibraryModal({ open, onClose }: Props) {
         className="modal-panel library-modal"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
-        aria-label="Recordings library"
+        aria-label={pickMode ? "Select recording" : "Recordings library"}
       >
         <div className="modal-header">
-          <h2>Recordings library</h2>
+          <h2>{pickMode ? "Select recording" : "Recordings library"}</h2>
           <div className="library-modal-header-actions">
             <button type="button" className="badge files-btn" onClick={load} disabled={loading}>
               {loading ? "…" : "Refresh"}
@@ -209,6 +212,7 @@ export default function LibraryModal({ open, onClose }: Props) {
           </div>
         </div>
 
+        {!pickMode && (
         <div className="library-path-bar">
           <label className="library-path-label" htmlFor="recordings-path">
             Storage path
@@ -231,6 +235,7 @@ export default function LibraryModal({ open, onClose }: Props) {
             {pathBusy ? "…" : "Save"}
           </button>
         </div>
+        )}
 
         {error && <div className="error-message">{error}</div>}
 
@@ -298,6 +303,19 @@ export default function LibraryModal({ open, onClose }: Props) {
                       </div>
                     </div>
                     <div className="recording-actions">
+                      {pickMode ? (
+                        <button
+                          type="button"
+                          className="global-rec-btn"
+                          onClick={() => {
+                            onPick?.(f);
+                            onClose();
+                          }}
+                        >
+                          Select
+                        </button>
+                      ) : (
+                        <>
                       <select
                         className="encode-preset-select"
                         value=""
@@ -331,6 +349,8 @@ export default function LibraryModal({ open, onClose }: Props) {
                       <button className="badge delete-btn" onClick={() => removeFile(f)} disabled={busyKey === key}>
                         Delete
                       </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 );
@@ -338,6 +358,7 @@ export default function LibraryModal({ open, onClose }: Props) {
             )}
           </div>
 
+          {!pickMode && (
           <div className="recordings-player-wrap">
             {playerURL ? (
               <video className="recordings-player" controls autoPlay src={playerURL} />
@@ -345,6 +366,7 @@ export default function LibraryModal({ open, onClose }: Props) {
               <div className="files-empty">Select a file to play.</div>
             )}
           </div>
+          )}
         </div>
       </div>
     </div>

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/url"
 	"os"
@@ -866,25 +867,55 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	if useDeckLink {
 		// Progressive: scale → fps → uyvy422.
 		// Interlaced (e.g. Hi50): produce 2× frames then tinterlace into fields.
+		samplesPerFrame := int(math.Round(48000 / fps))
+		if samplesPerFrame < 1 {
+			samplesPerFrame = 1920
+		}
 		var vchain string
 		if fmtInfo.Interlaced {
 			vchain = fmt.Sprintf(
-				"[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,tinterlace=interleave_top,format=uyvy422,split=2[vout][vt]",
+				"[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,tinterlace=interleave_top,format=uyvy422,split=2[vdl][vt]",
 				w, h, w, h, fps*2,
 			)
 		} else {
 			vchain = fmt.Sprintf(
-				"[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,format=uyvy422,split=2[vout][vt]",
+				"[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,format=uyvy422,split=2[vdl][vt]",
 				w, h, w, h, fps,
 			)
 		}
+		// fifo + asetnsamples: DeckLink schedules A/V in lockstep; without framed
+		// audio packets it logs "There's no buffered audio" and drops on the wire.
 		filter = vchain + ";" +
 			"[vt]scale=640:360,format=yuv420p[vthumb];" +
-			"[0:a]pan=stereo|c0=c0|c1=c1,asplit=3[aout][ahls][ameter];" +
+			fmt.Sprintf(
+				"[0:a]aresample=48000:async=1:first_pts=0,pan=stereo|c0=c0|c1=c1,asetnsamples=n=%d:p=0,asplit=3[aout][ahls][ameter];",
+				samplesPerFrame,
+			) +
 			"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
 			"ametadata=print,anullsink"
+		// DeckLink output first so it is not starved by thumb/HLS muxers.
 		args = append(base,
 			"-filter_complex", filter,
+			"-map", "[vdl]",
+			"-map", "[aout]",
+			"-c:v", "wrapped_avframe",
+			"-pix_fmt", "uyvy422",
+			"-c:a", "pcm_s16le",
+			"-ar", "48000",
+			"-ac", "2",
+			"-fps_mode", "cfr",
+			"-r", fmt.Sprintf("%g", fps),
+			"-s", fmt.Sprintf("%dx%d", w, h),
+		)
+		if fmtInfo.Interlaced {
+			args = append(args, "-flags", "+ilme+ildct", "-field_order", "tt")
+		}
+		if formatCode != "" && !isAllDigits(formatCode) {
+			args = append(args, "-format_code", strings.TrimSpace(formatCode))
+		}
+		args = append(args,
+			"-preroll", "1.5",
+			"-f", "decklink", openDevice,
 			"-map", "[vthumb]",
 			"-r", "1",
 			"-q:v", "4",
@@ -902,23 +933,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			"-hls_flags", "delete_segments+independent_segments+omit_endlist",
 			"-hls_segment_filename", audioSeg,
 			audioPlaylist,
-			"-map", "[vout]",
-			"-map", "[aout]",
-			"-c:v", "wrapped_avframe",
-			"-pix_fmt", "uyvy422",
-			"-c:a", "pcm_s16le",
-			"-ar", "48000",
-			"-ac", "2",
-			"-r", fmt.Sprintf("%g", fps),
-			"-s", fmt.Sprintf("%dx%d", w, h),
 		)
-		if fmtInfo.Interlaced {
-			args = append(args, "-flags", "+ilme+ildct", "-field_order", "tt")
-		}
-		if formatCode != "" && !isAllDigits(formatCode) {
-			args = append(args, "-format_code", strings.TrimSpace(formatCode))
-		}
-		args = append(args, "-preroll", "0.5", "-f", "decklink", openDevice)
 	} else {
 		// Preview only. Keep meters in filter_complex (anullsink) — never write
 		// a null muxer to stdout, that steals -progress pipe:1 and freezes UI state.

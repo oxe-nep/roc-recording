@@ -94,7 +94,14 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
   if (!open || !client) return null;
 
   const selected = devices.find((d) => d.name === device);
-  const formats = selected?.formats ?? [];
+  const formats = selected?.formats?.length
+    ? selected.formats
+    : [
+        { code: "Hi50", label: "1080i50", width: 1920, height: 1080, fps: 25, interlaced: true },
+        { code: "Hp50", label: "1080p50", width: 1920, height: 1080, fps: 50, interlaced: false },
+        { code: "Hp25", label: "1080p25", width: 1920, height: 1080, fps: 25, interlaced: false },
+        { code: "hp50", label: "720p50", width: 1280, height: 720, fps: 50, interlaced: false },
+      ];
 
   const apply = async () => {
     if (active) {
@@ -201,9 +208,9 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
           <label className="presets-field">
             <span>Output format</span>
             <select
-              value={formatCode}
+              value={formats.some((f) => f.code === formatCode) ? formatCode : ""}
               onChange={(e) => setFormatCode(e.target.value)}
-              disabled={busy || active || formats.length === 0}
+              disabled={busy || active}
             >
               <option value="">Select format…</option>
               {formats.map((f) => (
@@ -212,6 +219,17 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                 </option>
               ))}
             </select>
+            <input
+              style={{ marginTop: 6 }}
+              value={formatCode}
+              onChange={(e) => setFormatCode(e.target.value)}
+              disabled={busy || active}
+              placeholder="or type format_code (e.g. Hi50)"
+              title="DeckLink FourCC / format_code"
+            />
+            <span className="channel-settings-hint">
+              Prefer a probed mode when available. Manual codes like Hi50 / Hp25 also work.
+            </span>
           </label>
 
           <label className="presets-field">

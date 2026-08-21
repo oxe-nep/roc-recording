@@ -695,10 +695,20 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	formatCode := c.FormatCode
 	mode := c.Mode
 	srtURL, err := m.srtInputURL(c)
-	w, h, fps := formatGeometry(formatCode)
 	c.mu.Unlock()
 	if err != nil {
 		return err
+	}
+
+	devs, _ := m.Devices()
+	w, h, fps := 1920, 1080, 25.0
+	if f, ok := LookupFormat(formatCode, devs); ok {
+		w, h, fps = f.Width, f.Height, f.FPS
+		if fps <= 0 {
+			fps = 25
+		}
+	} else {
+		w, h, fps = formatGeometry(formatCode)
 	}
 
 	// Decode SRT → scale to selected DeckLink mode → DeckLink + thumb + HLS audio + meters.

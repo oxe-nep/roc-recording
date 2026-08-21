@@ -20,44 +20,110 @@ type Device struct {
 
 // Format is a DeckLink mode (format_code + human label).
 type Format struct {
-	Code      string `json:"code"`       // e.g. "Hp50"
-	Label     string `json:"label"`      // e.g. "1080i50"
-	Width     int    `json:"width"`
-	Height    int    `json:"height"`
-	FPS       float64 `json:"fps"`
-	Interlaced bool  `json:"interlaced"`
+	Code       string  `json:"code"`  // e.g. "Hi50"
+	Label      string  `json:"label"` // e.g. "1080i50"
+	Width      int     `json:"width"`
+	Height     int     `json:"height"`
+	FPS        float64 `json:"fps"`
+	Interlaced bool    `json:"interlaced"`
 }
 
 var (
-	reDeviceNum  = regexp.MustCompile(`(?i)^\s*(\d+)\s*[:=\-]\s*['"]?(.+?)['"]?\s*$`)
-	reFormatCode = regexp.MustCompile(`(?i)format_code\s+(\S+)\s*:\s*(\d+)x(\d+)\s+at\s+([\d.]+)(?:/([\d.]+))?\s*fps(.*?)$`)
-	reListDevHdr = regexp.MustCompile(`(?i)decklink.*devices|input/output devices`)
+	// "0: DeckLink IP 100G (1)" / "0: 'DeckLink …'"
+	reDeviceNum = regexp.MustCompile(`(?i)^\s*(\d+)\s*[:=\-]\s*['"]?(.+?)['"]?\s*$`)
+	// Header line in older builds: "format_code description"
+	reFormatHeader = regexp.MustCompile(`(?i)^\s*format_code\s+description\s*$`)
+	// Per-line: "Hi50 1920x1080 at 25000/1000 fps (interlaced, upper field first)"
+	// Also tolerate "format_code Hi50: 1920x1080 at …"
+	reFormatLine = regexp.MustCompile(
+		`(?i)^\s*(?:format_code\s+)?([A-Za-z0-9]{3,8})\s*:?\s+(\d+)x(\d+)\s+at\s+([\d.]+)(?:/([\d.]+))?\s*fps(.*)$`,
+	)
+	reSinkLine = regexp.MustCompile(`(?i)^\s*(?:\[[^\]]+\]\s*)?['"]?([^'"\n]+DeckLink[^'"\n]*)['"]?\s*$`)
 )
 
-// ListDevices probes FFmpeg for DeckLink devices and their formats.
-// Best-effort: if probing fails, returns an empty list (UI can still type a name later).
+// CommonModes is a fallback list when FFmpeg probe returns no formats.
+func CommonModes() []Format {
+	return []Format{
+		{Code: "Hi50", Label: "1080i50", Width: 1920, Height: 1080, FPS: 25, Interlaced: true},
+		{Code: "Hp50", Label: "1080p50", Width: 1920, Height: 1080, FPS: 50, Interlaced: false},
+		{Code: "Hp25", Label: "1080p25", Width: 1920, Height: 1080, FPS: 25, Interlaced: false},
+		{Code: "Hi59", Label: "1080i59.94", Width: 1920, Height: 1080, FPS: 30000.0 / 1001.0, Interlaced: true},
+		{Code: "Hp29", Label: "1080p29.97", Width: 1920, Height: 1080, FPS: 30000.0 / 1001.0, Interlaced: false},
+		{Code: "Hp30", Label: "1080p30", Width: 1920, Height: 1080, FPS: 30, Interlaced: false},
+		{Code: "hp50", Label: "720p50", Width: 1280, Height: 720, FPS: 50, Interlaced: false},
+		{Code: "pal", Label: "576i50", Width: 720, Height: 576, FPS: 25, Interlaced: true},
+		{Code: "ntsc", Label: "486i59.94", Width: 720, Height: 486, FPS: 30000.0 / 1001.0, Interlaced: true},
+	}
+}
+
+// ListDevices probes FFmpeg for DeckLink output devices and their formats.
 func ListDevices(ffmpegBin string) ([]Device, error) {
 	if ffmpegBin == "" {
 		ffmpegBin = "ffmpeg"
 	}
-	names, err := listDeviceNames(ffmpegBin)
-	if err != nil {
-		return nil, err
+	names := listOutputDeviceNames(ffmpegBin)
+	if len(names) == 0 {
+		// Fall back to legacy list_devices (may mix inputs/outputs).
+		var err error
+		names, err = listDeviceNamesLegacy(ffmpegBin)
+		if err != nil {
+			return nil, err
+		}
 	}
 	out := make([]Device, 0, len(names))
 	for _, name := range names {
-		formats, ferr := listFormats(ffmpegBin, name)
-		if ferr != nil {
-			log.Printf("[playout] list_formats for %q: %v", name, ferr)
-			formats = nil
+		formats := listOutputFormats(ffmpegBin, name)
+		if len(formats) == 0 {
+			// Input-style list_formats sometimes still works on IP cards.
+			formats, _ = listInputFormats(ffmpegBin, name)
+		}
+		if len(formats) == 0 {
+			log.Printf("[playout] no formats probed for %q – offering common modes", name)
+			formats = CommonModes()
 		}
 		out = append(out, Device{Name: name, Formats: formats})
 	}
 	return out, nil
 }
 
-func listDeviceNames(ffmpegBin string) ([]string, error) {
-	// FFmpeg prints device list to stderr and exits with an error code.
+func listOutputDeviceNames(ffmpegBin string) []string {
+	// Modern FFmpeg: ffmpeg -sinks decklink
+	cmd := exec.Command(ffmpegBin, "-hide_banner", "-sinks", "decklink")
+	out, _ := cmd.CombinedOutput()
+	var names []string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(strings.ToLower(line), "auto-") {
+			continue
+		}
+		if mm := reDeviceNum.FindStringSubmatch(line); mm != nil {
+			name := strings.Trim(strings.TrimSpace(mm[2]), `'"`)
+			if name != "" && !seen[name] {
+				seen[name] = true
+				names = append(names, name)
+			}
+			continue
+		}
+		if strings.Contains(strings.ToLower(line), "decklink") {
+			if mm := reSinkLine.FindStringSubmatch(line); mm != nil {
+				name := strings.TrimSpace(mm[1])
+				name = strings.Trim(name, `'"`)
+				// Strip trailing " [something]"
+				if i := strings.Index(name, " ["); i > 0 {
+					name = name[:i]
+				}
+				if name != "" && !seen[name] {
+					seen[name] = true
+					names = append(names, name)
+				}
+			}
+		}
+	}
+	return names
+}
+
+func listDeviceNamesLegacy(ffmpegBin string) ([]string, error) {
 	cmd := exec.Command(ffmpegBin, "-hide_banner", "-f", "decklink", "-list_devices", "1", "-i", "dummy")
 	stderr, _ := cmd.StderrPipe()
 	_ = cmd.Start()
@@ -71,22 +137,9 @@ func listDeviceNames(ffmpegBin string) ([]string, error) {
 
 	var names []string
 	seen := map[string]bool{}
-	inList := false
 	for _, line := range lines {
-		if reListDevHdr.MatchString(line) {
-			inList = true
-			continue
-		}
-		if !inList && !strings.Contains(strings.ToLower(line), "decklink") {
-			continue
-		}
-		inList = true
-		// Common shapes:
-		//   [decklink @ ...] 'DeckLink IP 100G (1)'
-		//   1: DeckLink IP 100G (1)
 		if mm := reDeviceNum.FindStringSubmatch(line); mm != nil {
-			name := strings.TrimSpace(mm[2])
-			name = strings.Trim(name, `'"`)
+			name := strings.Trim(strings.TrimSpace(mm[2]), `'"`)
 			if name != "" && !seen[name] {
 				seen[name] = true
 				names = append(names, name)
@@ -108,20 +161,48 @@ func listDeviceNames(ffmpegBin string) ([]string, error) {
 	return names, nil
 }
 
-func listFormats(ffmpegBin, device string) ([]Format, error) {
+// listOutputFormats uses the outdev probe:
+//
+//	ffmpeg -f lavfi -i nullsrc=s=64x64:d=0.1 -f decklink -list_formats 1 'Device'
+func listOutputFormats(ffmpegBin, device string) []Format {
+	cmd := exec.Command(
+		ffmpegBin, "-hide_banner", "-loglevel", "info",
+		"-f", "lavfi", "-i", "nullsrc=s=64x64:d=0.1",
+		"-f", "decklink", "-list_formats", "1", device,
+	)
+	out, _ := cmd.CombinedOutput()
+	return parseFormatLines(string(out))
+}
+
+func listInputFormats(ffmpegBin, device string) ([]Format, error) {
 	cmd := exec.Command(ffmpegBin, "-hide_banner", "-f", "decklink", "-list_formats", "1", "-i", device)
-	stderr, _ := cmd.StderrPipe()
-	_ = cmd.Start()
+	out, _ := cmd.CombinedOutput()
+	return parseFormatLines(string(out)), nil
+}
+
+func parseFormatLines(raw string) []Format {
 	var formats []Format
-	sc := bufio.NewScanner(stderr)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	for sc.Scan() {
-		line := sc.Text()
-		mm := reFormatCode.FindStringSubmatch(line)
+	seen := map[string]bool{}
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || reFormatHeader.MatchString(line) {
+			continue
+		}
+		// Drop ffmpeg log prefixes like "[decklink @ 0x…] "
+		if i := strings.Index(line, "] "); i >= 0 && strings.HasPrefix(line, "[") {
+			line = strings.TrimSpace(line[i+2:])
+		}
+		mm := reFormatLine.FindStringSubmatch(line)
 		if mm == nil {
 			continue
 		}
 		code := mm[1]
+		if strings.EqualFold(code, "format_code") || strings.EqualFold(code, "description") {
+			continue
+		}
+		if seen[code] {
+			continue
+		}
 		w, _ := strconv.Atoi(mm[2])
 		h, _ := strconv.Atoi(mm[3])
 		num, _ := strconv.ParseFloat(mm[4], 64)
@@ -133,7 +214,8 @@ func listFormats(ffmpegBin, device string) ([]Format, error) {
 			}
 		}
 		fps := num / den
-		interlaced := strings.Contains(strings.ToLower(mm[6]), "interlac")
+		tail := strings.ToLower(mm[6])
+		interlaced := strings.Contains(tail, "interlac")
 		rate := int(fps + 0.5)
 		if interlaced {
 			rate = int(fps*2 + 0.5)
@@ -143,6 +225,7 @@ func listFormats(ffmpegBin, device string) ([]Format, error) {
 			scan = "i"
 		}
 		label := fmt.Sprintf("%d%s%d", h, scan, rate)
+		seen[code] = true
 		formats = append(formats, Format{
 			Code:       code,
 			Label:      label,
@@ -152,11 +235,30 @@ func listFormats(ffmpegBin, device string) ([]Format, error) {
 			Interlaced: interlaced,
 		})
 	}
-	_ = cmd.Wait()
-	return formats, nil
+	return formats
 }
 
-// Cache probed devices briefly so the UI can poll without hammering FFmpeg.
+// LookupFormat returns geometry for a format code from probe/common lists.
+func LookupFormat(code string, devices []Device) (Format, bool) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return Format{}, false
+	}
+	for _, d := range devices {
+		for _, f := range d.Formats {
+			if strings.EqualFold(f.Code, code) {
+				return f, true
+			}
+		}
+	}
+	for _, f := range CommonModes() {
+		if strings.EqualFold(f.Code, code) {
+			return f, true
+		}
+	}
+	return Format{}, false
+}
+
 type deviceCache struct {
 	mu      sync.Mutex
 	at      time.Time

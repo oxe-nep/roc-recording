@@ -548,6 +548,7 @@ func (m *Manager) Start(id int) (ClientInfo, error) {
 	c.LastError = ""
 	c.BitrateKbps = 0
 	c.Sending = false
+	c.Reconnects = 0
 	c.AudioL = audioSilence
 	c.AudioR = audioSilence
 	info := m.infoLocked(c)
@@ -812,16 +813,21 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		}
 		args = append(args, "-f", "decklink", device)
 	} else {
-		// SRT preview only: simple maps so missing audio does not kill the graph,
-		// and video thumb is not blocked behind a complex filter.
+		// Preview only. Keep meters in filter_complex (anullsink) — never write
+		// a null muxer to stdout, that steals -progress pipe:1 and freezes UI state.
+		filter =
+			"[0:v]fps=1,scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,format=yuv420p[vthumb];" +
+				"[0:a]asplit=2[ahls][ameter];" +
+				"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
+				"ametadata=print,anullsink"
 		args = append(base,
-			"-map", "0:v:0",
-			"-vf", "fps=1,scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
+			"-filter_complex", filter,
+			"-map", "[vthumb]",
 			"-q:v", "4",
 			"-update", "1",
 			"-f", "image2",
 			thumbPath,
-			"-map", "0:a:0?",
+			"-map", "[ahls]",
 			"-c:a", "aac",
 			"-b:a", "128k",
 			"-ar", "48000",
@@ -832,11 +838,6 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			"-hls_flags", "delete_segments+independent_segments+omit_endlist",
 			"-hls_segment_filename", audioSeg,
 			audioPlaylist,
-			// Peak meters (optional audio — skipped if no audio track)
-			"-map", "0:a:0?",
-			"-af", "astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none,ametadata=print",
-			"-f", "null",
-			"-",
 		)
 	}
 
@@ -1083,6 +1084,7 @@ func (m *Manager) markReceiving(c *Client, why string) {
 	wasWaiting := c.Status == StatusWaiting
 	first := !c.Sending
 	c.Sending = true
+	c.Reconnects = 0
 	if wasWaiting {
 		c.Status = StatusRunning
 	}

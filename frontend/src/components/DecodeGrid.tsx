@@ -202,7 +202,7 @@ export default function DecodeGrid() {
                               ? "DECODE · connecting…"
                               : "DECODE · waiting for publisher"}
                         </div>
-                        {(c.reconnects ?? 0) > 0 && (
+                        {(c.reconnects ?? 0) > 0 && !(hasMedia || c.sending) && (
                           <div className="stream-badge waiting">reconnects {c.reconnects}</div>
                         )}
                       </div>

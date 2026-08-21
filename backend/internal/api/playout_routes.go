@@ -128,4 +128,18 @@ func registerPlayoutRoutes(r chi.Router, playMgr *playout.Manager) {
 		}
 		jsonOK(w, map[string]any{"id": id, "lines": lines})
 	})
+
+	r.Get("/api/playout/{id}/audio", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.Atoi(chi.URLParam(r, "id"))
+		if err != nil {
+			jsonError(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		l, r2, ok := playMgr.AudioLevels(id)
+		if !ok {
+			jsonError(w, "decode client not active", http.StatusNotFound)
+			return
+		}
+		jsonOK(w, map[string]float64{"l": l, "r": r2})
+	})
 }

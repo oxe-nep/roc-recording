@@ -530,7 +530,7 @@ export async function fetchPlayoutLogs(id: number): Promise<string[]> {
 }
 
 export async function fetchPlayoutAudioLevels(id: number): Promise<AudioLevels> {
-  const res = await fetch(`${BASE}/playout/audio/${id}`);
+  const res = await apiFetch(`/api/playout/${id}/audio`);
   if (!res.ok) throw new Error(`fetchPlayoutAudioLevels: ${res.status}`);
   return res.json();
 }

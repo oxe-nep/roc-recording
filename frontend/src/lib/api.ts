@@ -438,6 +438,9 @@ export interface PlayoutClient {
   has_passphrase: boolean;
   latency_ms: number;
   bitrate_kbps?: number;
+  duration_sec?: number;
+  elapsed_sec?: number;
+  remain_sec?: number;
   sending?: boolean;
   reconnects?: number;
   error?: string;

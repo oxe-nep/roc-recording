@@ -192,12 +192,12 @@ export default function DecodeGrid() {
                 />
                 <div className="card-stage">
                   <div className="card-thumb">
-                    <Thumbnail id={c.id} active={on} path={`/playout/thumb/${c.id}`} />
+                    <Thumbnail id={c.id} active={on} path={`/hls/playout/${c.id}/thumb.jpg`} />
                     {on && (
                       <div className="thumb-badges">
                         <div className={`stream-badge${hasMedia || c.sending ? "" : " waiting"}`}>
                           {hasMedia || c.sending
-                            ? `DECODE · ${formatBitrate(c.bitrate_kbps)}`
+                            ? `DECODE · ${formatBitrate(c.bitrate_kbps) === "--" ? "live" : formatBitrate(c.bitrate_kbps)}`
                             : c.mode === "caller"
                               ? "DECODE · connecting…"
                               : "DECODE · waiting for publisher"}

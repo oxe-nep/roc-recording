@@ -7,7 +7,7 @@ const BASE = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8080";
 interface ThumbnailProps {
   id: number;
   active: boolean;
-  /** Default encode thumbs at /thumb/{id}; decode uses /playout/thumb/{id} */
+  /** Default encode thumbs at /thumb/{id}; decode uses /hls/playout/{id}/thumb.jpg */
   path?: string;
 }
 

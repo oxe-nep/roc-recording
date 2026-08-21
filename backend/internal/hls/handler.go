@@ -59,6 +59,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else if strings.HasSuffix(fullAbs, ".ts") {
 		w.Header().Set("Cache-Control", "max-age=60")
 		w.Header().Set("Content-Type", "video/MP2T")
+	} else if strings.HasSuffix(fullAbs, ".jpg") || strings.HasSuffix(fullAbs, ".jpeg") {
+		w.Header().Set("Cache-Control", "no-cache, no-store")
+		w.Header().Set("Content-Type", "image/jpeg")
 	}
 
 	http.ServeFile(w, r, fullAbs)

@@ -816,8 +816,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		// and video thumb is not blocked behind a complex filter.
 		args = append(base,
 			"-map", "0:v:0",
-			"-vf", "scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
-			"-r", "1",
+			"-vf", "fps=1,scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
 			"-q:v", "4",
 			"-update", "1",
 			"-f", "image2",

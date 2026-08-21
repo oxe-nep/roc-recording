@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  encodeLibraryPlayRef,
+  fetchLibraryFiles,
   fetchPlayoutDevices,
   fetchPlayoutLogs,
   fetchPlayoutMedia,
@@ -9,6 +11,7 @@ import {
   startPlayout,
   stopPlayout,
   updatePlayoutClient,
+  type LibraryFile,
   type PlayoutClient,
   type PlayoutDevice,
   type PlayoutMediaItem,
@@ -35,6 +38,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
   const [passDirty, setPassDirty] = useState(false);
   const [devices, setDevices] = useState<PlayoutDevice[]>([]);
   const [media, setMedia] = useState<PlayoutMediaItem[]>([]);
+  const [recordings, setRecordings] = useState<LibraryFile[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -63,10 +67,11 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
     setError(null);
     setLogsOpen(false);
     setLogs([]);
-    Promise.all([fetchPlayoutDevices(), fetchPlayoutMedia()])
-      .then(([devs, files]) => {
+    Promise.all([fetchPlayoutDevices(), fetchPlayoutMedia(), fetchLibraryFiles()])
+      .then(([devs, files, recs]) => {
         setDevices(devs);
         setMedia(files);
+        setRecordings(recs);
       })
       .catch((e) => setError(String(e)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -293,14 +298,32 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                   onChange={(e) => setFileId(e.target.value)}
                   disabled={busy || active}
                 >
-                  <option value="">Select from library…</option>
-                  {media.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
+                  <option value="">Select file…</option>
+                  {recordings.length > 0 && (
+                    <optgroup label="Recordings">
+                      {recordings.map((f) => {
+                        const id = encodeLibraryPlayRef(f.category, f.name);
+                        return (
+                          <option key={id} value={id}>
+                            {f.category}/{f.name}
+                          </option>
+                        );
+                      })}
+                    </optgroup>
+                  )}
+                  {media.length > 0 && (
+                    <optgroup label="Uploaded">
+                      {media.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
-                <span className="channel-settings-hint">Upload files via Decode → Media.</span>
+                <span className="channel-settings-hint">
+                  Pick a recorded clip, or upload via Decode → Media.
+                </span>
               </label>
               <label className="presets-field" style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                 <input

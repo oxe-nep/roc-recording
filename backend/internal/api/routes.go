@@ -489,7 +489,13 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 		})
 
 		r.Delete("/api/library/file/{category}/{name}", func(w http.ResponseWriter, r *http.Request) {
-			if err := recMgr.DeleteLibraryFile(chi.URLParam(r, "category"), chi.URLParam(r, "name")); err != nil {
+			cat := chi.URLParam(r, "category")
+			name := chi.URLParam(r, "name")
+			if playMgr.MediaInUse(playout.EncodeLibraryRef(cat, name)) {
+				jsonError(w, "file is in use by an active decode channel", http.StatusConflict)
+				return
+			}
+			if err := recMgr.DeleteLibraryFile(cat, name); err != nil {
 				status := http.StatusInternalServerError
 				if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "invalid") {
 					status = http.StatusBadRequest

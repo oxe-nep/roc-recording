@@ -111,15 +111,16 @@ type ClientInfo struct {
 }
 
 type Manager struct {
-	mu           sync.RWMutex
-	clients      map[int]*Client
-	nextID       int
-	ffmpegBin    string
-	hlsDir       string
-	settingsPath string
-	publicHost   string
-	devCache     deviceCache
-	media        *MediaStore
+	mu             sync.RWMutex
+	clients        map[int]*Client
+	nextID         int
+	ffmpegBin      string
+	hlsDir         string
+	settingsPath   string
+	publicHost     string
+	devCache       deviceCache
+	media          *MediaStore
+	libraryResolve LibraryResolver
 }
 
 type persistedFile struct {
@@ -582,9 +583,13 @@ func (m *Manager) infoLocked(c *Client) ClientInfo {
 		Reconnects:  c.Reconnects,
 		Error:       c.LastError,
 	}
-	if c.FileID != "" && m.media != nil {
-		if it, ok := m.media.Get(c.FileID); ok {
-			info.FileName = it.Name
+	if c.FileID != "" {
+		if cat, name, ok := ParseLibraryRef(c.FileID); ok {
+			info.FileName = cat + "/" + name
+		} else if m.media != nil {
+			if it, ok := m.media.Get(c.FileID); ok {
+				info.FileName = it.Name
+			}
 		}
 	}
 	if c.Mode == ModeListener && src == SourceSRT {
@@ -658,7 +663,7 @@ func (m *Manager) Start(id int) (ClientInfo, error) {
 	c.mu.Unlock()
 
 	if source == SourceFile {
-		if _, err := m.media.Path(fileID); err != nil {
+		if _, _, err := m.ResolveFilePath(fileID); err != nil {
 			return ClientInfo{}, err
 		}
 	}
@@ -903,7 +908,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 
 	filePath := ""
 	if source == SourceFile {
-		p, err := m.media.Path(fileID)
+		p, _, err := m.ResolveFilePath(fileID)
 		if err != nil {
 			return err
 		}

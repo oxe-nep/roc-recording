@@ -287,6 +287,11 @@ export async function fetchLibraryFiles(category?: string): Promise<LibraryFile[
   return res.json();
 }
 
+/** file_id for a recordings-library clip (matches backend EncodeLibraryRef). */
+export function encodeLibraryPlayRef(category: string, name: string): string {
+  return `lib:${encodeURIComponent(category)}/${encodeURIComponent(name)}`;
+}
+
 /** Direct media URL for <video>/<a download>. Supports Range; uses api_key query when needed locally. */
 export function libraryFileURL(category: string, name: string, opts?: { download?: boolean }): string {
   const path = `/api/library/file/${encodeURIComponent(category)}/${encodeURIComponent(name)}`;

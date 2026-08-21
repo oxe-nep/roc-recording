@@ -111,6 +111,9 @@ func main() {
 		recMgr.Register(ch.ID)
 	}
 	recMgr.LoadCategoryAssignments()
+	playMgr.SetLibraryResolver(func(category, name string) (string, error) {
+		return recMgr.LibraryFilePath(category, name)
+	})
 
 	srtMgr := srt.NewManager(
 		cfg.FFmpegBin,

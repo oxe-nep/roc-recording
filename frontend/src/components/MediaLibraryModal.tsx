@@ -94,7 +94,9 @@ export default function MediaLibraryModal({ open, onClose }: Props) {
         {error && <div className="error-message">{error}</div>}
 
         <p className="channel-settings-hint">
-          Upload once, then pick a file in any decode channel set to File mode. Supported: mp4, mov, mkv, mxf, ts.
+          Upload external files here. Recorded clips from the Recordings library are available
+          directly in each channel&apos;s File mode picker (no upload needed). Supported uploads:
+          mp4, mov, mkv, mxf, ts.
         </p>
 
         <div className="channel-settings-actions" style={{ marginTop: 0 }}>

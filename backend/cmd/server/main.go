@@ -91,6 +91,7 @@ func main() {
 	)
 	playMgr.Load()
 	playMgr.WarmProbe()
+	playMgr.EnsureDefaultChannels()
 
 	for _, ch := range cfg.Channels {
 		if err := mgr.Start(ch.ID); err != nil {

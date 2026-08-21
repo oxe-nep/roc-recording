@@ -34,6 +34,13 @@ const (
 	ModeCaller   Mode = "caller"
 )
 
+type Source string
+
+const (
+	SourceSRT  Source = "srt"
+	SourceFile Source = "file"
+)
+
 const (
 	audioSilence = -90.0
 	logCap       = 200
@@ -51,7 +58,11 @@ type Client struct {
 	Device      string
 	DeviceLabel string // persisted display name; used when cache miss / open fallback
 	FormatCode  string
-	DeckLinkOut bool // when false, SRT preview only (thumb/meters) — ignore Device
+	DeckLinkOut bool // always true for fixed channels
+	Fixed       bool // default sink-mapped channel (cannot delete)
+	Source      Source
+	FileID      string
+	Loop        bool
 	Mode        Mode
 	Port        int
 	Target      string
@@ -82,6 +93,11 @@ type ClientInfo struct {
 	DeviceLabel string  `json:"device_label,omitempty"`
 	FormatCode  string  `json:"format_code"`
 	DeckLinkOut bool    `json:"decklink_out"`
+	Fixed       bool    `json:"fixed"`
+	Source      Source  `json:"source"`
+	FileID      string  `json:"file_id,omitempty"`
+	FileName    string  `json:"file_name,omitempty"`
+	Loop        bool    `json:"loop"`
 	Mode        Mode    `json:"mode"`
 	Port        int     `json:"port"`
 	Target      string  `json:"target"`
@@ -103,6 +119,7 @@ type Manager struct {
 	settingsPath string
 	publicHost   string
 	devCache     deviceCache
+	media        *MediaStore
 }
 
 type persistedFile struct {
@@ -116,6 +133,10 @@ type persistedCli struct {
 	DeviceLabel string `json:"device_label,omitempty"`
 	FormatCode  string `json:"format_code"`
 	DeckLinkOut bool   `json:"decklink_out"`
+	Fixed       bool   `json:"fixed"`
+	Source      Source `json:"source"`
+	FileID      string `json:"file_id,omitempty"`
+	Loop        bool   `json:"loop"`
 	Mode        Mode   `json:"mode"`
 	Port        int    `json:"port"`
 	Target      string `json:"target"`
@@ -127,6 +148,7 @@ func NewManager(ffmpegBin, hlsDir, settingsPath, publicHost string) *Manager {
 	if publicHost == "" {
 		publicHost = "127.0.0.1"
 	}
+	cfgDir := filepath.Dir(settingsPath)
 	return &Manager{
 		clients:      make(map[int]*Client),
 		nextID:       1,
@@ -134,7 +156,15 @@ func NewManager(ffmpegBin, hlsDir, settingsPath, publicHost string) *Manager {
 		hlsDir:       hlsDir,
 		settingsPath: settingsPath,
 		publicHost:   publicHost,
+		media: NewMediaStore(
+			filepath.Join(cfgDir, "playout-media"),
+			filepath.Join(cfgDir, "playout-media.json"),
+		),
 	}
+}
+
+func (m *Manager) Media() *MediaStore {
+	return m.media
 }
 
 func (m *Manager) Load() {
@@ -160,6 +190,10 @@ func (m *Manager) Load() {
 		if mode != ModeCaller && mode != ModeListener {
 			mode = ModeListener
 		}
+		src := cfg.Source
+		if src != SourceFile {
+			src = SourceSRT
+		}
 		port := cfg.Port
 		if port <= 0 {
 			port = 9200 + id
@@ -179,7 +213,11 @@ func (m *Manager) Load() {
 			Device:      NormalizeOpenDevice(cfg.Device),
 			DeviceLabel: strings.TrimSpace(cfg.DeviceLabel),
 			FormatCode:  cfg.FormatCode,
-			DeckLinkOut: cfg.DeckLinkOut, // default false — SRT preview until explicitly enabled
+			DeckLinkOut: cfg.DeckLinkOut || cfg.Fixed,
+			Fixed:       cfg.Fixed,
+			Source:      src,
+			FileID:      strings.TrimSpace(cfg.FileID),
+			Loop:        cfg.Loop,
 			Mode:        mode,
 			Port:        port,
 			Target:      strings.TrimSpace(cfg.Target),
@@ -211,6 +249,10 @@ func (m *Manager) saveLocked() error {
 			DeviceLabel: c.DeviceLabel,
 			FormatCode:  c.FormatCode,
 			DeckLinkOut: c.DeckLinkOut,
+			Fixed:       c.Fixed,
+			Source:      c.Source,
+			FileID:      c.FileID,
+			Loop:        c.Loop,
 			Mode:        c.Mode,
 			Port:        c.Port,
 			Target:      c.Target,
@@ -232,6 +274,9 @@ type CreateInput struct {
 	DeviceLabel string `json:"device_label"`
 	FormatCode  string `json:"format_code"`
 	DeckLinkOut bool   `json:"decklink_out"`
+	Source      string `json:"source"`
+	FileID      string `json:"file_id"`
+	Loop        bool   `json:"loop"`
 	Mode        string `json:"mode"`
 	Port        int    `json:"port"`
 	Target      string `json:"target"`
@@ -245,6 +290,9 @@ type UpdateInput struct {
 	DeviceLabel *string `json:"device_label"`
 	FormatCode  *string `json:"format_code"`
 	DeckLinkOut *bool   `json:"decklink_out"`
+	Source      *string `json:"source"`
+	FileID      *string `json:"file_id"`
+	Loop        *bool   `json:"loop"`
 	Mode        *string `json:"mode"`
 	Port        *int    `json:"port"`
 	Target      *string `json:"target"`
@@ -284,6 +332,9 @@ func (m *Manager) Create(in CreateInput) (ClientInfo, error) {
 		DeviceLabel: strings.TrimSpace(in.DeviceLabel),
 		FormatCode:  strings.TrimSpace(in.FormatCode),
 		DeckLinkOut: in.DeckLinkOut,
+		Source:      SourceSRT,
+		FileID:      strings.TrimSpace(in.FileID),
+		Loop:        in.Loop,
 		Mode:        mode,
 		Port:        port,
 		Target:      strings.TrimSpace(in.Target),
@@ -292,6 +343,9 @@ func (m *Manager) Create(in CreateInput) (ClientInfo, error) {
 		AudioL:      audioSilence,
 		AudioR:      audioSilence,
 		logLines:    make([]string, 0, 32),
+	}
+	if strings.EqualFold(strings.TrimSpace(in.Source), string(SourceFile)) {
+		c.Source = SourceFile
 	}
 	if c.Device != "" && c.DeviceLabel == "" {
 		c.DeviceLabel = m.LookupDeviceLabel(c.Device)
@@ -322,6 +376,10 @@ func (m *Manager) Update(id int, in UpdateInput) (ClientInfo, error) {
 		c.Name = name
 	}
 	if in.Device != nil {
+		if c.Fixed {
+			c.mu.Unlock()
+			return ClientInfo{}, fmt.Errorf("device is locked for default decode channels")
+		}
 		c.Device = NormalizeOpenDevice(*in.Device)
 		if in.DeviceLabel != nil {
 			c.DeviceLabel = strings.TrimSpace(*in.DeviceLabel)
@@ -337,7 +395,25 @@ func (m *Manager) Update(id int, in UpdateInput) (ClientInfo, error) {
 		c.FormatCode = strings.TrimSpace(*in.FormatCode)
 	}
 	if in.DeckLinkOut != nil {
-		c.DeckLinkOut = *in.DeckLinkOut
+		if c.Fixed {
+			c.DeckLinkOut = true
+		} else {
+			c.DeckLinkOut = *in.DeckLinkOut
+		}
+	}
+	if in.Source != nil {
+		src := Source(strings.TrimSpace(*in.Source))
+		if src != SourceSRT && src != SourceFile {
+			c.mu.Unlock()
+			return ClientInfo{}, fmt.Errorf("source must be srt or file")
+		}
+		c.Source = src
+	}
+	if in.FileID != nil {
+		c.FileID = strings.TrimSpace(*in.FileID)
+	}
+	if in.Loop != nil {
+		c.Loop = *in.Loop
 	}
 	if in.Mode != nil {
 		mode := Mode(strings.TrimSpace(*in.Mode))
@@ -385,8 +461,12 @@ func (m *Manager) Delete(id int) error {
 		return err
 	}
 	c.mu.Lock()
+	fixed := c.Fixed
 	active := c.Status != StatusStopped
 	c.mu.Unlock()
+	if fixed {
+		return fmt.Errorf("default decode channels cannot be deleted")
+	}
 	if active {
 		if _, err := m.Stop(id); err != nil {
 			return err
@@ -476,6 +556,10 @@ func (m *Manager) infoLocked(c *Client) ClientInfo {
 	if label == "" {
 		label = m.LookupDeviceLabel(c.Device)
 	}
+	src := c.Source
+	if src == "" {
+		src = SourceSRT
+	}
 	info := ClientInfo{
 		ID:          c.ID,
 		Name:        c.Name,
@@ -483,7 +567,11 @@ func (m *Manager) infoLocked(c *Client) ClientInfo {
 		Device:      c.Device,
 		DeviceLabel: label,
 		FormatCode:  c.FormatCode,
-		DeckLinkOut: c.DeckLinkOut,
+		DeckLinkOut: c.DeckLinkOut || c.Fixed,
+		Fixed:       c.Fixed,
+		Source:      src,
+		FileID:      c.FileID,
+		Loop:        c.Loop,
 		Mode:        c.Mode,
 		Port:        c.Port,
 		Target:      c.Target,
@@ -494,7 +582,12 @@ func (m *Manager) infoLocked(c *Client) ClientInfo {
 		Reconnects:  c.Reconnects,
 		Error:       c.LastError,
 	}
-	if c.Mode == ModeListener {
+	if c.FileID != "" && m.media != nil {
+		if it, ok := m.media.Get(c.FileID); ok {
+			info.FileName = it.Name
+		}
+	}
+	if c.Mode == ModeListener && src == SourceSRT {
 		info.ListenURL = m.listenURL(c)
 	}
 	return info
@@ -532,22 +625,31 @@ func (m *Manager) Start(id int) (ClientInfo, error) {
 		c.mu.Unlock()
 		return ClientInfo{}, fmt.Errorf("decode client %d already active", id)
 	}
-	// DeckLink is opt-in (decklink_out). Existing clients keep a saved device but
-	// default decklink_out=false so SRT preview works without opening sinks.
-	wantDeckLink := c.DeckLinkOut
+	source := c.Source
+	if source == "" {
+		source = SourceSRT
+	}
+	// Fixed channels always drive DeckLink out.
+	wantDeckLink := c.DeckLinkOut || c.Fixed
 	deviceRaw := strings.TrimSpace(c.Device)
 	formatCode := strings.TrimSpace(c.FormatCode)
+	fileID := strings.TrimSpace(c.FileID)
 	if wantDeckLink {
 		if deviceRaw == "" {
 			c.mu.Unlock()
-			return ClientInfo{}, fmt.Errorf("DeckLink output device is required when decklink_out is enabled")
+			return ClientInfo{}, fmt.Errorf("DeckLink output device is required")
 		}
 		if formatCode == "" {
 			c.mu.Unlock()
-			return ClientInfo{}, fmt.Errorf("output format is required when decklink_out is enabled")
+			return ClientInfo{}, fmt.Errorf("output format is required")
 		}
 	}
-	if c.Mode == ModeCaller && strings.TrimSpace(c.Target) == "" {
+	if source == SourceFile {
+		if fileID == "" {
+			c.mu.Unlock()
+			return ClientInfo{}, fmt.Errorf("select a media file before starting file playout")
+		}
+	} else if c.Mode == ModeCaller && strings.TrimSpace(c.Target) == "" {
 		c.mu.Unlock()
 		return ClientInfo{}, fmt.Errorf("caller mode requires a target")
 	}
@@ -555,18 +657,25 @@ func (m *Manager) Start(id int) (ClientInfo, error) {
 	port := c.Port
 	c.mu.Unlock()
 
+	if source == SourceFile {
+		if _, err := m.media.Path(fileID); err != nil {
+			return ClientInfo{}, err
+		}
+	}
+
 	device := ""
 	if wantDeckLink {
 		device = m.ResolveOpenDevice(deviceRaw)
 	}
 
-	if err := m.assertNoConflicts(id, device, mode, port); err != nil {
+	if err := m.assertNoConflicts(id, device, mode, port, source); err != nil {
 		return ClientInfo{}, err
 	}
 
 	c.mu.Lock()
 	if wantDeckLink {
 		c.Device = device
+		c.DeckLinkOut = true
 	}
 	if c.Status != StatusStopped {
 		c.mu.Unlock()
@@ -584,7 +693,9 @@ func (m *Manager) Start(id int) (ClientInfo, error) {
 	info := m.infoLocked(c)
 	c.mu.Unlock()
 
-	if wantDeckLink {
+	if source == SourceFile {
+		c.appendLog("start requested – file → DeckLink")
+	} else if wantDeckLink {
 		c.appendLog("start requested – waiting for SRT (+ DeckLink out)")
 	} else {
 		c.appendLog("start requested – SRT preview only (DeckLink out disabled)")
@@ -593,7 +704,7 @@ func (m *Manager) Start(id int) (ClientInfo, error) {
 	return info, nil
 }
 
-func (m *Manager) assertNoConflicts(selfID int, device string, mode Mode, port int) error {
+func (m *Manager) assertNoConflicts(selfID int, device string, mode Mode, port int, source Source) error {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	for id, other := range m.clients {
@@ -605,6 +716,7 @@ func (m *Manager) assertNoConflicts(selfID int, device string, mode Mode, port i
 		dev := other.Device
 		omode := other.Mode
 		oport := other.Port
+		osrc := other.Source
 		other.mu.Unlock()
 		if !active {
 			continue
@@ -612,7 +724,7 @@ func (m *Manager) assertNoConflicts(selfID int, device string, mode Mode, port i
 		if device != "" && dev == device {
 			return fmt.Errorf("DeckLink output %q is already in use by decode %d", device, id)
 		}
-		if mode == ModeListener && omode == ModeListener && oport == port {
+		if source == SourceSRT && osrc != SourceFile && mode == ModeListener && omode == ModeListener && oport == port {
 			return fmt.Errorf("SRT listen port %d is already in use by decode %d", port, id)
 		}
 	}
@@ -733,6 +845,15 @@ func (m *Manager) runLoop(c *Client) {
 			return
 		default:
 		}
+		c.mu.Lock()
+		src := c.Source
+		loop := c.Loop
+		c.mu.Unlock()
+		// File playout without loop: one pass then stop.
+		if src == SourceFile && !loop && err == nil {
+			c.appendLog("file playback finished")
+			return
+		}
 		if err != nil {
 			c.mu.Lock()
 			c.Reconnects++
@@ -760,14 +881,33 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	audioSeg := filepath.Join(outDir, "audio_%03d.ts")
 
 	c.mu.Lock()
-	wantDeckLink := c.DeckLinkOut
+	wantDeckLink := c.DeckLinkOut || c.Fixed
 	deviceRaw := strings.TrimSpace(c.Device)
 	formatCode := strings.TrimSpace(c.FormatCode)
+	source := c.Source
+	if source == "" {
+		source = SourceSRT
+	}
+	fileID := strings.TrimSpace(c.FileID)
+	loop := c.Loop
 	mode := c.Mode
-	srtURL, err := m.srtInputURL(c)
+	var srtURL string
+	var srtErr error
+	if source == SourceSRT {
+		srtURL, srtErr = m.srtInputURL(c)
+	}
 	c.mu.Unlock()
-	if err != nil {
-		return err
+	if srtErr != nil {
+		return srtErr
+	}
+
+	filePath := ""
+	if source == SourceFile {
+		p, err := m.media.Path(fileID)
+		if err != nil {
+			return err
+		}
+		filePath = p
 	}
 
 	useDeckLink := wantDeckLink && deviceRaw != "" && formatCode != ""
@@ -776,22 +916,15 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	openPrimary := ""
 	openAlt := ""
 	if useDeckLink {
-		// Refresh sinks so open_name / labels match current FFmpeg + driver state.
 		if _, err := m.devCache.refresh(m.ffmpegBin); err != nil {
 			c.appendLog(fmt.Sprintf("decklink device refresh: %v", err))
 		}
 		device = m.ResolveOpenDevice(deviceRaw)
 		if d, ok := m.FindDevice(device); ok {
 			deviceLabel = d.Label
-			openPrimary = d.OpenName
-			if openPrimary == "" {
-				openPrimary = d.Label
-			}
-			if openPrimary == "" {
-				openPrimary = d.Name
-			}
-			openAlt = d.Name
-			if openPrimary == openAlt {
+			// Prefer full unique sink id (works on DeckLink IP); label as fallback.
+			openPrimary = d.Name
+			if d.Label != "" && d.Label != d.Name {
 				openAlt = d.Label
 			}
 		} else {
@@ -799,12 +932,9 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			if deviceLabel == "" {
 				deviceLabel = m.LookupDeviceLabel(device)
 			}
-			// Prefer display label: unique IDs from -sinks often fail write_header on DeckLink IP.
+			openPrimary = device
 			if deviceLabel != "" && deviceLabel != device {
-				openPrimary = deviceLabel
-				openAlt = device
-			} else {
-				openPrimary = device
+				openAlt = deviceLabel
 			}
 		}
 		if deviceLabel != "" {
@@ -823,7 +953,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 
 	w, h, fps := 1920, 1080, 25.0
 	var fmtInfo Format
-	if useDeckLink {
+	if useDeckLink || formatCode != "" {
 		devs, _ := m.Devices(false)
 		if f, ok := LookupFormat(formatCode, devs); ok {
 			fmtInfo = f
@@ -848,58 +978,58 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		openDevice = openAlt
 	}
 
-	var filter string
-	var args []string
-	base := []string{
+	samplesPerFrame := int(math.Round(48000 / fps))
+	if samplesPerFrame < 1 {
+		samplesPerFrame = 1920
+	}
+
+	var vchain string
+	if fmtInfo.Interlaced {
+		vchain = fmt.Sprintf(
+			"[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,tinterlace=interleave_top,format=yuv422p10le,split=2[vdl][vt]",
+			w, h, w, h, fps*2,
+		)
+	} else {
+		vchain = fmt.Sprintf(
+			"[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,format=yuv422p10le,split=2[vdl][vt]",
+			w, h, w, h, fps,
+		)
+	}
+
+	args := []string{
 		"-hide_banner",
-		// info (not warning): ametadata=print peak lines are AV_LOG_INFO and drive UI meters.
 		"-loglevel", "info",
 		"-fflags", "+genpts+discardcorrupt",
 		"-progress", "pipe:1",
 		"-nostats",
 		"-analyzeduration", "2M",
 		"-probesize", "2M",
+	}
+	if source == SourceFile {
+		if loop {
+			args = append(args, "-stream_loop", "-1")
+		}
+		args = append(args, "-i", filePath)
+	} else {
 		// Encode STREAM remuxes MPEG-TS over SRT — force demuxer so probe does not stall.
-		"-f", "mpegts",
-		"-i", srtURL,
+		args = append(args, "-f", "mpegts", "-i", srtURL)
 	}
 
+	var filter string
 	if useDeckLink {
-		// Progressive: scale → fps → uyvy422.
-		// Interlaced (e.g. Hi50): produce 2× frames then tinterlace into fields.
-		samplesPerFrame := int(math.Round(48000 / fps))
-		if samplesPerFrame < 1 {
-			samplesPerFrame = 1920
-		}
-		var vchain string
-		if fmtInfo.Interlaced {
-			vchain = fmt.Sprintf(
-				"[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,tinterlace=interleave_top,format=uyvy422,split=2[vdl][vt]",
-				w, h, w, h, fps*2,
-			)
-		} else {
-			vchain = fmt.Sprintf(
-				"[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,format=uyvy422,split=2[vdl][vt]",
-				w, h, w, h, fps,
-			)
-		}
-		// fifo + asetnsamples: DeckLink schedules A/V in lockstep; without framed
-		// audio packets it logs "There's no buffered audio" and drops on the wire.
 		filter = vchain + ";" +
 			"[vt]scale=640:360,format=yuv420p[vthumb];" +
 			fmt.Sprintf(
-				"[0:a]aresample=48000:async=1:first_pts=0,pan=stereo|c0=c0|c1=c1,asetnsamples=n=%d:p=0,asplit=3[aout][ahls][ameter];",
+				"[0:a]aresample=48000:async=1:first_pts=0,aformat=channel_layouts=stereo,asetnsamples=n=%d:p=0,asplit=3[aout][ahls][ameter];",
 				samplesPerFrame,
 			) +
 			"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
 			"ametadata=print,anullsink"
-		// DeckLink output first so it is not starved by thumb/HLS muxers.
-		args = append(base,
+		args = append(args,
 			"-filter_complex", filter,
 			"-map", "[vdl]",
 			"-map", "[aout]",
-			"-c:v", "wrapped_avframe",
-			"-pix_fmt", "uyvy422",
+			"-c:v", "v210",
 			"-c:a", "pcm_s16le",
 			"-ar", "48000",
 			"-ac", "2",
@@ -935,14 +1065,12 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			audioPlaylist,
 		)
 	} else {
-		// Preview only. Keep meters in filter_complex (anullsink) — never write
-		// a null muxer to stdout, that steals -progress pipe:1 and freezes UI state.
 		filter =
 			"[0:v]fps=1,scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,format=yuv420p[vthumb];" +
 				"[0:a]asplit=2[ahls][ameter];" +
 				"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
 				"ametadata=print,anullsink"
-		args = append(base,
+		args = append(args,
 			"-filter_complex", filter,
 			"-map", "[vthumb]",
 			"-q:v", "4",
@@ -979,12 +1107,12 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	c.mu.Unlock()
 	if useDeckLink {
 		c.appendLog(fmt.Sprintf(
-			"starting FFmpeg (%s → decklink %q label=%q primary=%q alt=%q format=%s interlaced=%v)",
-			mode, openDevice, deviceLabel, openPrimary, openAlt, formatCode, fmtInfo.Interlaced,
+			"starting FFmpeg (%s/%s → decklink %q label=%q format=%s interlaced=%v loop=%v)",
+			source, mode, openDevice, deviceLabel, formatCode, fmtInfo.Interlaced, loop && source == SourceFile,
 		))
 		c.appendLog("decklink args: " + strings.Join(decklinkArgSummary(args, openDevice), " "))
 	} else {
-		c.appendLog(fmt.Sprintf("starting FFmpeg (%s → preview only)", mode))
+		c.appendLog(fmt.Sprintf("starting FFmpeg (%s → preview only)", source))
 	}
 
 	if err := cmd.Start(); err != nil {
@@ -1018,7 +1146,6 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		c.Sending = false
 		c.BitrateKbps = 0
 		c.Status = StatusWaiting
-		// Alternate unique-id vs probe-proven open_name/label on the next loop.
 		if useDeckLink && err != nil && openAlt != "" && openAlt != openPrimary {
 			if !tryAlt {
 				c.deviceTryAlt = true
@@ -1035,6 +1162,25 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		}
 		return err
 	}
+}
+
+// MediaInUse reports whether any active file-playout channel references mediaID.
+func (m *Manager) MediaInUse(mediaID string) bool {
+	mediaID = strings.TrimSpace(mediaID)
+	if mediaID == "" {
+		return false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, c := range m.clients {
+		c.mu.Lock()
+		inUse := c.Status != StatusStopped && c.Source == SourceFile && c.FileID == mediaID
+		c.mu.Unlock()
+		if inUse {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Manager) srtInputURL(c *Client) (string, error) {

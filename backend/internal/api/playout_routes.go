@@ -21,6 +21,43 @@ func registerPlayoutRoutes(r chi.Router, playMgr *playout.Manager) {
 		jsonOK(w, devs)
 	})
 
+	r.Get("/api/playout/media", func(w http.ResponseWriter, r *http.Request) {
+		jsonOK(w, playMgr.Media().List())
+	})
+
+	r.Post("/api/playout/media", func(w http.ResponseWriter, r *http.Request) {
+		const maxMem = 64 << 20 // 64 MiB form buffer; file streams to disk
+		if err := r.ParseMultipartForm(maxMem); err != nil {
+			jsonError(w, "invalid multipart form: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		file, hdr, err := r.FormFile("file")
+		if err != nil {
+			jsonError(w, "file field required", http.StatusBadRequest)
+			return
+		}
+		defer file.Close()
+		item, err := playMgr.Media().Add(hdr.Filename, file, hdr.Size)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		jsonOK(w, item)
+	})
+
+	r.Delete("/api/playout/media/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		if playMgr.MediaInUse(id) {
+			jsonError(w, "media is in use by an active file playout channel", http.StatusConflict)
+			return
+		}
+		if err := playMgr.Media().Delete(id); err != nil {
+			jsonError(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		jsonOK(w, map[string]string{"status": "deleted"})
+	})
+
 	r.Get("/api/playout", func(w http.ResponseWriter, r *http.Request) {
 		list := playMgr.List()
 		sort.Slice(list, func(i, j int) bool { return list[i].ID < list[j].ID })

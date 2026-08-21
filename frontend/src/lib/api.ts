@@ -422,6 +422,11 @@ export interface PlayoutClient {
   device_label?: string;
   format_code: string;
   decklink_out?: boolean;
+  fixed?: boolean;
+  source?: "srt" | "file";
+  file_id?: string;
+  file_name?: string;
+  loop?: boolean;
   mode: "listener" | "caller";
   port: number;
   target: string;
@@ -440,6 +445,9 @@ export type PlayoutCreateInput = {
   device_label?: string;
   format_code?: string;
   decklink_out?: boolean;
+  source?: "srt" | "file";
+  file_id?: string;
+  loop?: boolean;
   mode?: "listener" | "caller";
   port?: number;
   target?: string;
@@ -453,12 +461,22 @@ export type PlayoutUpdateInput = {
   device_label?: string;
   format_code?: string;
   decklink_out?: boolean;
+  source?: "srt" | "file";
+  file_id?: string;
+  loop?: boolean;
   mode?: "listener" | "caller";
   port?: number;
   target?: string;
   passphrase?: string;
   latency_ms?: number;
 };
+
+export interface PlayoutMediaItem {
+  id: string;
+  name: string;
+  size: number;
+  created_at: string;
+}
 
 export function isPlayoutOn(status: PlayoutClient["status"]): boolean {
   return status === "running" || status === "waiting";
@@ -539,6 +557,35 @@ export async function fetchPlayoutAudioLevels(id: number): Promise<AudioLevels> 
   const res = await fetch(`${BASE}/audio/playout/${id}`);
   if (!res.ok) throw new Error(`fetchPlayoutAudioLevels: ${res.status}`);
   return res.json();
+}
+
+export async function fetchPlayoutMedia(): Promise<PlayoutMediaItem[]> {
+  const res = await apiFetch("/api/playout/media");
+  if (!res.ok) throw new Error(`fetchPlayoutMedia: ${res.status}`);
+  return res.json();
+}
+
+export async function uploadPlayoutMedia(file: File): Promise<PlayoutMediaItem> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${BASE}/api/playout/media`, {
+    method: "POST",
+    headers: { "X-API-Key": API_KEY },
+    body: form,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `uploadPlayoutMedia: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function deletePlayoutMedia(id: string): Promise<void> {
+  const res = await apiFetch(`/api/playout/media/${encodeURIComponent(id)}`, { method: "DELETE" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `deletePlayoutMedia: ${res.status}`);
+  }
 }
 
 

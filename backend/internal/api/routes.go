@@ -749,13 +749,16 @@ func shouldSkipRequestLog(r *http.Request) bool {
 	case path == "/api/streams", path == "/api/recordings", path == "/api/srt", path == "/api/system", path == "/api/encode/presets",
 		path == "/api/encode/options",
 		path == "/api/library/categories", path == "/api/library/files",
-		path == "/api/playout", path == "/api/playout/devices":
+		path == "/api/playout", path == "/api/playout/devices", path == "/api/playout/media":
 		return true
 	case strings.HasPrefix(path, "/api/streams/") && strings.HasSuffix(path, "/logs"):
 		return true
 	case strings.HasPrefix(path, "/api/playout/") && strings.HasSuffix(path, "/logs"):
 		return true
 	case strings.HasPrefix(path, "/api/playout/") && strings.HasSuffix(path, "/audio"):
+		return true
+	case strings.HasPrefix(path, "/api/playout/") && !strings.Contains(path[len("/api/playout/"):], "/"):
+		// GET /api/playout/{id}
 		return true
 	case strings.HasPrefix(path, "/playout/thumb/"), strings.HasPrefix(path, "/playout/audio/"):
 		return true

@@ -2,10 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  createPlayoutClient,
   fetchPlayoutAudioLevels,
   fetchPlayoutClients,
-  fetchPlayoutDevices,
   isPlayoutOn,
   startPlayout,
   stopPlayout,
@@ -15,6 +13,7 @@ import {
 import Thumbnail from "@/components/Thumbnail";
 import AudioMonitor from "@/components/AudioMonitor";
 import DecodeSettingsModal from "@/components/DecodeSettingsModal";
+import MediaLibraryModal from "@/components/MediaLibraryModal";
 
 function formatBitrate(kbps?: number): string {
   if (!kbps || kbps <= 0) return "--";
@@ -58,15 +57,25 @@ function SegmentedMeter({ db, label }: { db?: number; label: string }) {
   );
 }
 
+function sourceLabel(c: PlayoutClient): string {
+  return (c.source || "srt").toUpperCase();
+}
+
+function waitingLabel(c: PlayoutClient): string {
+  if (c.source === "file") return "DECODE · file…";
+  if (c.mode === "caller") return "DECODE · connecting…";
+  return "DECODE · waiting for publisher";
+}
+
 export default function DecodeGrid() {
   const [clients, setClients] = useState<PlayoutClient[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Record<number, boolean>>({});
-  const [creating, setCreating] = useState(false);
   const [audio, setAudio] = useState<Record<number, AudioLevels>>({});
   const [listening, setListening] = useState<Record<number, boolean>>({});
   const [settingsId, setSettingsId] = useState<number | null>(null);
+  const [mediaOpen, setMediaOpen] = useState(false);
   const clientsRef = useRef<PlayoutClient[]>([]);
   clientsRef.current = clients;
 
@@ -121,30 +130,6 @@ export default function DecodeGrid() {
     };
   }, []);
 
-  const addClient = async () => {
-    setCreating(true);
-    setError(null);
-    try {
-      const devices = await fetchPlayoutDevices().catch(() => []);
-      const first = devices[0];
-      const created = await createPlayoutClient({
-        name: "",
-        device: first?.name || "",
-        device_label: first?.label || first?.open_name || "",
-        format_code: first?.formats?.[0]?.code || "",
-        decklink_out: false,
-        mode: "listener",
-        latency_ms: 120,
-      });
-      await load();
-      setSettingsId(created.id);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setCreating(false);
-    }
-  };
-
   const toggle = async (c: PlayoutClient) => {
     setBusy((b) => ({ ...b, [c.id]: true }));
     setError(null);
@@ -165,8 +150,8 @@ export default function DecodeGrid() {
     <section className="io-section">
       <div className="io-section-head">
         <h2 className="io-section-title">Decode</h2>
-        <button type="button" className="badge" onClick={addClient} disabled={creating}>
-          {creating ? "…" : "+ Add client"}
+        <button type="button" className="badge" onClick={() => setMediaOpen(true)}>
+          Media
         </button>
       </div>
 
@@ -181,16 +166,19 @@ export default function DecodeGrid() {
 
       {loading && clients.length === 0 ? (
         <div className="loading">
-          <span>Loading decode clients…</span>
+          <span>Loading decode channels…</span>
         </div>
       ) : clients.length === 0 ? (
-        <p className="io-section-empty">No decode clients yet — add one to receive SRT onto a DeckLink output.</p>
+        <p className="io-section-empty">
+          No decode channels yet — waiting for DeckLink sinks to be probed on the host.
+        </p>
       ) : (
         <div className="cards-grid">
           {clients.map((c) => {
             const on = isPlayoutOn(c.status);
             const hasMedia = c.status === "running";
             const isListening = !!listening[c.id];
+            const sink = c.device_label || c.device || `Channel ${c.id}`;
             return (
               <div key={c.id} className={`card-panel ${c.status}`}>
                 <AudioMonitor
@@ -207,9 +195,7 @@ export default function DecodeGrid() {
                         <div className={`stream-badge${hasMedia || c.sending ? "" : " waiting"}`}>
                           {hasMedia || c.sending
                             ? `DECODE · ${formatBitrate(c.bitrate_kbps) === "--" ? "live" : formatBitrate(c.bitrate_kbps)}`
-                            : c.mode === "caller"
-                              ? "DECODE · connecting…"
-                              : "DECODE · waiting for publisher"}
+                            : waitingLabel(c)}
                         </div>
                         {(c.reconnects ?? 0) > 0 && !(hasMedia || c.sending) && (
                           <div className="stream-badge waiting">reconnects {c.reconnects}</div>
@@ -227,7 +213,7 @@ export default function DecodeGrid() {
                   <div className="card-top">
                     <div className="card-identity">
                       <div className="card-title">
-                        <span className={`input-badge ${c.status}`} title={c.device_label || c.device || "No device"}>
+                        <span className={`input-badge ${c.status}`} title={sink}>
                           {c.id}
                         </span>
                         <span className="card-name" title={c.name}>
@@ -236,31 +222,15 @@ export default function DecodeGrid() {
                       </div>
                       <div
                         className="card-meta"
-                        title={[
-                          c.device_label || c.device || null,
-                          c.decklink_out ? "DeckLink on" : "SRT preview",
-                          c.format_code || null,
-                          c.mode,
-                          c.listen_url || c.target || null,
-                        ]
+                        title={[sink, c.format_code || null, sourceLabel(c), c.file_name || null]
                           .filter(Boolean)
                           .join(" · ")}
                       >
-                        <span className="card-meta-item">
-                          {c.device_label || c.device
-                            ? c.decklink_out
-                              ? c.device_label || c.device
-                              : `${c.device_label || c.device} (off)`
-                            : c.decklink_out
-                              ? "No device"
-                              : "SRT preview"}
-                        </span>
+                        <span className="card-meta-item">{sink}</span>
                         <span className="card-meta-sep">·</span>
                         <span className="card-meta-item">{c.format_code || "—"}</span>
                         <span className="card-meta-sep">·</span>
-                        <span className="card-meta-item">
-                          {c.mode === "listener" ? `:${c.port}` : c.target || "caller"}
-                        </span>
+                        <span className="card-meta-item">{sourceLabel(c)}</span>
                       </div>
                     </div>
                     <div className="card-actions">
@@ -307,6 +277,7 @@ export default function DecodeGrid() {
         onClose={() => setSettingsId(null)}
         onSaved={load}
       />
+      <MediaLibraryModal open={mediaOpen} onClose={() => setMediaOpen(false)} />
     </section>
   );
 }

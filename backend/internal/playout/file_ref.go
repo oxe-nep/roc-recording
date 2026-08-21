@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"os/exec"
 	"strings"
 )
 
@@ -78,4 +79,13 @@ func (m *Manager) ResolveFilePath(fileID string) (path, displayName string, err 
 		display = it.Name
 	}
 	return abs, display, nil
+}
+
+func fileHasAudioStream(ffmpegBin, path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	cmd := exec.Command(ffmpegBin, "-hide_banner", "-i", path)
+	out, _ := cmd.CombinedOutput()
+	return strings.Contains(strings.ToLower(string(out)), "audio:")
 }

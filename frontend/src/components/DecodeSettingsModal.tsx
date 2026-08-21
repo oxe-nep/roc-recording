@@ -47,7 +47,6 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
 
   const channelId = client?.id;
   const active = client ? isPlayoutOn(client.status) : false;
-  const deviceLocked = !!(client?.fixed || client?.device);
   const deviceName = client?.device || "";
   const deviceLabel = client?.device_label || deviceName;
 
@@ -236,15 +235,12 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
         <div className="channel-settings-form">
           <label className="presets-field">
             <span>Name</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} disabled={busy || active} />
-          </label>
-
-          <label className="presets-field">
-            <span>DeckLink output</span>
-            <input value={deviceLabel || "—"} disabled readOnly />
-            <span className="channel-settings-hint">
-              Fixed sink mapping{deviceLocked ? "" : " (waiting for probe)"}.
-            </span>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              disabled={busy || active}
+              placeholder={`Decode ${client.id}`}
+            />
           </label>
 
           <label className="presets-field">
@@ -259,7 +255,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                 <option value="">{formats.length ? "Select format…" : "No formats probed"}</option>
                 {formats.map((f) => (
                   <option key={f.code} value={f.code}>
-                    {f.label} ({f.code})
+                    {f.label}
                   </option>
                 ))}
               </select>
@@ -268,7 +264,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
               </button>
             </div>
             {formats.length === 0 && (
-              <span className="channel-settings-hint">No modes from FFmpeg for this sink. Try Re-probe.</span>
+              <span className="channel-settings-hint">No modes probed for this output. Try Re-probe.</span>
             )}
             {probeLog && formats.length === 0 && (
               <pre className="channel-settings-logbox" style={{ marginTop: 8, maxHeight: 120 }}>

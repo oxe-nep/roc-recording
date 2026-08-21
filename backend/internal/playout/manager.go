@@ -960,15 +960,12 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	var fmtInfo Format
 	if useDeckLink || formatCode != "" {
 		devs, _ := m.Devices(false)
-		if f, ok := LookupFormat(formatCode, devs); ok {
-			fmtInfo = f
-			w, h, fps = f.Width, f.Height, f.FPS
-			if fps <= 0 {
-				fps = 25
-			}
-		} else {
-			w, h, fps = formatGeometry(formatCode)
-			fmtInfo.Interlaced = formatCodeLooksInterlaced(formatCode)
+		probed, ok := LookupFormat(formatCode, devs)
+		w, h, fps, fmtInfo.Interlaced = resolveOutputTiming(formatCode, probed, ok)
+		if ok {
+			fmtInfo.Code = probed.Code
+			fmtInfo.Label = probed.Label
+			fmtInfo.Width, fmtInfo.Height, fmtInfo.FPS = w, h, fps
 		}
 	}
 
@@ -1010,11 +1007,20 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		"-analyzeduration", "2M",
 		"-probesize", "2M",
 	}
+	audioSrc := "[0:a]"
 	if source == SourceFile {
 		if loop {
 			args = append(args, "-stream_loop", "-1")
 		}
 		args = append(args, "-i", filePath)
+		if !fileHasAudioStream(m.ffmpegBin, filePath) {
+			args = append(args,
+				"-f", "lavfi",
+				"-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+			)
+			audioSrc = "[1:a]"
+			c.appendLog("file has no audio – using silent track")
+		}
 	} else {
 		// Encode STREAM remuxes MPEG-TS over SRT — force demuxer so probe does not stall.
 		args = append(args, "-f", "mpegts", "-i", srtURL)
@@ -1023,10 +1029,10 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	var filter string
 	if useDeckLink {
 		filter = vchain + ";" +
-			"[vt]scale=640:360,format=yuv420p[vthumb];" +
+			"[vt]fps=1,scale=640:360,format=yuv420p[vthumb];" +
 			fmt.Sprintf(
-				"[0:a]aresample=48000:async=1:first_pts=0,aformat=channel_layouts=stereo,asetnsamples=n=%d:p=0,asplit=3[aout][ahls][ameter];",
-				samplesPerFrame,
+				"%saresample=48000:async=1:first_pts=0,aformat=channel_layouts=stereo,asetnsamples=n=%d:p=0,asplit=3[aout][ahls][ameter];",
+				audioSrc, samplesPerFrame,
 			) +
 			"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
 			"ametadata=print,anullsink"
@@ -1049,10 +1055,9 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			args = append(args, "-format_code", strings.TrimSpace(formatCode))
 		}
 		args = append(args,
-			"-preroll", "1.5",
+			"-preroll", "0.5",
 			"-f", "decklink", openDevice,
 			"-map", "[vthumb]",
-			"-r", "1",
 			"-q:v", "4",
 			"-update", "1",
 			"-f", "image2",
@@ -1072,7 +1077,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	} else {
 		filter =
 			"[0:v]fps=1,scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,format=yuv420p[vthumb];" +
-				"[0:a]asplit=2[ahls][ameter];" +
+				fmt.Sprintf("%sasplit=2[ahls][ameter];", audioSrc) +
 				"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
 				"ametadata=print,anullsink"
 		args = append(args,
@@ -1112,8 +1117,8 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	c.mu.Unlock()
 	if useDeckLink {
 		c.appendLog(fmt.Sprintf(
-			"starting FFmpeg (%s/%s → decklink %q label=%q format=%s interlaced=%v loop=%v)",
-			source, mode, openDevice, deviceLabel, formatCode, fmtInfo.Interlaced, loop && source == SourceFile,
+			"starting FFmpeg (%s/%s → decklink %q format=%s %dx%d@%g interlaced=%v loop=%v)",
+			source, mode, openDevice, formatCode, w, h, fps, fmtInfo.Interlaced, loop && source == SourceFile,
 		))
 		c.appendLog("decklink args: " + strings.Join(decklinkArgSummary(args, openDevice), " "))
 	} else {
@@ -1296,12 +1301,14 @@ func srtLatencyUs(ms int) int {
 func formatGeometry(code string) (w, h int, fps float64) {
 	w, h, fps = 1920, 1080, 25
 	switch strings.ToLower(strings.TrimSpace(code)) {
-	case "hp50", "hi50":
+	case "hi50", "hi25":
 		return 1920, 1080, 25
-	case "hp25", "hi25":
+	case "hp50":
+		return 1920, 1080, 50
+	case "hp25":
 		return 1920, 1080, 25
 	case "hp60", "hp59.94", "hp5994":
-		return 1920, 1080, 30
+		return 1920, 1080, 60
 	case "hp30", "hp29.97", "hp29":
 		return 1920, 1080, 30
 	case "hp24", "hp23.98":
@@ -1310,6 +1317,47 @@ func formatGeometry(code string) (w, h int, fps float64) {
 		return 1280, 720, 50
 	}
 	return w, h, fps
+}
+
+// resolveOutputTiming picks width/height/fps/interlace for a DeckLink format_code.
+// Probe often reports field-rate as fps for interlaced modes (Hi50 → 50); normalize to frame rate.
+func resolveOutputTiming(formatCode string, probed Format, haveProbed bool) (w, h int, fps float64, interlaced bool) {
+	w, h, fps = 1920, 1080, 25
+	interlaced = formatCodeLooksInterlaced(formatCode)
+	if haveProbed {
+		w, h, fps = probed.Width, probed.Height, probed.FPS
+		if probed.Interlaced {
+			interlaced = true
+		}
+	}
+	gw, gh, gfps := formatGeometry(formatCode)
+	code := strings.ToLower(strings.TrimSpace(formatCode))
+	switch {
+	case code == "hi50" || code == "hi25":
+		w, h, fps, interlaced = gw, gh, gfps, true
+	case code == "hp50":
+		w, h, fps, interlaced = gw, gh, gfps, false
+	case code == "hp25":
+		w, h, fps, interlaced = gw, gh, gfps, false
+	default:
+		if w <= 0 {
+			w = gw
+		}
+		if h <= 0 {
+			h = gh
+		}
+		if fps <= 0 {
+			fps = gfps
+		}
+		// Interlaced modes listed at field rate (e.g. 50 for i50) → frame rate.
+		if interlaced && fps > 30 {
+			fps = fps / 2
+		}
+	}
+	if fps <= 0 {
+		fps = 25
+	}
+	return w, h, fps, interlaced
 }
 
 func formatCodeLooksInterlaced(code string) bool {

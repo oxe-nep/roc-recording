@@ -61,6 +61,33 @@ function sourceLabel(c: PlayoutClient): string {
   return (c.source || "srt").toUpperCase();
 }
 
+function formatDisplay(code?: string): string {
+  if (!code) return "—";
+  const map: Record<string, string> = {
+    Hi50: "1080i50",
+    Hp50: "1080p50",
+    Hi25: "1080i25",
+    Hp25: "1080p25",
+    Hp60: "1080p60",
+    Hp30: "1080p30",
+    Hp24: "1080p24",
+  };
+  return map[code] || code;
+}
+
+function metaLine(c: PlayoutClient): string {
+  const parts = [formatDisplay(c.format_code), sourceLabel(c)];
+  if (c.source === "file" && c.file_name) {
+    const short = c.file_name.includes("/") ? c.file_name.split("/").pop()! : c.file_name;
+    parts.push(short);
+  } else if (c.source !== "file" && c.mode === "caller" && c.target) {
+    parts.push(c.target);
+  } else if (c.source !== "file" && c.mode === "listener") {
+    parts.push(`:${c.port}`);
+  }
+  return parts.filter(Boolean).join(" · ");
+}
+
 function waitingLabel(c: PlayoutClient): string {
   if (c.source === "file") return "DECODE · file…";
   if (c.mode === "caller") return "DECODE · connecting…";
@@ -178,7 +205,7 @@ export default function DecodeGrid() {
             const on = isPlayoutOn(c.status);
             const hasMedia = c.status === "running";
             const isListening = !!listening[c.id];
-            const sink = c.device_label || c.device || `Channel ${c.id}`;
+            const title = c.name?.trim() || `Decode ${c.id}`;
             return (
               <div key={c.id} className={`card-panel ${c.status}`}>
                 <AudioMonitor
@@ -213,24 +240,25 @@ export default function DecodeGrid() {
                   <div className="card-top">
                     <div className="card-identity">
                       <div className="card-title">
-                        <span className={`input-badge ${c.status}`} title={sink}>
+                        <span className={`input-badge ${c.status}`} title={`Output ${c.id}`}>
                           {c.id}
                         </span>
-                        <span className="card-name" title={c.name}>
-                          {c.name}
+                        <span className="card-name" title={title}>
+                          {title}
                         </span>
                       </div>
-                      <div
-                        className="card-meta"
-                        title={[sink, c.format_code || null, sourceLabel(c), c.file_name || null]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      >
-                        <span className="card-meta-item">{sink}</span>
-                        <span className="card-meta-sep">·</span>
-                        <span className="card-meta-item">{c.format_code || "—"}</span>
+                      <div className="card-meta" title={metaLine(c)}>
+                        <span className="card-meta-item">{formatDisplay(c.format_code)}</span>
                         <span className="card-meta-sep">·</span>
                         <span className="card-meta-item">{sourceLabel(c)}</span>
+                        {c.source === "file" && c.file_name && (
+                          <>
+                            <span className="card-meta-sep">·</span>
+                            <span className="card-meta-item">
+                              {c.file_name.includes("/") ? c.file_name.split("/").pop() : c.file_name}
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
                     <div className="card-actions">

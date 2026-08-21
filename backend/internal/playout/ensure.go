@@ -36,12 +36,13 @@ func (m *Manager) EnsureDefaultChannels() {
 		}
 		format := pickDefaultFormat(d)
 		openName := d.Name
+		defaultName := fmt.Sprintf("Decode %d", id)
 
 		existing, ok := m.clients[id]
 		if !ok {
 			m.clients[id] = &Client{
 				ID:          id,
-				Name:        label,
+				Name:        defaultName,
 				Status:      StatusStopped,
 				Device:      openName,
 				DeviceLabel: label,
@@ -66,20 +67,18 @@ func (m *Manager) EnsureDefaultChannels() {
 		existing.Fixed = true
 		existing.DeckLinkOut = true
 		if strings.TrimSpace(existing.Device) == "" || !deviceRefMatch(existing.Device, d.Name, d.Label) {
-			// Repair wrong/short id to this sink slot when stopped.
 			if existing.Status == StatusStopped {
 				existing.Device = openName
 				existing.DeviceLabel = label
 				changed = true
 			}
 		} else if existing.Status == StatusStopped {
-			// Expand short id → full handle while keeping the same sink.
 			resolved := d.Name
 			if existing.Device != resolved {
 				existing.Device = resolved
 				changed = true
 			}
-			if existing.DeviceLabel == "" {
+			if existing.DeviceLabel == "" || existing.DeviceLabel != label {
 				existing.DeviceLabel = label
 				changed = true
 			}
@@ -92,8 +91,9 @@ func (m *Manager) EnsureDefaultChannels() {
 			existing.Source = SourceSRT
 			changed = true
 		}
-		if existing.Name == "" || existing.Name == fmt.Sprintf("Decode %d", id) {
-			existing.Name = label
+		// Prefer friendly names — migrate away from raw DeckLink labels.
+		if existing.Name == "" || looksLikeDeckLinkName(existing.Name, label) {
+			existing.Name = defaultName
 			changed = true
 		}
 		existing.mu.Unlock()
@@ -108,6 +108,18 @@ func (m *Manager) EnsureDefaultChannels() {
 		}
 	}
 	log.Printf("[playout] EnsureDefaultChannels: %d sinks / %d clients", len(sorted), len(m.clients))
+}
+
+func looksLikeDeckLinkName(name, sinkLabel string) bool {
+	n := strings.TrimSpace(name)
+	if n == "" {
+		return true
+	}
+	if sinkLabel != "" && strings.EqualFold(n, strings.TrimSpace(sinkLabel)) {
+		return true
+	}
+	lower := strings.ToLower(n)
+	return strings.Contains(lower, "decklink") || strings.Contains(lower, "blackmagic")
 }
 
 func sinkSortKey(d Device) int {

@@ -218,7 +218,7 @@ export default function DecodeGrid() {
                   <div className="card-top">
                     <div className="card-identity">
                       <div className="card-title">
-                        <span className={`input-badge ${c.status}`} title={c.device || "No device"}>
+                        <span className={`input-badge ${c.status}`} title={c.device_label || c.device || "No device"}>
                           {c.id}
                         </span>
                         <span className="card-name" title={c.name}>
@@ -227,11 +227,20 @@ export default function DecodeGrid() {
                       </div>
                       <div
                         className="card-meta"
-                        title={[c.device || null, c.format_code || null, c.mode, c.listen_url || c.target || null]
+                        title={[
+                          c.decklink_out ? c.device_label || c.device || null : "SRT preview",
+                          c.format_code || null,
+                          c.mode,
+                          c.listen_url || c.target || null,
+                        ]
                           .filter(Boolean)
                           .join(" · ")}
                       >
-                        <span className="card-meta-item">{c.device || "No device"}</span>
+                        <span className="card-meta-item">
+                          {c.decklink_out
+                            ? c.device_label || c.device || "No device"
+                            : "SRT preview"}
+                        </span>
                         <span className="card-meta-sep">·</span>
                         <span className="card-meta-item">{c.format_code || "—"}</span>
                         <span className="card-meta-sep">·</span>

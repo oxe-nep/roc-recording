@@ -123,12 +123,20 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
       setError("Stop decode before changing settings");
       return;
     }
+    if (deckLinkOut && !device) {
+      setError("Select a DeckLink output device, or disable DeckLink output");
+      return;
+    }
+    if (deckLinkOut && device && !formatCode) {
+      setError("Select an output format for DeckLink");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       const body: Parameters<typeof updatePlayoutClient>[1] = {
         name: name.trim() || `Decode ${client.id}`,
-        device,
+        device: deckLinkOut ? device : "",
         format_code: deckLinkOut && device ? formatCode : "",
         decklink_out: deckLinkOut,
         mode,
@@ -208,7 +216,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
             <span>Enable DeckLink output</span>
           </label>
           <span className="channel-settings-hint" style={{ marginTop: -8 }}>
-            Leave off to verify SRT decode first (thumb + meters only).
+            Enable after SRT preview works. Sinks use unique IDs (8in/8out are separate instances).
           </span>
 
           <label className="presets-field">

@@ -371,6 +371,30 @@ func (m *Manager) ResolveOpenDevice(raw string) string {
 	return raw
 }
 
+// LookupDeviceLabel returns the human sink label for a unique id (or the id itself).
+func (m *Manager) LookupDeviceLabel(idOrName string) string {
+	idOrName = strings.TrimSpace(idOrName)
+	if idOrName == "" {
+		return ""
+	}
+	devs, err := m.devCache.get(m.ffmpegBin, 5*time.Minute)
+	if err != nil {
+		return ""
+	}
+	for _, d := range devs {
+		if strings.EqualFold(d.Name, idOrName) {
+			if d.Label != "" {
+				return d.Label
+			}
+			return d.Name
+		}
+		if strings.EqualFold(d.Label, idOrName) {
+			return d.Label
+		}
+	}
+	return ""
+}
+
 type deviceCache struct {
 	mu      sync.Mutex
 	at      time.Time

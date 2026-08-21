@@ -417,6 +417,7 @@ export interface PlayoutClient {
   name: string;
   status: "stopped" | "waiting" | "running";
   device: string;
+  device_label?: string;
   format_code: string;
   decklink_out?: boolean;
   mode: "listener" | "caller";

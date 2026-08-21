@@ -48,6 +48,7 @@ type Client struct {
 	Name        string
 	Status      Status
 	Device      string
+	DeviceLabel string // persisted display name; used when cache miss / open fallback
 	FormatCode  string
 	DeckLinkOut bool // when false, SRT preview only (thumb/meters) — ignore Device
 	Mode        Mode
@@ -63,8 +64,8 @@ type Client struct {
 	Reconnects  int
 	LastError   string
 
-	// deviceTryLabel: next DeckLink open uses display label instead of unique id.
-	deviceTryLabel bool
+	// deviceTryAlt: next DeckLink open uses the alternate of unique-id vs open_name.
+	deviceTryAlt bool
 
 	cmd      *exec.Cmd
 	stopCh   chan struct{}
@@ -111,6 +112,7 @@ type persistedFile struct {
 type persistedCli struct {
 	Name        string `json:"name"`
 	Device      string `json:"device"`
+	DeviceLabel string `json:"device_label,omitempty"`
 	FormatCode  string `json:"format_code"`
 	DeckLinkOut bool   `json:"decklink_out"`
 	Mode        Mode   `json:"mode"`
@@ -174,6 +176,7 @@ func (m *Manager) Load() {
 			Name:        name,
 			Status:      StatusStopped,
 			Device:      NormalizeOpenDevice(cfg.Device),
+			DeviceLabel: strings.TrimSpace(cfg.DeviceLabel),
 			FormatCode:  cfg.FormatCode,
 			DeckLinkOut: cfg.DeckLinkOut, // default false — SRT preview until explicitly enabled
 			Mode:        mode,
@@ -204,6 +207,7 @@ func (m *Manager) saveLocked() error {
 		f.Clients[strconv.Itoa(id)] = persistedCli{
 			Name:        c.Name,
 			Device:      c.Device,
+			DeviceLabel: c.DeviceLabel,
 			FormatCode:  c.FormatCode,
 			DeckLinkOut: c.DeckLinkOut,
 			Mode:        c.Mode,
@@ -224,6 +228,7 @@ func (m *Manager) saveLocked() error {
 type CreateInput struct {
 	Name        string `json:"name"`
 	Device      string `json:"device"`
+	DeviceLabel string `json:"device_label"`
 	FormatCode  string `json:"format_code"`
 	DeckLinkOut bool   `json:"decklink_out"`
 	Mode        string `json:"mode"`
@@ -236,6 +241,7 @@ type CreateInput struct {
 type UpdateInput struct {
 	Name        *string `json:"name"`
 	Device      *string `json:"device"`
+	DeviceLabel *string `json:"device_label"`
 	FormatCode  *string `json:"format_code"`
 	DeckLinkOut *bool   `json:"decklink_out"`
 	Mode        *string `json:"mode"`
@@ -274,6 +280,7 @@ func (m *Manager) Create(in CreateInput) (ClientInfo, error) {
 		Name:        name,
 		Status:      StatusStopped,
 		Device:      NormalizeOpenDevice(in.Device),
+		DeviceLabel: strings.TrimSpace(in.DeviceLabel),
 		FormatCode:  strings.TrimSpace(in.FormatCode),
 		DeckLinkOut: in.DeckLinkOut,
 		Mode:        mode,
@@ -284,6 +291,9 @@ func (m *Manager) Create(in CreateInput) (ClientInfo, error) {
 		AudioL:      audioSilence,
 		AudioR:      audioSilence,
 		logLines:    make([]string, 0, 32),
+	}
+	if c.Device != "" && c.DeviceLabel == "" {
+		c.DeviceLabel = m.LookupDeviceLabel(c.Device)
 	}
 	m.clients[id] = c
 	if err := m.saveLocked(); err != nil {
@@ -312,6 +322,15 @@ func (m *Manager) Update(id int, in UpdateInput) (ClientInfo, error) {
 	}
 	if in.Device != nil {
 		c.Device = NormalizeOpenDevice(*in.Device)
+		if in.DeviceLabel != nil {
+			c.DeviceLabel = strings.TrimSpace(*in.DeviceLabel)
+		} else if c.Device != "" {
+			c.DeviceLabel = m.LookupDeviceLabel(c.Device)
+		} else {
+			c.DeviceLabel = ""
+		}
+	} else if in.DeviceLabel != nil {
+		c.DeviceLabel = strings.TrimSpace(*in.DeviceLabel)
 	}
 	if in.FormatCode != nil {
 		c.FormatCode = strings.TrimSpace(*in.FormatCode)
@@ -452,12 +471,16 @@ func (m *Manager) get(id int) (*Client, error) {
 }
 
 func (m *Manager) infoLocked(c *Client) ClientInfo {
+	label := strings.TrimSpace(c.DeviceLabel)
+	if label == "" {
+		label = m.LookupDeviceLabel(c.Device)
+	}
 	info := ClientInfo{
 		ID:          c.ID,
 		Name:        c.Name,
 		Status:      c.Status,
 		Device:      c.Device,
-		DeviceLabel: m.LookupDeviceLabel(c.Device),
+		DeviceLabel: label,
 		FormatCode:  c.FormatCode,
 		DeckLinkOut: c.DeckLinkOut,
 		Mode:        c.Mode,
@@ -554,7 +577,7 @@ func (m *Manager) Start(id int) (ClientInfo, error) {
 	c.BitrateKbps = 0
 	c.Sending = false
 	c.Reconnects = 0
-	c.deviceTryLabel = false
+	c.deviceTryAlt = false
 	c.AudioL = audioSilence
 	c.AudioR = audioSilence
 	info := m.infoLocked(c)
@@ -749,10 +772,48 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	useDeckLink := wantDeckLink && deviceRaw != "" && formatCode != ""
 	device := ""
 	deviceLabel := ""
+	openPrimary := ""
+	openAlt := ""
 	if useDeckLink {
+		// Refresh sinks so open_name / labels match current FFmpeg + driver state.
+		if _, err := m.devCache.refresh(m.ffmpegBin); err != nil {
+			c.appendLog(fmt.Sprintf("decklink device refresh: %v", err))
+		}
 		device = m.ResolveOpenDevice(deviceRaw)
-		deviceLabel = m.LookupDeviceLabel(device)
-		if device != deviceRaw {
+		if d, ok := m.FindDevice(device); ok {
+			deviceLabel = d.Label
+			openPrimary = d.OpenName
+			if openPrimary == "" {
+				openPrimary = d.Label
+			}
+			if openPrimary == "" {
+				openPrimary = d.Name
+			}
+			openAlt = d.Name
+			if openPrimary == openAlt {
+				openAlt = d.Label
+			}
+		} else {
+			deviceLabel = strings.TrimSpace(c.DeviceLabel)
+			if deviceLabel == "" {
+				deviceLabel = m.LookupDeviceLabel(device)
+			}
+			// Prefer display label: unique IDs from -sinks often fail write_header on DeckLink IP.
+			if deviceLabel != "" && deviceLabel != device {
+				openPrimary = deviceLabel
+				openAlt = device
+			} else {
+				openPrimary = device
+			}
+		}
+		if deviceLabel != "" {
+			c.mu.Lock()
+			c.DeviceLabel = deviceLabel
+			if device != deviceRaw {
+				c.Device = device
+			}
+			c.mu.Unlock()
+		} else if device != deviceRaw {
 			c.mu.Lock()
 			c.Device = device
 			c.mu.Unlock()
@@ -776,11 +837,14 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	}
 
 	c.mu.Lock()
-	tryLabel := c.deviceTryLabel
+	tryAlt := c.deviceTryAlt
 	c.mu.Unlock()
-	openDevice := device
-	if useDeckLink && tryLabel && deviceLabel != "" && deviceLabel != device {
-		openDevice = deviceLabel
+	openDevice := openPrimary
+	if openDevice == "" {
+		openDevice = device
+	}
+	if useDeckLink && tryAlt && openAlt != "" && openAlt != openDevice {
+		openDevice = openAlt
 	}
 
 	var filter string
@@ -900,8 +964,8 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	c.mu.Unlock()
 	if useDeckLink {
 		c.appendLog(fmt.Sprintf(
-			"starting FFmpeg (%s → decklink %q label=%q format=%s interlaced=%v)",
-			mode, openDevice, deviceLabel, formatCode, fmtInfo.Interlaced,
+			"starting FFmpeg (%s → decklink %q label=%q primary=%q alt=%q format=%s interlaced=%v)",
+			mode, openDevice, deviceLabel, openPrimary, openAlt, formatCode, fmtInfo.Interlaced,
 		))
 		c.appendLog("decklink args: " + strings.Join(decklinkArgSummary(args, openDevice), " "))
 	} else {
@@ -939,19 +1003,19 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		c.Sending = false
 		c.BitrateKbps = 0
 		c.Status = StatusWaiting
-		// After unique-ID open failure, try display label once on the next loop.
-		if useDeckLink && err != nil && deviceLabel != "" && deviceLabel != device {
-			if !tryLabel {
-				c.deviceTryLabel = true
+		// Alternate unique-id vs probe-proven open_name/label on the next loop.
+		if useDeckLink && err != nil && openAlt != "" && openAlt != openPrimary {
+			if !tryAlt {
+				c.deviceTryAlt = true
 				c.mu.Unlock()
-				c.appendLog(fmt.Sprintf("DeckLink open with id failed – next retry will use label %q", deviceLabel))
+				c.appendLog(fmt.Sprintf("DeckLink open with %q failed – next retry will use %q", openDevice, openAlt))
 			} else {
-				c.deviceTryLabel = false
+				c.deviceTryAlt = false
 				c.mu.Unlock()
-				c.appendLog("DeckLink label fallback also failed – reverting to unique id")
+				c.appendLog(fmt.Sprintf("DeckLink open with %q also failed – reverting to %q", openDevice, openPrimary))
 			}
 		} else {
-			c.deviceTryLabel = false
+			c.deviceTryAlt = false
 			c.mu.Unlock()
 		}
 		return err

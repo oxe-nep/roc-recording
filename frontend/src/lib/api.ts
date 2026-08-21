@@ -171,6 +171,7 @@ export interface SystemMetrics {
   disk_path?: string;
   gpu_available: boolean;
   nvenc_percent?: number;
+  nvdec_percent?: number;
   gpu_percent?: number;
   gpu_mem_used_mb?: number;
   gpu_mem_total_mb?: number;
@@ -406,6 +407,7 @@ export interface PlayoutFormat {
 export interface PlayoutDevice {
   name: string; // unique sink id for FFmpeg
   label?: string; // display name
+  open_name?: string; // name that accepted format probe
   formats: PlayoutFormat[];
   probe_log?: string;
   busy?: boolean;
@@ -435,6 +437,7 @@ export interface PlayoutClient {
 export type PlayoutCreateInput = {
   name?: string;
   device?: string;
+  device_label?: string;
   format_code?: string;
   decklink_out?: boolean;
   mode?: "listener" | "caller";
@@ -447,6 +450,7 @@ export type PlayoutCreateInput = {
 export type PlayoutUpdateInput = {
   name?: string;
   device?: string;
+  device_label?: string;
   format_code?: string;
   decklink_out?: boolean;
   mode?: "listener" | "caller";

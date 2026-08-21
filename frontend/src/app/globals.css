@@ -50,14 +50,39 @@ body {
 
 .sys-status {
   display: flex;
-  align-items: center;
-  gap: 14px;
+  align-items: stretch;
+  gap: 10px;
   font-variant-numeric: tabular-nums;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .sys-status.muted,
+.sys-group.muted .sys-value,
 .sys-item.muted .sys-value {
   color: var(--text-muted);
+}
+
+.sys-group {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 4px 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--border-radius);
+}
+
+.sys-group-label {
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding-right: 6px;
+  margin-right: 2px;
+  border-right: 1px solid var(--border-strong);
+  align-self: center;
 }
 
 .sys-item {

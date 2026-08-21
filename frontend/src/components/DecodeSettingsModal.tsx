@@ -6,6 +6,8 @@ import {
   fetchPlayoutDevices,
   fetchPlayoutLogs,
   isPlayoutOn,
+  startPlayout,
+  stopPlayout,
   updatePlayoutClient,
   type PlayoutClient,
   type PlayoutDevice,
@@ -118,36 +120,73 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
     }
   };
 
+  const buildSaveBody = (): Parameters<typeof updatePlayoutClient>[1] => {
+    const selectedDev = devices.find((d) => d.name === device);
+    const body: Parameters<typeof updatePlayoutClient>[1] = {
+      name: name.trim() || `Decode ${client!.id}`,
+      // Keep device/format even when DeckLink out is off — only decklink_out gates open.
+      device,
+      device_label: selectedDev?.label || selectedDev?.open_name || client?.device_label || "",
+      format_code: formatCode,
+      decklink_out: deckLinkOut,
+      mode,
+      port,
+      target,
+      latency_ms: latency,
+    };
+    if (passDirty) body.passphrase = passphrase;
+    return body;
+  };
+
+  const validateForDeckLink = (): string | null => {
+    if (deckLinkOut && !device) {
+      return "Select a DeckLink output device, or disable DeckLink output";
+    }
+    if (deckLinkOut && device && !formatCode) {
+      return "Select an output format for DeckLink";
+    }
+    return null;
+  };
+
   const apply = async () => {
     if (active) {
       setError("Stop decode before changing settings");
       return;
     }
-    if (deckLinkOut && !device) {
-      setError("Select a DeckLink output device, or disable DeckLink output");
-      return;
-    }
-    if (deckLinkOut && device && !formatCode) {
-      setError("Select an output format for DeckLink");
+    const invalid = validateForDeckLink();
+    if (invalid) {
+      setError(invalid);
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      const body: Parameters<typeof updatePlayoutClient>[1] = {
-        name: name.trim() || `Decode ${client.id}`,
-        device: deckLinkOut ? device : "",
-        format_code: deckLinkOut && device ? formatCode : "",
-        decklink_out: deckLinkOut,
-        mode,
-        port,
-        target,
-        latency_ms: latency,
-      };
-      if (passDirty) body.passphrase = passphrase;
-      await updatePlayoutClient(client.id, body);
+      await updatePlayoutClient(client.id, buildSaveBody());
       onSaved();
       onClose();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleRun = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      if (active) {
+        await stopPlayout(client.id);
+      } else {
+        const invalid = validateForDeckLink();
+        if (invalid) {
+          setError(invalid);
+          return;
+        }
+        await updatePlayoutClient(client.id, buildSaveBody());
+        await startPlayout(client.id);
+      }
+      onSaved();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -216,7 +255,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
             <span>Enable DeckLink output</span>
           </label>
           <span className="channel-settings-hint" style={{ marginTop: -8 }}>
-            Enable after SRT preview works. Sinks use unique IDs (8in/8out are separate instances).
+            Device selection is kept even when this is off. Turn on only after SRT preview works.
           </span>
 
           <label className="presets-field">
@@ -346,6 +385,15 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
         <div className="channel-settings-actions">
           <button type="button" className="badge" onClick={remove} disabled={busy || active}>
             Delete
+          </button>
+          <button
+            type="button"
+            className={`stream-btn ${active ? "streaming" : "idle"}`}
+            onClick={toggleRun}
+            disabled={busy}
+            title={active ? "Stop decode" : "Save settings and start decode"}
+          >
+            {busy ? "…" : active ? "STOP" : "START"}
           </button>
           <button type="button" className="badge" onClick={onClose} disabled={busy}>
             Cancel

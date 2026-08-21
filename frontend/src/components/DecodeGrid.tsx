@@ -130,7 +130,9 @@ export default function DecodeGrid() {
       const created = await createPlayoutClient({
         name: "",
         device: first?.name || "",
+        device_label: first?.label || first?.open_name || "",
         format_code: first?.formats?.[0]?.code || "",
+        decklink_out: false,
         mode: "listener",
         latency_ms: 120,
       });
@@ -235,7 +237,8 @@ export default function DecodeGrid() {
                       <div
                         className="card-meta"
                         title={[
-                          c.decklink_out ? c.device_label || c.device || null : "SRT preview",
+                          c.device_label || c.device || null,
+                          c.decklink_out ? "DeckLink on" : "SRT preview",
                           c.format_code || null,
                           c.mode,
                           c.listen_url || c.target || null,
@@ -244,9 +247,13 @@ export default function DecodeGrid() {
                           .join(" · ")}
                       >
                         <span className="card-meta-item">
-                          {c.decklink_out
-                            ? c.device_label || c.device || "No device"
-                            : "SRT preview"}
+                          {c.device_label || c.device
+                            ? c.decklink_out
+                              ? c.device_label || c.device
+                              : `${c.device_label || c.device} (off)`
+                            : c.decklink_out
+                              ? "No device"
+                              : "SRT preview"}
                         </span>
                         <span className="card-meta-sep">·</span>
                         <span className="card-meta-item">{c.format_code || "—"}</span>

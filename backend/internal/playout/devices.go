@@ -12,11 +12,13 @@ import (
 )
 
 // Device is a DeckLink *output* (sink) discovered via FFmpeg.
-// Name is the unique handle FFmpeg opens (BMDDeckLinkDeviceHandle).
+// Name is the unique handle from -sinks (BMDDeckLinkDeviceHandle).
 // Label is the human display name (may match an input with a different ID).
+// OpenName is whichever of Name/Label actually accepted -list_formats (use for playout).
 type Device struct {
 	Name       string   `json:"name"`  // unique id, e.g. "25fb7120:00000000"
 	Label      string   `json:"label"` // e.g. "DeckLink IP 100G (1)"
+	OpenName   string   `json:"open_name,omitempty"`
 	Formats    []Format `json:"formats"`
 	ProbeLog   string   `json:"probe_log,omitempty"`
 	Busy       bool     `json:"busy,omitempty"`
@@ -120,20 +122,23 @@ func ListDevices(ffmpegBin string) ([]Device, error) {
 	out := make([]Device, 0, len(sinks))
 	for _, s := range sinks {
 		formats, raw := probeFormats(ffmpegBin, s.ID)
-		// Also try display name if unique id probe failed (older FFmpeg).
+		openName := s.ID
+		// Unique handle often lists in -sinks but fails -list_formats / write_header
+		// on DeckLink IP; display label is what actually opens.
 		if len(formats) == 0 && s.Label != "" && s.Label != s.ID {
 			if f2, raw2 := probeFormats(ffmpegBin, s.Label); len(f2) > 0 {
 				formats, raw = f2, raw2
+				openName = s.Label
 			} else {
 				raw = raw + "\n" + raw2
 			}
 		}
-		d := Device{Name: s.ID, Label: s.Label, Formats: formats}
+		d := Device{Name: s.ID, Label: s.Label, OpenName: openName, Formats: formats}
 		if len(formats) == 0 {
 			d.ProbeLog = trimProbeLog(raw)
 			log.Printf("[playout] format probe failed for sink %q (%q) (%d bytes log)", s.ID, s.Label, len(raw))
 		} else {
-			log.Printf("[playout] probed %d formats for sink %q (%q)", len(formats), s.ID, s.Label)
+			log.Printf("[playout] probed %d formats for sink %q label=%q open=%q", len(formats), s.ID, s.Label, openName)
 		}
 		out = append(out, d)
 	}
@@ -395,6 +400,48 @@ func (m *Manager) LookupDeviceLabel(idOrName string) string {
 	return ""
 }
 
+// LookupDeviceOpen returns the FFmpeg open string that accepted format probing.
+func (m *Manager) LookupDeviceOpen(idOrName string) string {
+	idOrName = strings.TrimSpace(idOrName)
+	if idOrName == "" {
+		return ""
+	}
+	devs, err := m.devCache.get(m.ffmpegBin, 5*time.Minute)
+	if err != nil {
+		return ""
+	}
+	for _, d := range devs {
+		if strings.EqualFold(d.Name, idOrName) || strings.EqualFold(d.Label, idOrName) {
+			if d.OpenName != "" {
+				return d.OpenName
+			}
+			if d.Label != "" {
+				return d.Label
+			}
+			return d.Name
+		}
+	}
+	return ""
+}
+
+// FindDevice returns a cached sink matching unique id or label.
+func (m *Manager) FindDevice(idOrName string) (Device, bool) {
+	idOrName = strings.TrimSpace(idOrName)
+	if idOrName == "" {
+		return Device{}, false
+	}
+	devs, err := m.devCache.get(m.ffmpegBin, 5*time.Minute)
+	if err != nil {
+		return Device{}, false
+	}
+	for _, d := range devs {
+		if strings.EqualFold(d.Name, idOrName) || strings.EqualFold(d.Label, idOrName) {
+			return d, true
+		}
+	}
+	return Device{}, false
+}
+
 type deviceCache struct {
 	mu      sync.Mutex
 	at      time.Time
@@ -448,10 +495,23 @@ func mergeFormatCache(prev, next []Device) []Device {
 	}
 	out := make([]Device, 0, len(next))
 	for _, d := range next {
-		if len(d.Formats) == 0 {
-			if old, ok := byID[d.Name]; ok && len(old.Formats) > 0 {
+		if old, ok := byID[d.Name]; ok {
+			if len(d.Formats) == 0 && len(old.Formats) > 0 {
 				d.Formats = old.Formats
 				d.ProbeLog = ""
+			}
+			if d.OpenName == "" && old.OpenName != "" {
+				d.OpenName = old.OpenName
+			}
+			if d.Label == "" && old.Label != "" {
+				d.Label = old.Label
+			}
+		}
+		if d.OpenName == "" {
+			if d.Label != "" {
+				d.OpenName = d.Label
+			} else {
+				d.OpenName = d.Name
 			}
 		}
 		out = append(out, d)

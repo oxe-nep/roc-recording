@@ -11,6 +11,39 @@ function fmtBytes(n: number): string {
   return `${mb.toFixed(0)}M`;
 }
 
+function fmtVram(mb?: number): string {
+  if (mb == null || Number.isNaN(mb)) return "--";
+  if (mb >= 1024) return `${(mb / 1024).toFixed(1)}G`;
+  return `${mb.toFixed(0)}M`;
+}
+
+function pct(n?: number): string {
+  if (n == null || Number.isNaN(n)) return "--";
+  return `${n.toFixed(0)}%`;
+}
+
+function Item({
+  label,
+  value,
+  sub,
+  title,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  title?: string;
+}) {
+  return (
+    <span className="sys-item" title={title}>
+      <span className="sys-label">{label}</span>
+      <span className="sys-value">
+        {value}
+        {sub ? <span className="sys-sub">{sub}</span> : null}
+      </span>
+    </span>
+  );
+}
+
 export default function SystemStatus() {
   const [m, setM] = useState<SystemMetrics | null>(null);
 
@@ -38,48 +71,46 @@ export default function SystemStatus() {
 
   return (
     <div className="sys-status" title="Capture host resource usage">
-      <span className="sys-item">
-        <span className="sys-label">CPU</span>
-        <span className="sys-value">{m.cpu_percent.toFixed(0)}%</span>
-      </span>
-      <span className="sys-item">
-        <span className="sys-label">MEM</span>
-        <span className="sys-value">
-          {m.mem_percent.toFixed(0)}%
-          <span className="sys-sub">
-            {fmtBytes(m.mem_used_bytes)}/{fmtBytes(m.mem_total_bytes)}
-          </span>
-        </span>
-      </span>
-      <span className="sys-item" title={m.disk_path ? `Disk: ${m.disk_path}` : "Disk"}>
-        <span className="sys-label">DISK</span>
-        <span className="sys-value">
-          {(m.disk_percent ?? 0).toFixed(0)}%
-          <span className="sys-sub">
-            {fmtBytes(m.disk_used_bytes)}/{fmtBytes(m.disk_total_bytes)}
-          </span>
-        </span>
-      </span>
-      {m.gpu_available ? (
-        <span
-          className="sys-item"
-          title={`NVENC encoder util. GPU compute ${(m.gpu_percent ?? 0).toFixed(0)}% · VRAM ${(m.gpu_mem_used_mb ?? 0).toFixed(0)}/${(m.gpu_mem_total_mb ?? 0).toFixed(0)} MB`}
-        >
-          <span className="sys-label">NVENC</span>
-          <span className="sys-value">
-            {(m.nvenc_percent ?? 0).toFixed(0)}%
-            <span className="sys-sub">
-              VRAM {(m.gpu_mem_used_mb ?? 0).toFixed(0)}/
-              {(m.gpu_mem_total_mb ?? 0).toFixed(0)}
-            </span>
-          </span>
-        </span>
-      ) : (
-        <span className="sys-item muted">
-          <span className="sys-label">NVENC</span>
-          <span className="sys-value">n/a</span>
-        </span>
-      )}
+      <div className="sys-group" aria-label="Host">
+        <span className="sys-group-label">Host</span>
+        <Item label="CPU" value={pct(m.cpu_percent)} />
+        <Item
+          label="MEM"
+          value={pct(m.mem_percent)}
+          sub={`${fmtBytes(m.mem_used_bytes)}/${fmtBytes(m.mem_total_bytes)}`}
+        />
+        <Item
+          label="DISK"
+          value={pct(m.disk_percent)}
+          sub={`${fmtBytes(m.disk_used_bytes)}/${fmtBytes(m.disk_total_bytes)}`}
+          title={m.disk_path ? `Disk: ${m.disk_path}` : "Disk"}
+        />
+      </div>
+
+      <div
+        className={`sys-group${m.gpu_available ? "" : " muted"}`}
+        aria-label="GPU"
+        title={
+          m.gpu_available
+            ? `GPU compute ${pct(m.gpu_percent)} · VRAM ${fmtVram(m.gpu_mem_used_mb)}/${fmtVram(m.gpu_mem_total_mb)}`
+            : "NVIDIA GPU not available"
+        }
+      >
+        <span className="sys-group-label">GPU</span>
+        {m.gpu_available ? (
+          <>
+            <Item label="NVENC" value={pct(m.nvenc_percent)} title="Encoder utilization" />
+            <Item label="NVDEC" value={pct(m.nvdec_percent)} title="Decoder utilization" />
+            <Item
+              label="VRAM"
+              value={`${fmtVram(m.gpu_mem_used_mb)}/${fmtVram(m.gpu_mem_total_mb)}`}
+              title={`GPU compute ${pct(m.gpu_percent)}`}
+            />
+          </>
+        ) : (
+          <Item label="—" value="n/a" />
+        )}
+      </div>
     </div>
   );
 }

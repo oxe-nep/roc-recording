@@ -49,10 +49,10 @@ var (
 	reFormatIndex = regexp.MustCompile(
 		`(?i)^\s*(\d+)\s+(\d+)x(\d+)\s+at\s+([\d.]+)(?:/([\d.]+))?\s*fps(.*)$`,
 	)
-	// ffmpeg -sinks: "25fb7120:00000000 [DeckLink IP 100G (1)] (none)"
-	// also older "55:00000000:00000000 [DeckLink Duo (1)]"
+	// ffmpeg -sinks: "106:25fb7120:00000000 [DeckLink IP 100G (1)] (none)"
+	// also older "55:00000000:00000000 [DeckLink Duo (1)]" / short "25fb7120:00000000 […]".
 	reSinkUIDLabel = regexp.MustCompile(`(?i)^\s*([0-9a-f]{2,}(?::[0-9a-f]+){1,})\s+\[([^\]]+)\]`)
-	reSinkUIDAlone = regexp.MustCompile(`(?i)^\s*([0-9a-f]{8}:[0-9a-f]{8})\s*$`)
+	reSinkUIDAlone = regexp.MustCompile(`(?i)^\s*([0-9a-f]{2,}(?::[0-9a-f]+){1,})\s*$`)
 	reUniqueID     = regexp.MustCompile(`(?i)^[0-9a-f]{2,}(?::[0-9a-f]+){1,}$`)
 )
 
@@ -353,23 +353,54 @@ func ExtractDeckLinkName(ffmpegInput string) string {
 	return NormalizeOpenDevice(s)
 }
 
+// deviceRefMatch reports whether a stored ref (full id, short id suffix, or label)
+// refers to this sink. Short ids like "25fb7120:00000000" must match
+// "106:25fb7120:00000000" from current FFmpeg -sinks.
+func deviceRefMatch(ref, name, label string) bool {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return false
+	}
+	if strings.EqualFold(ref, name) || strings.EqualFold(ref, label) {
+		return true
+	}
+	nameLower := strings.ToLower(name)
+	refLower := strings.ToLower(ref)
+	if strings.Contains(ref, ":") && strings.Contains(name, ":") {
+		if nameLower == refLower {
+			return true
+		}
+		// Suffix match: stored short handle vs full BMDDeckLinkDeviceHandle.
+		if strings.HasSuffix(nameLower, ":"+refLower) || strings.HasSuffix(nameLower, refLower) {
+			// Require at least one colon segment in the suffix to avoid tiny false positives.
+			if strings.Count(refLower, ":") >= 1 && len(refLower) >= 9 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // ResolveOpenDevice maps a stored value (display name, sinks line, or id) to a sink unique id.
 func (m *Manager) ResolveOpenDevice(raw string) string {
 	raw = NormalizeOpenDevice(raw)
 	if raw == "" {
 		return ""
 	}
+	// Prefer a fresh -sinks listing so short persisted ids expand to full handles.
+	if sinks := listOutputSinks(m.ffmpegBin); len(sinks) > 0 {
+		for _, s := range sinks {
+			if deviceRefMatch(raw, s.ID, s.Label) {
+				return s.ID
+			}
+		}
+	}
 	devs, err := m.devCache.get(m.ffmpegBin, 5*time.Minute)
 	if err != nil || len(devs) == 0 {
 		return raw
 	}
 	for _, d := range devs {
-		if strings.EqualFold(d.Name, raw) {
-			return d.Name
-		}
-	}
-	for _, d := range devs {
-		if strings.EqualFold(d.Label, raw) {
+		if deviceRefMatch(raw, d.Name, d.Label) {
 			return d.Name
 		}
 	}
@@ -382,19 +413,26 @@ func (m *Manager) LookupDeviceLabel(idOrName string) string {
 	if idOrName == "" {
 		return ""
 	}
+	if sinks := listOutputSinks(m.ffmpegBin); len(sinks) > 0 {
+		for _, s := range sinks {
+			if deviceRefMatch(idOrName, s.ID, s.Label) {
+				if s.Label != "" {
+					return s.Label
+				}
+				return s.ID
+			}
+		}
+	}
 	devs, err := m.devCache.get(m.ffmpegBin, 5*time.Minute)
 	if err != nil {
 		return ""
 	}
 	for _, d := range devs {
-		if strings.EqualFold(d.Name, idOrName) {
+		if deviceRefMatch(idOrName, d.Name, d.Label) {
 			if d.Label != "" {
 				return d.Label
 			}
 			return d.Name
-		}
-		if strings.EqualFold(d.Label, idOrName) {
-			return d.Label
 		}
 	}
 	return ""
@@ -411,7 +449,7 @@ func (m *Manager) LookupDeviceOpen(idOrName string) string {
 		return ""
 	}
 	for _, d := range devs {
-		if strings.EqualFold(d.Name, idOrName) || strings.EqualFold(d.Label, idOrName) {
+		if deviceRefMatch(idOrName, d.Name, d.Label) {
 			if d.OpenName != "" {
 				return d.OpenName
 			}
@@ -430,12 +468,35 @@ func (m *Manager) FindDevice(idOrName string) (Device, bool) {
 	if idOrName == "" {
 		return Device{}, false
 	}
+	// Fast path: build a Device from -sinks without waiting on format probe cache.
+	if sinks := listOutputSinks(m.ffmpegBin); len(sinks) > 0 {
+		for _, s := range sinks {
+			if deviceRefMatch(idOrName, s.ID, s.Label) {
+				open := s.ID
+				d := Device{Name: s.ID, Label: s.Label, OpenName: open}
+				if cached, ok := m.findCachedDevice(s.ID); ok {
+					d.Formats = cached.Formats
+					if cached.OpenName != "" {
+						d.OpenName = cached.OpenName
+					}
+				}
+				return d, true
+			}
+		}
+	}
+	if d, ok := m.findCachedDevice(idOrName); ok {
+		return d, true
+	}
+	return Device{}, false
+}
+
+func (m *Manager) findCachedDevice(idOrName string) (Device, bool) {
 	devs, err := m.devCache.get(m.ffmpegBin, 5*time.Minute)
 	if err != nil {
 		return Device{}, false
 	}
 	for _, d := range devs {
-		if strings.EqualFold(d.Name, idOrName) || strings.EqualFold(d.Label, idOrName) {
+		if deviceRefMatch(idOrName, d.Name, d.Label) {
 			return d, true
 		}
 	}
@@ -486,16 +547,30 @@ func cloneDevices(in []Device) []Device {
 // mergeFormatCache keeps previously probed formats when a re-probe returns empty
 // (e.g. sink briefly busy). Device list/ids still update from the new probe.
 func mergeFormatCache(prev, next []Device) []Device {
+	if len(next) == 0 {
+		// Never wipe a good cache on a transient empty -sinks result.
+		return prev
+	}
 	if len(prev) == 0 {
 		return next
 	}
 	byID := map[string]Device{}
 	for _, d := range prev {
 		byID[d.Name] = d
+		// Also index by short suffix so format cache survives id prefix changes.
+		if i := strings.Index(d.Name, ":"); i >= 0 {
+			byID[d.Name[i+1:]] = d
+		}
 	}
 	out := make([]Device, 0, len(next))
 	for _, d := range next {
-		if old, ok := byID[d.Name]; ok {
+		old, ok := byID[d.Name]
+		if !ok {
+			if i := strings.Index(d.Name, ":"); i >= 0 {
+				old, ok = byID[d.Name[i+1:]]
+			}
+		}
+		if ok {
 			if len(d.Formats) == 0 && len(old.Formats) > 0 {
 				d.Formats = old.Formats
 				d.ProbeLog = ""
@@ -508,11 +583,8 @@ func mergeFormatCache(prev, next []Device) []Device {
 			}
 		}
 		if d.OpenName == "" {
-			if d.Label != "" {
-				d.OpenName = d.Label
-			} else {
-				d.OpenName = d.Name
-			}
+			// Prefer full unique id for open (matches -sinks device_name).
+			d.OpenName = d.Name
 		}
 		out = append(out, d)
 	}

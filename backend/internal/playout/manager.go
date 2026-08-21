@@ -904,7 +904,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			audioPlaylist,
 			"-map", "[vout]",
 			"-map", "[aout]",
-			"-c:v", "rawvideo",
+			"-c:v", "wrapped_avframe",
 			"-pix_fmt", "uyvy422",
 			"-c:a", "pcm_s16le",
 			"-ar", "48000",

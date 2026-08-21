@@ -9,6 +9,7 @@ func TestParseSinkLine(t *testing.T) {
 		wantLabel string
 		ok        bool
 	}{
+		{`106:25fb7120:00000000 [DeckLink IP 100G (1)] (none)`, "106:25fb7120:00000000", "DeckLink IP 100G (1)", true},
 		{`25fb7120:00000000 [DeckLink IP 100G (1)] (none)`, "25fb7120:00000000", "DeckLink IP 100G (1)", true},
 		{`55:00000000:00000000 [DeckLink Duo (1)]`, "55:00000000:00000000", "DeckLink Duo (1)", true},
 		{`'DeckLink Mini Monitor'`, "DeckLink Mini Monitor", "DeckLink Mini Monitor", true},
@@ -30,12 +31,25 @@ func TestParseSinkLine(t *testing.T) {
 	}
 }
 
+func TestDeviceRefMatch(t *testing.T) {
+	if !deviceRefMatch("25fb7120:00000000", "106:25fb7120:00000000", "DeckLink IP 100G (1)") {
+		t.Fatal("short id should match full sink handle")
+	}
+	if !deviceRefMatch("106:25fb7120:00000000", "106:25fb7120:00000000", "DeckLink IP 100G (1)") {
+		t.Fatal("full id should match")
+	}
+	if deviceRefMatch("25fb7120:00000000", "106:25fb7121:00000000", "DeckLink IP 100G (2)") {
+		t.Fatal("short id must not match a different sink")
+	}
+}
+
 func TestNormalizeOpenDevice(t *testing.T) {
 	cases := map[string]string{
-		`25fb7120:00000000 [DeckLink IP 100G (1)] (none)`: "25fb7120:00000000",
-		`'DeckLink IP 100G (2)'`:                           "DeckLink IP 100G (2)",
-		`DeckLink IP 100G (3)`:                             "DeckLink IP 100G (3)",
-		`25fb7120:00000000`:                                "25fb7120:00000000",
+		`106:25fb7120:00000000 [DeckLink IP 100G (1)] (none)`: "106:25fb7120:00000000",
+		`25fb7120:00000000 [DeckLink IP 100G (1)] (none)`:     "25fb7120:00000000",
+		`'DeckLink IP 100G (2)'`:                              "DeckLink IP 100G (2)",
+		`DeckLink IP 100G (3)`:                                "DeckLink IP 100G (3)",
+		`25fb7120:00000000`:                                   "25fb7120:00000000",
 	}
 	for in, want := range cases {
 		if got := NormalizeOpenDevice(in); got != want {

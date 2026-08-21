@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import StreamGrid from "@/components/StreamGrid";
+import DecodeGrid from "@/components/DecodeGrid";
 import SystemStatus from "@/components/SystemStatus";
 import EncodePresetsEditor from "@/components/EncodePresetsEditor";
 import LibraryModal from "@/components/LibraryModal";
@@ -53,6 +54,7 @@ export default function Home() {
         <SystemStatus />
       </header>
       <StreamGrid />
+      <DecodeGrid />
       <EncodePresetsEditor
         open={presetsOpen}
         onClose={() => setPresetsOpen(false)}

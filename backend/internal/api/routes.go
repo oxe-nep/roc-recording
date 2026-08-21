@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/roc-recording/backend/internal/capture"
 	hlshandler "github.com/roc-recording/backend/internal/hls"
+	"github.com/roc-recording/backend/internal/playout"
 	"github.com/roc-recording/backend/internal/recording"
 	"github.com/roc-recording/backend/internal/srt"
 	"github.com/roc-recording/backend/internal/sysmetrics"
@@ -49,7 +50,7 @@ type recordingFileResponse struct {
 	URL     string    `json:"url"`
 }
 
-func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Manager, hlsHandler *hlshandler.Handler, apiKey, allowedOrigins, hlsBaseURL string, metrics *sysmetrics.Collector) http.Handler {
+func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Manager, playMgr *playout.Manager, hlsHandler *hlshandler.Handler, apiKey, allowedOrigins, hlsBaseURL string, metrics *sysmetrics.Collector) http.Handler {
 	r := chi.NewRouter()
 	r.Use(quietRequestLogger())
 	r.Use(middleware.Recoverer)
@@ -90,10 +91,43 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 		w.Header().Set("Content-Type", "image/jpeg")
 		http.ServeFile(w, r, thumbPath)
 	})
+	r.Get("/playout/audio/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.Atoi(chi.URLParam(r, "id"))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		l, r2, ok := playMgr.AudioLevels(id)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
+		w.Header().Set("Cache-Control", "no-cache, no-store")
+		jsonOK(w, map[string]float64{"l": l, "r": r2})
+	})
+	r.Get("/playout/thumb/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.Atoi(chi.URLParam(r, "id"))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		status, ok := playMgr.StatusByID(id)
+		if !ok || (status != playout.StatusRunning && status != playout.StatusWaiting) {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
+		w.Header().Set("Cache-Control", "no-cache, no-store")
+		w.Header().Set("Content-Type", "image/jpeg")
+		http.ServeFile(w, r, playMgr.ThumbPath(id))
+	})
 
 	// API – requires API key
 	r.Group(func(r chi.Router) {
 		r.Use(apiKeyMiddleware(apiKey))
+
+		registerPlayoutRoutes(r, playMgr)
 
 		r.Get("/api/streams", func(w http.ResponseWriter, r *http.Request) {
 			streams := mgr.List()
@@ -699,9 +733,14 @@ func shouldSkipRequestLog(r *http.Request) bool {
 		return true
 	case path == "/api/streams", path == "/api/recordings", path == "/api/srt", path == "/api/system", path == "/api/encode/presets",
 		path == "/api/encode/options",
-		path == "/api/library/categories", path == "/api/library/files":
+		path == "/api/library/categories", path == "/api/library/files",
+		path == "/api/playout", path == "/api/playout/devices":
 		return true
 	case strings.HasPrefix(path, "/api/streams/") && strings.HasSuffix(path, "/logs"):
+		return true
+	case strings.HasPrefix(path, "/api/playout/") && strings.HasSuffix(path, "/logs"):
+		return true
+	case strings.HasPrefix(path, "/playout/thumb/"), strings.HasPrefix(path, "/playout/audio/"):
 		return true
 	case strings.HasPrefix(path, "/api/recordings/files/"):
 		return true

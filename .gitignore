@@ -5,6 +5,8 @@ backend/encode-assignments.json
 backend/encode-presets.json
 backend/channel-categories.json
 backend/recordings-path.json
+backend/playout-clients.json
+backend/srt-settings.json
 backend/recordings/
 
 # Node

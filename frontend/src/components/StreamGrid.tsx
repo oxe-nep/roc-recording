@@ -242,6 +242,11 @@ export default function StreamGrid() {
         </div>
       )}
 
+      <section className="io-section">
+        <div className="io-section-head">
+          <h2 className="io-section-title">Encode</h2>
+        </div>
+
       <div className="cards-grid">
         {streams.map((s) => {
           const rec = recordings[s.id];
@@ -404,6 +409,7 @@ export default function StreamGrid() {
           );
         })}
       </div>
+      </section>
 
       <ChannelSettingsModal
         open={settingsId != null}

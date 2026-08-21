@@ -7,10 +7,13 @@ const BASE = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8080";
 interface ThumbnailProps {
   id: number;
   active: boolean;
+  /** Default encode thumbs at /thumb/{id}; decode uses /playout/thumb/{id} */
+  path?: string;
 }
 
-export default function Thumbnail({ id, active }: ThumbnailProps) {
-  const [src, setSrc] = useState(`${BASE}/thumb/${id}?t=${Date.now()}`);
+export default function Thumbnail({ id, active, path }: ThumbnailProps) {
+  const basePath = path ?? `/thumb/${id}`;
+  const [src, setSrc] = useState(`${BASE}${basePath}?t=${Date.now()}`);
   const [hasError, setHasError] = useState(!active);
 
   useEffect(() => {
@@ -18,12 +21,12 @@ export default function Thumbnail({ id, active }: ThumbnailProps) {
       setHasError(true);
       return;
     }
-    setSrc(`${BASE}/thumb/${id}?t=${Date.now()}`);
+    setSrc(`${BASE}${basePath}?t=${Date.now()}`);
     const interval = setInterval(() => {
-      setSrc(`${BASE}/thumb/${id}?t=${Date.now()}`);
+      setSrc(`${BASE}${basePath}?t=${Date.now()}`);
     }, 1000);
     return () => clearInterval(interval);
-  }, [id, active]);
+  }, [id, active, basePath]);
 
   if (!active) {
     return <span className="no-signal">No signal</span>;
@@ -32,7 +35,6 @@ export default function Thumbnail({ id, active }: ThumbnailProps) {
   return (
     <>
       {hasError && <span className="no-signal">No signal</span>}
-      {/* Keep img mounted so retries can succeed when signal returns */}
       <img
         className={hasError ? "thumb-hidden" : undefined}
         src={src}

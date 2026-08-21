@@ -394,3 +394,137 @@ export async function stopSrt(id: number): Promise<SrtInfo> {
   return res.json();
 }
 
+export interface PlayoutFormat {
+  code: string;
+  label: string;
+  width: number;
+  height: number;
+  fps: number;
+  interlaced: boolean;
+}
+
+export interface PlayoutDevice {
+  name: string;
+  formats: PlayoutFormat[];
+}
+
+export interface PlayoutClient {
+  id: number;
+  name: string;
+  status: "stopped" | "waiting" | "running";
+  device: string;
+  format_code: string;
+  mode: "listener" | "caller";
+  port: number;
+  target: string;
+  has_passphrase: boolean;
+  latency_ms: number;
+  bitrate_kbps?: number;
+  sending?: boolean;
+  reconnects?: number;
+  error?: string;
+  listen_url?: string;
+}
+
+export type PlayoutCreateInput = {
+  name?: string;
+  device?: string;
+  format_code?: string;
+  mode?: "listener" | "caller";
+  port?: number;
+  target?: string;
+  passphrase?: string;
+  latency_ms?: number;
+};
+
+export type PlayoutUpdateInput = {
+  name?: string;
+  device?: string;
+  format_code?: string;
+  mode?: "listener" | "caller";
+  port?: number;
+  target?: string;
+  passphrase?: string;
+  latency_ms?: number;
+};
+
+export function isPlayoutOn(status: PlayoutClient["status"]): boolean {
+  return status === "running" || status === "waiting";
+}
+
+export async function fetchPlayoutDevices(): Promise<PlayoutDevice[]> {
+  const res = await apiFetch("/api/playout/devices");
+  if (!res.ok) throw new Error(`fetchPlayoutDevices: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchPlayoutClients(): Promise<PlayoutClient[]> {
+  const res = await apiFetch("/api/playout");
+  if (!res.ok) throw new Error(`fetchPlayoutClients: ${res.status}`);
+  return res.json();
+}
+
+export async function createPlayoutClient(body: PlayoutCreateInput = {}): Promise<PlayoutClient> {
+  const res = await apiFetch("/api/playout", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `createPlayoutClient: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function updatePlayoutClient(id: number, body: PlayoutUpdateInput): Promise<PlayoutClient> {
+  const res = await apiFetch(`/api/playout/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `updatePlayoutClient: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function deletePlayoutClient(id: number): Promise<void> {
+  const res = await apiFetch(`/api/playout/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `deletePlayoutClient: ${res.status}`);
+  }
+}
+
+export async function startPlayout(id: number): Promise<PlayoutClient> {
+  const res = await apiFetch(`/api/playout/${id}/start`, { method: "POST" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `startPlayout: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function stopPlayout(id: number): Promise<PlayoutClient> {
+  const res = await apiFetch(`/api/playout/${id}/stop`, { method: "POST" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `stopPlayout: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchPlayoutLogs(id: number): Promise<string[]> {
+  const res = await apiFetch(`/api/playout/${id}/logs`);
+  if (!res.ok) throw new Error(`fetchPlayoutLogs: ${res.status}`);
+  const body = await res.json();
+  return (body.lines ?? []) as string[];
+}
+
+export async function fetchPlayoutAudioLevels(id: number): Promise<AudioLevels> {
+  const res = await fetch(`${BASE}/playout/audio/${id}`);
+  if (!res.ok) throw new Error(`fetchPlayoutAudioLevels: ${res.status}`);
+  return res.json();
+}
+
+

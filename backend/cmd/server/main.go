@@ -18,6 +18,7 @@ import (
 	"github.com/roc-recording/backend/internal/capture"
 	"github.com/roc-recording/backend/internal/config"
 	hlshandler "github.com/roc-recording/backend/internal/hls"
+	"github.com/roc-recording/backend/internal/playout"
 	"github.com/roc-recording/backend/internal/recording"
 	"github.com/roc-recording/backend/internal/srt"
 	"github.com/roc-recording/backend/internal/sysmetrics"
@@ -111,9 +112,17 @@ func main() {
 	}
 	srtMgr.LoadSettings()
 
+	playMgr := playout.NewManager(
+		cfg.FFmpegBin,
+		cfg.HLSDir,
+		filepath.Join(filepath.Dir(cfgPath), "playout-clients.json"),
+		publicSRTHost,
+	)
+	playMgr.Load()
+
 	hlsH := hlshandler.NewHandler(cfg.HLSDir, cfg.AllowedOrigins)
 	metrics := sysmetrics.NewCollector(recMgr.RecordingDir())
-	router := api.NewRouter(mgr, recMgr, srtMgr, hlsH, cfg.APIKey, cfg.AllowedOrigins, hlsBase, metrics)
+	router := api.NewRouter(mgr, recMgr, srtMgr, playMgr, hlsH, cfg.APIKey, cfg.AllowedOrigins, hlsBase, metrics)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
@@ -133,6 +142,7 @@ func main() {
 	<-quit
 
 	log.Println("Shutting down...")
+	playMgr.StopAll()
 	srtMgr.StopAll()
 	_ = recMgr.StopAll()
 	mgr.StopAll()

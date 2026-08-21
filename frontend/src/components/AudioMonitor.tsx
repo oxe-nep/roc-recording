@@ -9,9 +9,11 @@ interface AudioMonitorProps {
   id: number;
   active: boolean;
   listening: boolean;
+  /** Default /hls/{id}/audio.m3u8; decode uses /hls/playout/{id}/audio.m3u8 */
+  playlistPath?: string;
 }
 
-export default function AudioMonitor({ id, active, listening }: AudioMonitorProps) {
+export default function AudioMonitor({ id, active, listening, playlistPath }: AudioMonitorProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const hlsRef = useRef<Hls | null>(null);
 
@@ -32,7 +34,7 @@ export default function AudioMonitor({ id, active, listening }: AudioMonitorProp
       return;
     }
 
-    const src = `${BASE}/hls/${id}/audio.m3u8`;
+    const src = `${BASE}${playlistPath ?? `/hls/${id}/audio.m3u8`}`;
 
     if (Hls.isSupported()) {
       const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
@@ -48,7 +50,7 @@ export default function AudioMonitor({ id, active, listening }: AudioMonitorProp
     }
 
     return stop;
-  }, [id, active, listening]);
+  }, [id, active, listening, playlistPath]);
 
   return <audio ref={audioRef} className="audio-monitor" preload="none" />;
 }

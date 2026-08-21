@@ -17,6 +17,8 @@ Recording starts a second FFmpeg that **remuxes** the UDP feed (`-c copy`) into 
 
 Optional **SRT** output per channel remuxes the same UDP master (`-c copy`) as listener or caller. REC and STREAM can run at the same time. Configure and start from channel settings. Publish URL host comes from `PUBLIC_SRT_HOST` (or the host in `PUBLIC_URL`). Default listener ports are `9100 + channel id`. FFmpeg must be built with libsrt.
 
+**Decode (playout)** clients receive SRT and output to a DeckLink device (`playout-clients.json`). Devices/formats are probed via FFmpeg. Each client has its own output mode, SRT listener/caller settings, JPEG preview, and audio meters. UI sections: **Encode** (capture) and **Decode** (playout).
+
 Encode presets are defined in `config.yaml` (and live-edited via the UI into `encode-presets.json`). Per-channel selection is persisted to `encode-assignments.json`. Encode settings are applied when that channel’s capture starts — editing a preset or switching assignment does not restart a running channel.
 
 Recordings land in global category folders under a configurable storage root

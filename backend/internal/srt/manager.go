@@ -282,9 +282,10 @@ func (m *Manager) publishURL(st *channelState) string {
 		latency = 120
 	}
 	q := url.Values{}
-	// Shareable URL is for the remote peer. If we listen, they must call.
+	// Shareable URL is for remote players (VLC etc.) — latency in milliseconds.
+	// FFmpeg itself still gets microseconds via outputURL().
 	q.Set("mode", string(ModeCaller))
-	q.Set("latency", strconv.Itoa(srtLatencyUs(latency)))
+	q.Set("latency", strconv.Itoa(latency))
 	if st.passphrase != "" {
 		q.Set("passphrase", st.passphrase)
 	}

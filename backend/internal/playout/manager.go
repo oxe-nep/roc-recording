@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -464,9 +465,9 @@ func (m *Manager) listenURL(c *Client) string {
 		lat = 120
 	}
 	q := url.Values{}
-	// URL for a remote peer pushing into our listener → they must be caller.
+	// Shareable for a remote peer → caller mode, latency in milliseconds.
 	q.Set("mode", "caller")
-	q.Set("latency", strconv.Itoa(srtLatencyUs(lat)))
+	q.Set("latency", strconv.Itoa(lat))
 	return fmt.Sprintf("srt://%s:%d?%s", m.publicHost, c.Port, q.Encode())
 }
 
@@ -490,14 +491,12 @@ func (m *Manager) Start(id int) (ClientInfo, error) {
 		c.mu.Unlock()
 		return ClientInfo{}, fmt.Errorf("decode client %d already active", id)
 	}
-	if strings.TrimSpace(c.Device) == "" {
+	// DeckLink is optional — SRT preview (thumb/meters) can run without it.
+	deviceRaw := strings.TrimSpace(c.Device)
+	formatCode := strings.TrimSpace(c.FormatCode)
+	if deviceRaw != "" && formatCode == "" {
 		c.mu.Unlock()
-		return ClientInfo{}, fmt.Errorf("DeckLink output device is required")
-	}
-	deviceRaw := c.Device
-	if strings.TrimSpace(c.FormatCode) == "" {
-		c.mu.Unlock()
-		return ClientInfo{}, fmt.Errorf("output format is required")
+		return ClientInfo{}, fmt.Errorf("output format is required when a DeckLink device is set")
 	}
 	if c.Mode == ModeCaller && strings.TrimSpace(c.Target) == "" {
 		c.mu.Unlock()
@@ -507,7 +506,10 @@ func (m *Manager) Start(id int) (ClientInfo, error) {
 	port := c.Port
 	c.mu.Unlock()
 
-	device := m.ResolveOpenDevice(deviceRaw)
+	device := ""
+	if deviceRaw != "" {
+		device = m.ResolveOpenDevice(deviceRaw)
+	}
 
 	if err := m.assertNoConflicts(id, device, mode, port); err != nil {
 		return ClientInfo{}, err
@@ -529,7 +531,11 @@ func (m *Manager) Start(id int) (ClientInfo, error) {
 	info := m.infoLocked(c)
 	c.mu.Unlock()
 
-	c.appendLog("start requested – waiting for SRT")
+	if device == "" {
+		c.appendLog("start requested – SRT preview only (no DeckLink)")
+	} else {
+		c.appendLog("start requested – waiting for SRT")
+	}
 	go m.runLoop(c)
 	return info, nil
 }
@@ -691,43 +697,60 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	audioSeg := filepath.Join(outDir, "audio_%03d.ts")
 
 	c.mu.Lock()
-	deviceRaw := c.Device
-	formatCode := c.FormatCode
+	deviceRaw := strings.TrimSpace(c.Device)
+	formatCode := strings.TrimSpace(c.FormatCode)
 	mode := c.Mode
 	srtURL, err := m.srtInputURL(c)
 	c.mu.Unlock()
 	if err != nil {
 		return err
 	}
-	device := m.ResolveOpenDevice(deviceRaw)
-	if device != deviceRaw {
-		c.mu.Lock()
-		c.Device = device
-		c.mu.Unlock()
+
+	useDeckLink := deviceRaw != "" && formatCode != ""
+	device := ""
+	if useDeckLink {
+		device = m.ResolveOpenDevice(deviceRaw)
+		if device != deviceRaw {
+			c.mu.Lock()
+			c.Device = device
+			c.mu.Unlock()
+		}
 	}
 
-	devs, _ := m.Devices(false)
 	w, h, fps := 1920, 1080, 25.0
 	var fmtInfo Format
-	if f, ok := LookupFormat(formatCode, devs); ok {
-		fmtInfo = f
-		w, h, fps = f.Width, f.Height, f.FPS
-		if fps <= 0 {
-			fps = 25
+	if useDeckLink {
+		devs, _ := m.Devices(false)
+		if f, ok := LookupFormat(formatCode, devs); ok {
+			fmtInfo = f
+			w, h, fps = f.Width, f.Height, f.FPS
+			if fps <= 0 {
+				fps = 25
+			}
+		} else {
+			w, h, fps = formatGeometry(formatCode)
 		}
-	} else {
-		w, h, fps = formatGeometry(formatCode)
 	}
 
-	// Decode SRT → scale to selected DeckLink mode → DeckLink + thumb + HLS audio + meters.
-	filter := fmt.Sprintf(
-		"[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,format=uyvy422,split=2[vout][vt];"+
-			"[vt]scale=640:360,format=yuv420p[vthumb];"+
-			"[0:a]pan=stereo|c0=c0|c1=c1,asplit=3[aout][ahls][ameter];"+
-			"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none,"+
-			"ametadata=print,anullsink",
-		w, h, w, h, fps,
-	)
+	var filter string
+	if useDeckLink {
+		// SRT → DeckLink + thumb + HLS audio + meters
+		filter = fmt.Sprintf(
+			"[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,format=uyvy422,split=2[vout][vt];"+
+				"[vt]scale=640:360,format=yuv420p[vthumb];"+
+				"[0:a]pan=stereo|c0=c0|c1=c1,asplit=3[aout][ahls][ameter];"+
+				"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none,"+
+				"ametadata=print,anullsink",
+			w, h, w, h, fps,
+		)
+	} else {
+		// SRT preview only — no DeckLink (isolates SRT connect/decode issues).
+		filter =
+			"[0:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,format=yuv420p,fps=1[vthumb];" +
+				"[0:a]pan=stereo|c0=c0|c1=c1,asplit=2[ahls][ameter];" +
+				"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
+				"ametadata=print,anullsink"
+	}
 
 	args := []string{
 		"-hide_banner",
@@ -758,21 +781,25 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		"-hls_flags", "delete_segments+independent_segments+omit_endlist",
 		"-hls_segment_filename", audioSeg,
 		audioPlaylist,
-		// DeckLink output — mode is selected by frame size / fps / field order.
-		"-map", "[vout]",
-		"-map", "[aout]",
-		"-pix_fmt", "uyvy422",
-		"-r", fmt.Sprintf("%g", fps),
-		"-s", fmt.Sprintf("%dx%d", w, h),
 	}
-	if fmtInfo.Interlaced {
-		args = append(args, "-flags", "+ilme+ildct", "-top", "1")
+		if useDeckLink {
+		args = append(args,
+			"-map", "[vout]",
+			"-map", "[aout]",
+			"-pix_fmt", "uyvy422",
+			"-r", fmt.Sprintf("%g", fps),
+			"-s", fmt.Sprintf("%dx%d", w, h),
+		)
+		if fmtInfo.Interlaced {
+			// Field order for interlaced → DeckLink. Do NOT pass -top here:
+			// it is treated as a codec option and breaks decklink open.
+			args = append(args, "-flags", "+ilme+ildct", "-field_order", "tt")
+		}
+		if formatCode != "" && !isAllDigits(formatCode) {
+			args = append(args, "-format_code", strings.TrimSpace(formatCode))
+		}
+		args = append(args, "-f", "decklink", device)
 	}
-	// FourCC format_code when probe gave one (not a numeric mode index).
-	if formatCode != "" && !isAllDigits(formatCode) {
-		args = append(args, "-format_code", strings.TrimSpace(formatCode))
-	}
-	args = append(args, "-f", "decklink", device)
 
 	cmd := exec.Command(m.ffmpegBin, args...)
 	stdout, err := cmd.StdoutPipe()
@@ -788,7 +815,11 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	c.cmd = cmd
 	c.LastError = ""
 	c.mu.Unlock()
-	c.appendLog(fmt.Sprintf("starting FFmpeg (%s → %s %s)", mode, device, formatCode))
+	if useDeckLink {
+		c.appendLog(fmt.Sprintf("starting FFmpeg (%s → %s %s)", mode, device, formatCode))
+	} else {
+		c.appendLog(fmt.Sprintf("starting FFmpeg (%s → preview only)", mode))
+	}
 
 	if err := cmd.Start(); err != nil {
 		c.mu.Lock()
@@ -851,9 +882,9 @@ func (m *Manager) srtInputURL(c *Client) (string, error) {
 			if err != nil {
 				return "", fmt.Errorf("invalid target URL")
 			}
+			preferLocalSRTHost(u, m.publicHost)
 			existing := u.Query()
-			// Always force caller mode + our latency — pasted listener publish URLs
-			// often still contain mode=listener which breaks same-host pull.
+			// Force caller + our FFmpeg latency (µs). Pasted share URLs use ms.
 			for k, vals := range q {
 				for _, v := range vals {
 					existing.Set(k, v)
@@ -862,10 +893,62 @@ func (m *Manager) srtInputURL(c *Client) (string, error) {
 			u.RawQuery = existing.Encode()
 			return u.String(), nil
 		}
-		return fmt.Sprintf("srt://%s?%s", target, q.Encode()), nil
+		hostport := preferLocalHostPort(target, m.publicHost)
+		return fmt.Sprintf("srt://%s?%s", hostport, q.Encode()), nil
 	default:
 		return "", fmt.Errorf("unknown mode")
 	}
+}
+
+// preferLocalSRTHost rewrites same-machine hosts to 127.0.0.1 (IPv4).
+// "localhost" often resolves to ::1 while SRT listeners bind 0.0.0.0 → I/O error.
+func preferLocalSRTHost(u *url.URL, publicHost string) {
+	host := u.Hostname()
+	if host == "" {
+		return
+	}
+	rewrite := false
+	if host == "127.0.0.1" {
+		return
+	}
+	if strings.EqualFold(host, "localhost") || host == "::1" {
+		rewrite = true
+	}
+	pub := strings.TrimSpace(publicHost)
+	if pub != "" && (strings.EqualFold(host, pub) || host == pub) {
+		rewrite = true
+	}
+	if !rewrite {
+		return
+	}
+	port := u.Port()
+	if port != "" {
+		u.Host = "127.0.0.1:" + port
+	} else {
+		u.Host = "127.0.0.1"
+	}
+}
+
+func preferLocalHostPort(target, publicHost string) string {
+	target = strings.TrimSpace(target)
+	host, port, err := net.SplitHostPort(target)
+	if err != nil {
+		if strings.EqualFold(target, "localhost") {
+			return "127.0.0.1"
+		}
+		return target
+	}
+	if host == "127.0.0.1" {
+		return target
+	}
+	if strings.EqualFold(host, "localhost") || host == "::1" {
+		return net.JoinHostPort("127.0.0.1", port)
+	}
+	pub := strings.TrimSpace(publicHost)
+	if pub != "" && (strings.EqualFold(host, pub) || host == pub) {
+		return net.JoinHostPort("127.0.0.1", port)
+	}
+	return target
 }
 
 // srtLatencyUs converts UI milliseconds to FFmpeg SRT latency (microseconds).

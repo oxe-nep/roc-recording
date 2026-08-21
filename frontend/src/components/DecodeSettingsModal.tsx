@@ -127,7 +127,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
       const body: Parameters<typeof updatePlayoutClient>[1] = {
         name: name.trim() || `Decode ${client.id}`,
         device,
-        format_code: formatCode,
+        format_code: device ? formatCode : "",
         mode,
         port,
         target,
@@ -196,7 +196,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
           </label>
 
           <label className="presets-field">
-            <span>DeckLink output</span>
+            <span>DeckLink output (optional)</span>
             <div className="channel-settings-actions" style={{ marginTop: 0, marginBottom: 4 }}>
               <select
                 value={device}
@@ -209,7 +209,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                 disabled={busy || active}
                 style={{ flex: 1 }}
               >
-                <option value="">Select device…</option>
+                <option value="">None — SRT preview only</option>
                 {devices.map((d) => (
                   <option key={d.name} value={d.name}>
                     {d.label || d.name}
@@ -221,31 +221,36 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                 Re-probe
               </button>
             </div>
+            <span className="channel-settings-hint">
+              Leave empty to verify SRT decode (thumb + meters) before enabling DeckLink out.
+            </span>
             {devices.length === 0 && (
               <span className="channel-settings-hint">No devices probed — is FFmpeg+DeckLink available on the host?</span>
             )}
           </label>
 
           <label className="presets-field">
-            <span>Output format</span>
+            <span>Output format {device ? "" : "(when DeckLink is set)"}</span>
             <select
               value={formats.some((f) => f.code === formatCode) ? formatCode : ""}
               onChange={(e) => setFormatCode(e.target.value)}
-              disabled={busy || active || formats.length === 0}
+              disabled={busy || active || !device || formats.length === 0}
             >
-              <option value="">{formats.length ? "Select format…" : "No formats probed"}</option>
+              <option value="">
+                {!device ? "Not needed for SRT preview" : formats.length ? "Select format…" : "No formats probed"}
+              </option>
               {formats.map((f) => (
                 <option key={f.code} value={f.code}>
                   {f.label} ({f.code})
                 </option>
               ))}
             </select>
-            {formats.length === 0 && (
+            {device && formats.length === 0 && (
               <span className="channel-settings-hint">
-                No modes from FFmpeg for this device. Try Re-probe (best after backend restart before capture locks the card).
+                No modes from FFmpeg for this device. Try Re-probe.
               </span>
             )}
-            {probeLog && formats.length === 0 && (
+            {probeLog && device && formats.length === 0 && (
               <pre className="channel-settings-logbox" style={{ marginTop: 8, maxHeight: 120 }}>
                 {probeLog}
               </pre>
@@ -283,8 +288,11 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                 value={target}
                 onChange={(e) => setTarget(e.target.value)}
                 disabled={busy || active}
-                placeholder="host:port or srt://…"
+                placeholder="127.0.0.1:9101 or srt://…"
               />
+              <span className="channel-settings-hint">
+                Same host as encode STREAM: use 127.0.0.1 and the channel port (often 9100+id). Start STREAM first.
+              </span>
             </label>
           )}
 

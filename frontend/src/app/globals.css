@@ -893,6 +893,13 @@ body {
   box-shadow: 0 0 6px rgba(92, 184, 92, 0.25);
 }
 
+.loop-btn.active {
+  border-color: rgba(46, 125, 160, 0.75);
+  background: rgba(46, 125, 160, 0.35);
+  color: #c8e6f5;
+  box-shadow: 0 0 6px rgba(46, 125, 160, 0.3);
+}
+
 .rec-btn {
   flex-shrink: 0;
   height: 1.7rem;

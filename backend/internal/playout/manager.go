@@ -1143,9 +1143,9 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	silenceInput := false
 	if source == SourceFile {
 		args = append(args, "-hwaccel", "cuda")
-		if loop {
-			args = append(args, "-stream_loop", "-1")
-		}
+		// Always loop at demuxer level; when Loop is false we stop at end-of-pass
+		// ourselves so LOOP can be toggled without restarting playback.
+		args = append(args, "-stream_loop", "-1")
 		args = append(args, "-i", filePath)
 		if !fileHasAudioStream(m.ffmpegBin, filePath) {
 			args = append(args,
@@ -1205,9 +1205,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			"-fflags", "+genpts+discardcorrupt",
 			"-nostats",
 			"-re",
-		}
-		if loop {
-			previewArgs = append(previewArgs, "-stream_loop", "-1")
+			"-stream_loop", "-1",
 		}
 		// Soft decode for UI preview — NVDEC reserved for the DeckLink process.
 		previewArgs = append(previewArgs, "-i", filePath)
@@ -1352,6 +1350,9 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 
 	go m.watchStderr(c, stderr)
 	go m.watchProgress(c, stdout)
+	if source == SourceFile {
+		go m.watchFileEnd(c, stopCh)
+	}
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -1446,6 +1447,7 @@ func (m *Manager) runFileDeckLinkAndPreview(
 	go m.watchStderr(c, dlStderr)
 	go m.watchStderr(c, prevStderr)
 	go m.watchProgress(c, dlStdout)
+	go m.watchFileEnd(c, stopCh)
 
 	dlDone := make(chan error, 1)
 	prevDone := make(chan error, 1)
@@ -1835,17 +1837,58 @@ func filePositionLocked(c *Client) (elapsed, remain float64) {
 	if dur <= 0 {
 		return pos, 0
 	}
-	if c.Loop {
-		display := math.Mod(pos, dur)
-		if display < 0 {
-			display += dur
+	// Always show position within the current pass. Never snap to EOF just because
+	// Loop was toggled off while absolute play time already exceeds duration.
+	display := math.Mod(pos, dur)
+	if display < 0 {
+		display += dur
+	}
+	// At a pass boundary Mod→0; show the true end only when a pass has finished and loop is off.
+	if !c.Loop && pos >= dur-0.02 && display < 0.12 {
+		return dur, 0
+	}
+	return display, dur - display
+}
+
+// watchFileEnd stops after the current pass when Loop is false.
+// FFmpeg always uses -stream_loop -1 so LOOP can be toggled without restart.
+func (m *Manager) watchFileEnd(c *Client, stopCh <-chan struct{}) {
+	t := time.NewTicker(200 * time.Millisecond)
+	defer t.Stop()
+	for {
+		select {
+		case <-stopCh:
+			return
+		case <-t.C:
+			c.mu.Lock()
+			id := c.ID
+			loop := c.Loop
+			dur := c.DurationSec
+			armed := c.fileArmed
+			pos := filePlayedSecLocked(c)
+			st := c.Status
+			c.mu.Unlock()
+			if st == StatusStopped || st == StatusPaused {
+				continue
+			}
+			if loop || !armed || dur <= 0 {
+				continue
+			}
+			// Finish the current pass, then stop (works if loop was turned off mid-play).
+			if pos < dur-0.05 {
+				continue
+			}
+			rem := math.Mod(pos, dur)
+			if rem < 0 {
+				rem += dur
+			}
+			if rem < 0.15 || rem >= dur-0.15 {
+				c.appendLog("end of file – stopping (loop off)")
+				_, _ = m.Stop(id)
+				return
+			}
 		}
-		return display, dur - display
 	}
-	if pos > dur {
-		pos = dur
-	}
-	return pos, dur - pos
 }
 
 func (m *Manager) watchProgress(c *Client, r io.Reader) {

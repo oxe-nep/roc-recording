@@ -192,14 +192,15 @@ export default function DecodeGrid() {
   };
 
   const toggleLoop = async (c: PlayoutClient) => {
-    await withBusy(c.id, async () => {
-      const next = !c.loop;
-      const wasOn = isPlayoutOn(c.status);
-      // -stream_loop is set when FFmpeg starts, so apply LOOP via a clean restart.
-      if (wasOn) await stopPlayout(c.id);
+    const next = !c.loop;
+    // Optimistic UI only — never touch play/pause/stop.
+    setClients((prev) => prev.map((x) => (x.id === c.id ? { ...x, loop: next } : x)));
+    try {
       await updatePlayoutClient(c.id, { loop: next });
-      if (wasOn) await startPlayout(c.id);
-    });
+    } catch (e) {
+      setClients((prev) => prev.map((x) => (x.id === c.id ? { ...x, loop: c.loop } : x)));
+      setError(String(e));
+    }
   };
 
   const settingsClient = settingsId != null ? clients.find((c) => c.id === settingsId) ?? null : null;
@@ -331,10 +332,10 @@ export default function DecodeGrid() {
                           </button>
                           <button
                             type="button"
-                            className={`badge${c.loop ? " active" : ""}`}
+                            className={`badge loop-btn${c.loop ? " active" : ""}`}
                             disabled={busy[c.id]}
                             onClick={() => toggleLoop(c)}
-                            title="Toggle loop"
+                            title={c.loop ? "Loop on — click to play once" : "Loop off — click to loop"}
                           >
                             LOOP
                           </button>

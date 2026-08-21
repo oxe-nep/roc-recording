@@ -756,8 +756,21 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	}
 
 	var filter string
+	var args []string
+	base := []string{
+		"-hide_banner",
+		"-loglevel", "warning",
+		"-fflags", "+genpts+discardcorrupt",
+		"-progress", "pipe:1",
+		"-nostats",
+		"-analyzeduration", "2M",
+		"-probesize", "2M",
+		// Encode STREAM remuxes MPEG-TS over SRT — force demuxer so probe does not stall.
+		"-f", "mpegts",
+		"-i", srtURL,
+	}
+
 	if useDeckLink {
-		// SRT → DeckLink + thumb + HLS audio + meters
 		filter = fmt.Sprintf(
 			"[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,format=uyvy422,split=2[vout][vt];"+
 				"[vt]scale=640:360,format=yuv420p[vthumb];"+
@@ -766,47 +779,25 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 				"ametadata=print,anullsink",
 			w, h, w, h, fps,
 		)
-	} else {
-		// SRT preview only — no DeckLink (isolates SRT connect/decode issues).
-		filter =
-			"[0:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,format=yuv420p,fps=1[vthumb];" +
-				"[0:a]pan=stereo|c0=c0|c1=c1,asplit=2[ahls][ameter];" +
-				"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
-				"ametadata=print,anullsink"
-	}
-
-	args := []string{
-		"-hide_banner",
-		"-loglevel", "warning",
-		"-fflags", "+genpts+discardcorrupt",
-		"-progress", "pipe:1",
-		"-nostats",
-		"-analyzeduration", "5M",
-		"-probesize", "5M",
-		"-i", srtURL,
-		"-filter_complex", filter,
-		// Thumbnail
-		"-map", "[vthumb]",
-		"-r", "1",
-		"-q:v", "4",
-		"-update", "1",
-		"-f", "image2",
-		thumbPath,
-		// Browser audio monitor
-		"-map", "[ahls]",
-		"-c:a", "aac",
-		"-b:a", "128k",
-		"-ar", "48000",
-		"-ac", "2",
-		"-f", "hls",
-		"-hls_time", "1",
-		"-hls_list_size", "4",
-		"-hls_flags", "delete_segments+independent_segments+omit_endlist",
-		"-hls_segment_filename", audioSeg,
-		audioPlaylist,
-	}
-		if useDeckLink {
-		args = append(args,
+		args = append(base,
+			"-filter_complex", filter,
+			"-map", "[vthumb]",
+			"-r", "1",
+			"-q:v", "4",
+			"-update", "1",
+			"-f", "image2",
+			thumbPath,
+			"-map", "[ahls]",
+			"-c:a", "aac",
+			"-b:a", "128k",
+			"-ar", "48000",
+			"-ac", "2",
+			"-f", "hls",
+			"-hls_time", "1",
+			"-hls_list_size", "4",
+			"-hls_flags", "delete_segments+independent_segments+omit_endlist",
+			"-hls_segment_filename", audioSeg,
+			audioPlaylist,
 			"-map", "[vout]",
 			"-map", "[aout]",
 			"-pix_fmt", "uyvy422",
@@ -814,14 +805,40 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			"-s", fmt.Sprintf("%dx%d", w, h),
 		)
 		if fmtInfo.Interlaced {
-			// Field order for interlaced → DeckLink. Do NOT pass -top here:
-			// it is treated as a codec option and breaks decklink open.
 			args = append(args, "-flags", "+ilme+ildct", "-field_order", "tt")
 		}
 		if formatCode != "" && !isAllDigits(formatCode) {
 			args = append(args, "-format_code", strings.TrimSpace(formatCode))
 		}
 		args = append(args, "-f", "decklink", device)
+	} else {
+		// SRT preview only: simple maps so missing audio does not kill the graph,
+		// and video thumb is not blocked behind a complex filter.
+		args = append(base,
+			"-map", "0:v:0",
+			"-vf", "scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
+			"-r", "1",
+			"-q:v", "4",
+			"-update", "1",
+			"-f", "image2",
+			thumbPath,
+			"-map", "0:a:0?",
+			"-c:a", "aac",
+			"-b:a", "128k",
+			"-ar", "48000",
+			"-ac", "2",
+			"-f", "hls",
+			"-hls_time", "1",
+			"-hls_list_size", "4",
+			"-hls_flags", "delete_segments+independent_segments+omit_endlist",
+			"-hls_segment_filename", audioSeg,
+			audioPlaylist,
+			// Peak meters (optional audio — skipped if no audio track)
+			"-map", "0:a:0?",
+			"-af", "astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none,ametadata=print",
+			"-f", "null",
+			"-",
+		)
 	}
 
 	cmd := exec.Command(m.ffmpegBin, args...)
@@ -1053,9 +1070,26 @@ func (m *Manager) watchStderr(c *Client, r io.Reader) {
 			}
 			if !c.Sending {
 				c.Sending = true
+				c.mu.Unlock()
+				c.appendLog("receiving media (audio peaks)")
+				continue
 			}
 			c.mu.Unlock()
 		}
+	}
+}
+
+func (m *Manager) markReceiving(c *Client, why string) {
+	c.mu.Lock()
+	wasWaiting := c.Status == StatusWaiting
+	first := !c.Sending
+	c.Sending = true
+	if wasWaiting {
+		c.Status = StatusRunning
+	}
+	c.mu.Unlock()
+	if first {
+		c.appendLog("receiving media (" + why + ")")
 	}
 }
 
@@ -1082,6 +1116,27 @@ func (m *Manager) watchProgress(c *Client, r io.Reader) {
 	})
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
+		if strings.HasPrefix(line, "frame=") {
+			n, err := strconv.ParseInt(strings.TrimPrefix(line, "frame="), 10, 64)
+			if err == nil && n > 0 {
+				m.markReceiving(c, "frames")
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "out_time_ms=") {
+			n, err := strconv.ParseInt(strings.TrimPrefix(line, "out_time_ms="), 10, 64)
+			if err == nil && n > 0 {
+				m.markReceiving(c, "out_time")
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "out_time_us=") {
+			n, err := strconv.ParseInt(strings.TrimPrefix(line, "out_time_us="), 10, 64)
+			if err == nil && n > 0 {
+				m.markReceiving(c, "out_time")
+			}
+			continue
+		}
 		mm := reBitrate.FindStringSubmatch(line)
 		if mm == nil {
 			continue
@@ -1099,16 +1154,7 @@ func (m *Manager) watchProgress(c *Client, r io.Reader) {
 		}
 		c.mu.Lock()
 		c.BitrateKbps = kbps
-		if !c.Sending {
-			c.Sending = true
-			c.Status = StatusRunning
-			c.mu.Unlock()
-			c.appendLog("receiving media")
-			continue
-		}
-		if c.Status == StatusWaiting {
-			c.Status = StatusRunning
-		}
 		c.mu.Unlock()
+		m.markReceiving(c, "bitrate")
 	}
 }

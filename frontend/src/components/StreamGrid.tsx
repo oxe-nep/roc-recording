@@ -259,22 +259,26 @@ export default function StreamGrid() {
               <div className="card-stage">
                 <div className="card-thumb">
                   <Thumbnail id={s.id} active={captureOn} />
-                  {isEncoding && (
-                    <div className="rec-badge">
-                      {formatElapsed(rec?.elapsed_sec)} · {formatBitrate(rec?.bitrate_kbps)}
-                    </div>
-                  )}
-                  {isRecording && !isEncoding && (
-                    <div className="rec-badge starting">STARTING…</div>
-                  )}
-                  {srtOn && (
-                    <div
-                      className={`stream-badge${srtById[s.id]?.sending ? "" : " waiting"}`}
-                      title={srtById[s.id]?.publish_url || "SRT streaming"}
-                    >
-                      {srtById[s.id]?.sending
-                        ? `STREAM · ${formatBitrate(srtById[s.id]?.bitrate_kbps)}`
-                        : "STREAM · waiting"}
+                  {(isRecording || srtOn) && (
+                    <div className="thumb-badges">
+                      {isEncoding && (
+                        <div className="rec-badge">
+                          REC · {formatElapsed(rec?.elapsed_sec)} · {formatBitrate(rec?.bitrate_kbps)}
+                        </div>
+                      )}
+                      {isRecording && !isEncoding && (
+                        <div className="rec-badge starting">REC · STARTING…</div>
+                      )}
+                      {srtOn && (
+                        <div
+                          className={`stream-badge${srtById[s.id]?.sending ? "" : " waiting"}`}
+                          title={srtById[s.id]?.publish_url || "SRT streaming"}
+                        >
+                          {srtById[s.id]?.sending
+                            ? `STREAM · ${formatBitrate(srtById[s.id]?.bitrate_kbps)}`
+                            : "STREAM · waiting"}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

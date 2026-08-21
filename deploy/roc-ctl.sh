@@ -86,7 +86,7 @@ cmd_status() {
   systemctl --no-pager --full status "$SERVICE" || true
   echo
   echo "Related processes:"
-  pgrep -af 'roc-recording|ffmpeg.*DeckLink|ffmpeg.*udp://127.0.0.1:210' || echo "(none)"
+  pgrep -af 'roc-recording|ffmpeg.*DeckLink|ffmpeg.*udp://239.255.28' || echo "(none)"
 }
 
 cmd_logs() {
@@ -101,9 +101,9 @@ cleanup_orphans() {
 
   # Kill FFmpeg children that still bind our local UDP recording feeds / DeckLink inputs.
   # Narrow patterns to avoid killing unrelated ffmpeg on the host.
-  pkill -TERM -f 'ffmpeg.*(DeckLink IP 100G|udp://127\.0\.0\.1:210[0-9]{2})' 2>/dev/null || true
+  pkill -TERM -f 'ffmpeg.*(DeckLink IP 100G|udp://127\.0\.0\.1:210[0-9]{2}|udp://239\.255\.28\.)' 2>/dev/null || true
   sleep 1
-  pkill -KILL -f 'ffmpeg.*(DeckLink IP 100G|udp://127\.0\.0\.1:210[0-9]{2})' 2>/dev/null || true
+  pkill -KILL -f 'ffmpeg.*(DeckLink IP 100G|udp://127\.0\.0\.1:210[0-9]{2}|udp://239\.255\.28\.)' 2>/dev/null || true
 }
 
 cmd_cleanup() {
@@ -111,7 +111,7 @@ cmd_cleanup() {
   systemctl stop "$SERVICE" 2>/dev/null || true
   cleanup_orphans
   echo "Cleanup done. Remaining:"
-  pgrep -af 'roc-recording|ffmpeg.*DeckLink|ffmpeg.*udp://127.0.0.1:210' || echo "(none)"
+  pgrep -af 'roc-recording|ffmpeg.*DeckLink|ffmpeg.*udp://239.255.28' || echo "(none)"
 }
 
 main() {

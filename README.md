@@ -10,12 +10,12 @@ Live preview and recording UI for Blackmagic DeckLink IP (ST 2110).
 Per running channel, one FFmpeg holds the DeckLink lock and fans out:
 
 1. JPEG thumbnail (preview grid)
-2. **Master encode** → local MPEG-TS UDP (named preset from `encode_presets:`)
+2. **Master encode** → local MPEG-TS **multicast** UDP (`239.255.28.<id>:21000+id`, so REC and SRT can both subscribe)
 3. HLS audio-only (browser listen) + peak meters
 
 Recording starts a second FFmpeg that **remuxes** the UDP feed (`-c copy`) into fragmented MP4 — no second NVENC pass.
 
-Optional **SRT** output per channel remuxes the same UDP master (`-c copy`) as listener or caller. Configure and start from channel settings. Publish URL host comes from `PUBLIC_SRT_HOST` (or the host in `PUBLIC_URL`). Default listener ports are `9100 + channel id`. FFmpeg must be built with libsrt.
+Optional **SRT** output per channel remuxes the same UDP master (`-c copy`) as listener or caller. REC and STREAM can run at the same time. Configure and start from channel settings. Publish URL host comes from `PUBLIC_SRT_HOST` (or the host in `PUBLIC_URL`). Default listener ports are `9100 + channel id`. FFmpeg must be built with libsrt.
 
 Encode presets are defined in `config.yaml` (and live-edited via the UI into `encode-presets.json`). Per-channel selection is persisted to `encode-assignments.json`. Encode settings are applied when that channel’s capture starts — editing a preset or switching assignment does not restart a running channel.
 

@@ -158,10 +158,21 @@ func (m *Manager) Register(id int, name, ffmpegInput, encodePreset string) {
 		Status:       StatusStopped,
 		EncodePreset: encodePreset,
 		ffmpegInput:  ffmpegInput,
-		// Larger FIFO + overrun_nonfatal so REC can join mid-stream without dropping the writer.
-		feedURL:  fmt.Sprintf("udp://127.0.0.1:%d?pkt_size=1316&fifo_size=5000000&overrun_nonfatal=1", 21000+id),
+		// Multicast master feed so REC and SRT can both subscribe at once.
+		// Unicast 127.0.0.1 only delivers to one reader — the second remux starves.
+		feedURL:  masterFeedURL(id),
 		logLines: make([]string, 0, 32),
 	}
+}
+
+// masterFeedURL is the MPEG-TS UDP endpoint for the always-on capture encode.
+// Same URL is used as capture output and as REC/SRT input (reuse=1 for multi-reader).
+func masterFeedURL(id int) string {
+	return fmt.Sprintf(
+		"udp://239.255.28.%d:%d?pkt_size=1316&fifo_size=5000000&overrun_nonfatal=1&reuse=1&ttl=1",
+		id,
+		21000+id,
+	)
 }
 
 // LoadAssignments overlays persisted UI preset choices onto registered channels.

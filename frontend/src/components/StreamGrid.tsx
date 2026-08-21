@@ -276,7 +276,7 @@ export default function StreamGrid() {
                         >
                           {srtById[s.id]?.sending
                             ? `STREAM · ${formatBitrate(srtById[s.id]?.bitrate_kbps)}`
-                            : "STREAM · waiting"}
+                            : "STREAM · waiting for client"}
                         </div>
                       )}
                     </div>

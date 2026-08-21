@@ -193,11 +193,7 @@ export default function DecodeGrid() {
 
   const toggleLoop = async (c: PlayoutClient) => {
     await withBusy(c.id, async () => {
-      const next = !c.loop;
-      const wasOn = isPlayoutOn(c.status);
-      if (wasOn) await stopPlayout(c.id);
-      await updatePlayoutClient(c.id, { loop: next });
-      if (wasOn) await startPlayout(c.id);
+      await updatePlayoutClient(c.id, { loop: !c.loop });
     });
   };
 
@@ -254,7 +250,9 @@ export default function DecodeGrid() {
                           {paused
                             ? "DECODE · paused"
                             : hasMedia || c.sending
-                              ? `DECODE · ${formatBitrate(c.bitrate_kbps) === "--" ? "live" : formatBitrate(c.bitrate_kbps)}`
+                              ? isFile
+                                ? "DECODE · playing"
+                                : `DECODE · ${formatBitrate(c.bitrate_kbps) === "--" ? "live" : formatBitrate(c.bitrate_kbps)}`
                               : waitingLabel(c)}
                         </div>
                         {isFile && (c.duration_sec ?? 0) > 0 && (

@@ -75,7 +75,9 @@ type Client struct {
 	AudioR      float64
 	BitrateKbps float64
 	DurationSec float64 // file length; 0 if unknown / SRT
-	ElapsedSec  float64 // playback position (within current loop when looping)
+	ElapsedSec  float64 // display position within current loop
+	mediaPosSec float64 // last FFmpeg out_time (absolute seconds)
+	mediaPosAt  time.Time
 	Sending     bool
 	Reconnects  int
 	LastError   string
@@ -372,9 +374,26 @@ func (m *Manager) Update(id int, in UpdateInput) (ClientInfo, error) {
 		return ClientInfo{}, err
 	}
 	c.mu.Lock()
-	if c.Status != StatusStopped {
+	active := c.Status != StatusStopped
+	// Loop may be toggled while a file is playing; everything else requires stop.
+	loopOnly := in.Loop != nil &&
+		in.Name == nil && in.Device == nil && in.DeviceLabel == nil &&
+		in.FormatCode == nil && in.DeckLinkOut == nil && in.Source == nil &&
+		in.FileID == nil && in.Mode == nil && in.Port == nil &&
+		in.Target == nil && in.Passphrase == nil && in.LatencyMS == nil
+	if active && !loopOnly {
 		c.mu.Unlock()
 		return ClientInfo{}, fmt.Errorf("stop decode client before changing settings")
+	}
+	if active && loopOnly {
+		c.Loop = *in.Loop
+		info := m.infoLocked(c)
+		c.mu.Unlock()
+		m.mu.Lock()
+		_ = m.saveLocked()
+		m.mu.Unlock()
+		c.appendLog(fmt.Sprintf("loop %v", *in.Loop))
+		return info, nil
 	}
 	if in.Name != nil {
 		name := strings.TrimSpace(*in.Name)
@@ -588,17 +607,15 @@ func (m *Manager) infoLocked(c *Client) ClientInfo {
 		LatencyMS:   c.LatencyMS,
 		BitrateKbps: c.BitrateKbps,
 		DurationSec: c.DurationSec,
-		ElapsedSec:  c.ElapsedSec,
 		Sending:     c.Sending && (c.Status == StatusRunning || c.Status == StatusWaiting || c.Status == StatusPaused),
 		Reconnects:  c.Reconnects,
 		Error:       c.LastError,
 	}
-	if c.DurationSec > 0 && (c.Status == StatusRunning || c.Status == StatusWaiting || c.Status == StatusPaused) {
-		rem := c.DurationSec - c.ElapsedSec
-		if rem < 0 {
-			rem = 0
-		}
-		info.RemainSec = rem
+	if src == SourceFile && (c.Status == StatusRunning || c.Status == StatusWaiting || c.Status == StatusPaused) {
+		elapsed, remain := filePositionLocked(c)
+		c.ElapsedSec = elapsed
+		info.ElapsedSec = elapsed
+		info.RemainSec = remain
 	}
 	if c.FileID != "" {
 		if cat, name, ok := ParseLibraryRef(c.FileID); ok {
@@ -712,6 +729,8 @@ func (m *Manager) Start(id int) (ClientInfo, error) {
 	c.deviceTryAlt = false
 	c.DurationSec = 0
 	c.ElapsedSec = 0
+	c.mediaPosSec = 0
+	c.mediaPosAt = time.Time{}
 	c.AudioL = audioSilence
 	c.AudioR = audioSilence
 	info := m.infoLocked(c)
@@ -829,6 +848,8 @@ func (m *Manager) Pause(id int) (ClientInfo, error) {
 		return ClientInfo{}, fmt.Errorf("pause failed: %w", err)
 	}
 	_ = signalProc(c.previewCmd, syscall.SIGSTOP)
+	c.ElapsedSec, _ = filePositionLocked(c)
+	c.mediaPosAt = time.Time{} // freeze; keep last absolute FFmpeg out_time in mediaPosSec
 	c.Status = StatusPaused
 	c.Sending = false
 	c.appendLogUnlocked("paused")
@@ -849,6 +870,7 @@ func (m *Manager) Resume(id int) (ClientInfo, error) {
 		return ClientInfo{}, fmt.Errorf("resume failed: %w", err)
 	}
 	_ = signalProc(c.previewCmd, syscall.SIGCONT)
+	c.mediaPosAt = time.Now()
 	c.Status = StatusRunning
 	c.Sending = true
 	c.appendLogUnlocked("resumed")
@@ -996,6 +1018,8 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		c.mu.Lock()
 		c.DurationSec = dur
 		c.ElapsedSec = 0
+		c.mediaPosSec = 0
+		c.mediaPosAt = time.Time{}
 		c.mu.Unlock()
 		if dur > 0 {
 			c.appendLog(fmt.Sprintf("file duration %.1fs", dur))
@@ -1098,9 +1122,9 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	silenceInput := false
 	if source == SourceFile {
 		args = append(args, "-hwaccel", "cuda")
-		if loop {
-			args = append(args, "-stream_loop", "-1")
-		}
+		// Always loop at demuxer level; when Loop is false we stop at duration ourselves
+		// so LOOP can be toggled without restarting FFmpeg.
+		args = append(args, "-stream_loop", "-1")
 		args = append(args, "-i", filePath)
 		if !fileHasAudioStream(m.ffmpegBin, filePath) {
 			args = append(args,
@@ -1160,9 +1184,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			"-fflags", "+genpts+discardcorrupt",
 			"-nostats",
 			"-re",
-		}
-		if loop {
-			previewArgs = append(previewArgs, "-stream_loop", "-1")
+			"-stream_loop", "-1",
 		}
 		// Soft decode for UI preview — NVDEC reserved for the DeckLink process.
 		previewArgs = append(previewArgs, "-i", filePath)
@@ -1307,6 +1329,9 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 
 	go m.watchStderr(c, stderr)
 	go m.watchProgress(c, stdout)
+	if source == SourceFile {
+		go m.watchFileEnd(c, stopCh)
+	}
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -1401,6 +1426,7 @@ func (m *Manager) runFileDeckLinkAndPreview(
 	go m.watchStderr(c, dlStderr)
 	go m.watchStderr(c, prevStderr)
 	go m.watchProgress(c, dlStdout)
+	go m.watchFileEnd(c, stopCh)
 
 	dlDone := make(chan error, 1)
 	prevDone := make(chan error, 1)
@@ -1761,28 +1787,87 @@ func (m *Manager) markReceiving(c *Client, why string) {
 	}
 }
 
-func (m *Manager) setElapsedFromMS(c *Client, outTimeMS int64) {
-	elapsed := float64(outTimeMS) / 1000.0
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.Source != SourceFile {
+func filePositionLocked(c *Client) (elapsed, remain float64) {
+	pos := c.mediaPosSec
+	// Interpolate smoothly between FFmpeg progress ticks (capped so a stall doesn't run away).
+	if c.Status != StatusPaused && !c.mediaPosAt.IsZero() {
+		drift := time.Since(c.mediaPosAt).Seconds()
+		if drift > 1.0 {
+			drift = 1.0
+		}
+		if drift > 0 {
+			pos += drift
+		}
+	}
+	if pos < 0 {
+		pos = 0
+	}
+	dur := c.DurationSec
+	if dur <= 0 {
+		return pos, 0
+	}
+	display := math.Mod(pos, dur)
+	if display < 0 {
+		display += dur
+	}
+	// Near exact loop boundary, Mod can snap to 0; keep end-of-file if we just finished a pass
+	// and loop is off (stop pending).
+	if !c.Loop && pos >= dur {
+		return dur, 0
+	}
+	return display, dur - display
+}
+
+// watchFileEnd stops file playout after one pass when Loop is false.
+// FFmpeg always uses -stream_loop -1 so LOOP can be toggled without restart.
+func (m *Manager) watchFileEnd(c *Client, stopCh <-chan struct{}) {
+	t := time.NewTicker(200 * time.Millisecond)
+	defer t.Stop()
+	for {
+		select {
+		case <-stopCh:
+			return
+		case <-t.C:
+			c.mu.Lock()
+			id := c.ID
+			loop := c.Loop
+			dur := c.DurationSec
+			pos := c.mediaPosSec
+			st := c.Status
+			c.mu.Unlock()
+			if st == StatusStopped || st == StatusPaused {
+				continue
+			}
+			if loop || dur <= 0 {
+				continue
+			}
+			if pos >= dur-0.05 {
+				c.appendLog("end of file – stopping (loop off)")
+				_, _ = m.Stop(id)
+				return
+			}
+		}
+	}
+}
+
+func (m *Manager) setMediaPosFromMS(c *Client, outTimeMS int64) {
+	if outTimeMS < 0 {
 		return
 	}
-	if c.DurationSec > 0 {
-		// Keep position within the current loop iteration.
-		mod := math.Mod(elapsed, c.DurationSec)
-		if mod < 0 {
-			mod += c.DurationSec
-		}
-		// At exact loop boundary Mod can be 0 while still "at end".
-		if outTimeMS > 0 && mod < 0.05 && elapsed >= c.DurationSec-0.05 {
-			c.ElapsedSec = c.DurationSec
-		} else {
-			c.ElapsedSec = mod
-		}
-	} else {
-		c.ElapsedSec = elapsed
+	sec := float64(outTimeMS) / 1000.0
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.Source != SourceFile || c.Status == StatusPaused {
+		return
 	}
+	// Ignore tiny backwards noise; allow large backwards only as loop wrap (absolute still grows with stream_loop).
+	if sec+0.05 < c.mediaPosSec && sec > c.mediaPosSec-2 {
+		return
+	}
+	c.mediaPosSec = sec
+	c.mediaPosAt = time.Now()
+	elapsed, _ := filePositionLocked(c)
+	c.ElapsedSec = elapsed
 }
 
 func (m *Manager) watchProgress(c *Client, r io.Reader) {
@@ -1818,7 +1903,7 @@ func (m *Manager) watchProgress(c *Client, r io.Reader) {
 		if strings.HasPrefix(line, "out_time_ms=") {
 			n, err := strconv.ParseInt(strings.TrimPrefix(line, "out_time_ms="), 10, 64)
 			if err == nil && n >= 0 {
-				m.setElapsedFromMS(c, n)
+				m.setMediaPosFromMS(c, n)
 				if n > 0 {
 					m.markReceiving(c, "out_time")
 				}
@@ -1828,7 +1913,7 @@ func (m *Manager) watchProgress(c *Client, r io.Reader) {
 		if strings.HasPrefix(line, "out_time_us=") {
 			n, err := strconv.ParseInt(strings.TrimPrefix(line, "out_time_us="), 10, 64)
 			if err == nil && n >= 0 {
-				m.setElapsedFromMS(c, n/1000)
+				m.setMediaPosFromMS(c, n/1000)
 				if n > 0 {
 					m.markReceiving(c, "out_time")
 				}

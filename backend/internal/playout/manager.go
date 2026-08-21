@@ -465,7 +465,7 @@ func (m *Manager) listenURL(c *Client) string {
 	}
 	q := url.Values{}
 	q.Set("mode", "listener")
-	q.Set("latency", strconv.Itoa(lat))
+	q.Set("latency", strconv.Itoa(srtLatencyUs(lat)))
 	return fmt.Sprintf("srt://%s:%d?%s", m.publicHost, c.Port, q.Encode())
 }
 
@@ -725,6 +725,8 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		"-fflags", "+genpts+discardcorrupt",
 		"-progress", "pipe:1",
 		"-nostats",
+		"-analyzeduration", "5M",
+		"-probesize", "5M",
 		"-i", srtURL,
 		"-filter_complex", filter,
 		// Thumbnail
@@ -821,7 +823,7 @@ func (m *Manager) srtInputURL(c *Client) (string, error) {
 	}
 	q := url.Values{}
 	q.Set("mode", string(c.Mode))
-	q.Set("latency", strconv.Itoa(lat))
+	q.Set("latency", strconv.Itoa(srtLatencyUs(lat)))
 	q.Set("transtype", "live")
 	if c.Passphrase != "" {
 		q.Set("passphrase", c.Passphrase)
@@ -840,11 +842,11 @@ func (m *Manager) srtInputURL(c *Client) (string, error) {
 				return "", fmt.Errorf("invalid target URL")
 			}
 			existing := u.Query()
+			// Always force caller mode + our latency — pasted listener publish URLs
+			// often still contain mode=listener which breaks same-host pull.
 			for k, vals := range q {
-				if existing.Get(k) == "" {
-					for _, v := range vals {
-						existing.Set(k, v)
-					}
+				for _, v := range vals {
+					existing.Set(k, v)
 				}
 			}
 			u.RawQuery = existing.Encode()
@@ -854,6 +856,17 @@ func (m *Manager) srtInputURL(c *Client) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown mode")
 	}
+}
+
+// srtLatencyUs converts UI milliseconds to FFmpeg SRT latency (microseconds).
+func srtLatencyUs(ms int) int {
+	if ms <= 0 {
+		ms = 120
+	}
+	if ms > 8000 {
+		return ms
+	}
+	return ms * 1000
 }
 
 func formatGeometry(code string) (w, h int, fps float64) {
@@ -921,6 +934,9 @@ func (m *Manager) watchStderr(c *Client, r io.Reader) {
 			}
 			if c.Status == StatusWaiting {
 				c.Status = StatusRunning
+			}
+			if !c.Sending {
+				c.Sending = true
 			}
 			c.mu.Unlock()
 		}

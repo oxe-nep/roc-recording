@@ -195,10 +195,12 @@ export default function DecodeGrid() {
                     <Thumbnail id={c.id} active={on} path={`/playout/thumb/${c.id}`} />
                     {on && (
                       <div className="thumb-badges">
-                        <div className={`stream-badge${c.sending ? "" : " waiting"}`}>
-                          {c.sending
+                        <div className={`stream-badge${hasMedia || c.sending ? "" : " waiting"}`}>
+                          {hasMedia || c.sending
                             ? `DECODE · ${formatBitrate(c.bitrate_kbps)}`
-                            : "DECODE · waiting for client"}
+                            : c.mode === "caller"
+                              ? "DECODE · connecting…"
+                              : "DECODE · waiting for publisher"}
                         </div>
                         {(c.reconnects ?? 0) > 0 && (
                           <div className="stream-badge waiting">reconnects {c.reconnects}</div>

@@ -283,7 +283,7 @@ func (m *Manager) publishURL(st *channelState) string {
 	}
 	q := url.Values{}
 	q.Set("mode", string(st.mode))
-	q.Set("latency", strconv.Itoa(latency))
+	q.Set("latency", strconv.Itoa(srtLatencyUs(latency)))
 	if st.passphrase != "" {
 		q.Set("passphrase", st.passphrase)
 	}
@@ -312,7 +312,7 @@ func (m *Manager) outputURL(st *channelState) (string, error) {
 	}
 	q := url.Values{}
 	q.Set("mode", string(st.mode))
-	q.Set("latency", strconv.Itoa(latency))
+	q.Set("latency", strconv.Itoa(srtLatencyUs(latency)))
 	if st.passphrase != "" {
 		q.Set("passphrase", st.passphrase)
 	}
@@ -331,10 +331,8 @@ func (m *Manager) outputURL(st *channelState) (string, error) {
 			}
 			existing := u.Query()
 			for k, vals := range q {
-				if existing.Get(k) == "" {
-					for _, v := range vals {
-						existing.Set(k, v)
-					}
+				for _, v := range vals {
+					existing.Set(k, v)
 				}
 			}
 			u.RawQuery = existing.Encode()
@@ -344,6 +342,18 @@ func (m *Manager) outputURL(st *channelState) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown mode")
 	}
+}
+
+// srtLatencyUs converts UI milliseconds to FFmpeg SRT latency (microseconds).
+// Values already > 8000 are treated as microseconds for backward compatibility.
+func srtLatencyUs(ms int) int {
+	if ms <= 0 {
+		ms = 120
+	}
+	if ms > 8000 {
+		return ms
+	}
+	return ms * 1000
 }
 
 func (m *Manager) Start(id int) (ChannelInfo, error) {

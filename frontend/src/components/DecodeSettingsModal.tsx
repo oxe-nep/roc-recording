@@ -94,14 +94,27 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
   if (!open || !client) return null;
 
   const selected = devices.find((d) => d.name === device);
-  const formats = selected?.formats?.length
-    ? selected.formats
-    : [
-        { code: "Hi50", label: "1080i50", width: 1920, height: 1080, fps: 25, interlaced: true },
-        { code: "Hp50", label: "1080p50", width: 1920, height: 1080, fps: 50, interlaced: false },
-        { code: "Hp25", label: "1080p25", width: 1920, height: 1080, fps: 25, interlaced: false },
-        { code: "hp50", label: "720p50", width: 1280, height: 720, fps: 50, interlaced: false },
-      ];
+  const formats = selected?.formats ?? [];
+  const probeLog = selected?.probe_log || "";
+
+  const refreshDevices = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const list = await fetchPlayoutDevices(true);
+      setDevices(list);
+      if (device) {
+        const next = list.find((d) => d.name === device);
+        if (next?.formats?.length && !next.formats.some((f) => f.code === formatCode)) {
+          setFormatCode(next.formats[0].code);
+        }
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const apply = async () => {
     if (active) {
@@ -184,22 +197,30 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
 
           <label className="presets-field">
             <span>DeckLink output</span>
-            <select
-              value={device}
-              onChange={(e) => {
-                setDevice(e.target.value);
-                const next = devices.find((d) => d.name === e.target.value);
-                if (next?.formats?.length) setFormatCode(next.formats[0].code);
-              }}
-              disabled={busy || active}
-            >
-              <option value="">Select device…</option>
-              {devices.map((d) => (
-                <option key={d.name} value={d.name}>
-                  {d.name}
-                </option>
-              ))}
-            </select>
+            <div className="channel-settings-actions" style={{ marginTop: 0, marginBottom: 4 }}>
+              <select
+                value={device}
+                onChange={(e) => {
+                  setDevice(e.target.value);
+                  const next = devices.find((d) => d.name === e.target.value);
+                  if (next?.formats?.length) setFormatCode(next.formats[0].code);
+                  else setFormatCode("");
+                }}
+                disabled={busy || active}
+                style={{ flex: 1 }}
+              >
+                <option value="">Select device…</option>
+                {devices.map((d) => (
+                  <option key={d.name} value={d.name}>
+                    {d.name}
+                    {d.formats?.length ? ` (${d.formats.length} modes)` : " (no modes)"}
+                  </option>
+                ))}
+              </select>
+              <button type="button" className="badge" onClick={refreshDevices} disabled={busy || active}>
+                Re-probe
+              </button>
+            </div>
             {devices.length === 0 && (
               <span className="channel-settings-hint">No devices probed — is FFmpeg+DeckLink available on the host?</span>
             )}
@@ -210,26 +231,25 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
             <select
               value={formats.some((f) => f.code === formatCode) ? formatCode : ""}
               onChange={(e) => setFormatCode(e.target.value)}
-              disabled={busy || active}
+              disabled={busy || active || formats.length === 0}
             >
-              <option value="">Select format…</option>
+              <option value="">{formats.length ? "Select format…" : "No formats probed"}</option>
               {formats.map((f) => (
                 <option key={f.code} value={f.code}>
                   {f.label} ({f.code})
                 </option>
               ))}
             </select>
-            <input
-              style={{ marginTop: 6 }}
-              value={formatCode}
-              onChange={(e) => setFormatCode(e.target.value)}
-              disabled={busy || active}
-              placeholder="or type format_code (e.g. Hi50)"
-              title="DeckLink FourCC / format_code"
-            />
-            <span className="channel-settings-hint">
-              Prefer a probed mode when available. Manual codes like Hi50 / Hp25 also work.
-            </span>
+            {formats.length === 0 && (
+              <span className="channel-settings-hint">
+                No modes from FFmpeg for this device. Try Re-probe (best after backend restart before capture locks the card).
+              </span>
+            )}
+            {probeLog && formats.length === 0 && (
+              <pre className="channel-settings-logbox" style={{ marginTop: 8, maxHeight: 120 }}>
+                {probeLog}
+              </pre>
+            )}
           </label>
 
           <label className="presets-field">

@@ -12,7 +12,8 @@ import (
 
 func registerPlayoutRoutes(r chi.Router, playMgr *playout.Manager) {
 	r.Get("/api/playout/devices", func(w http.ResponseWriter, r *http.Request) {
-		devs, err := playMgr.Devices()
+		refresh := r.URL.Query().Get("refresh") == "1" || r.URL.Query().Get("refresh") == "true"
+		devs, err := playMgr.Devices(refresh)
 		if err != nil {
 			jsonError(w, err.Error(), http.StatusInternalServerError)
 			return

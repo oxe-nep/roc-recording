@@ -126,10 +126,6 @@ func NewManager(ffmpegBin, hlsDir, settingsPath, publicHost string) *Manager {
 	}
 }
 
-func (m *Manager) Devices() ([]Device, error) {
-	return m.devCache.get(m.ffmpegBin, 15*time.Second)
-}
-
 func (m *Manager) Load() {
 	data, err := os.ReadFile(m.settingsPath)
 	if err != nil {
@@ -700,9 +696,11 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		return err
 	}
 
-	devs, _ := m.Devices()
+	devs, _ := m.Devices(false)
 	w, h, fps := 1920, 1080, 25.0
+	var fmtInfo Format
 	if f, ok := LookupFormat(formatCode, devs); ok {
+		fmtInfo = f
 		w, h, fps = f.Width, f.Height, f.FPS
 		if fps <= 0 {
 			fps = 25
@@ -748,14 +746,21 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		"-hls_flags", "delete_segments+independent_segments+omit_endlist",
 		"-hls_segment_filename", audioSeg,
 		audioPlaylist,
-		// DeckLink output
+		// DeckLink output — mode is selected by frame size / fps / field order.
 		"-map", "[vout]",
 		"-map", "[aout]",
 		"-pix_fmt", "uyvy422",
-		"-f", "decklink",
-		"-format_code", formatCode,
-		device,
+		"-r", fmt.Sprintf("%g", fps),
+		"-s", fmt.Sprintf("%dx%d", w, h),
 	}
+	if fmtInfo.Interlaced {
+		args = append(args, "-flags", "+ilme+ildct", "-top", "1")
+	}
+	// FourCC format_code when probe gave one (not a numeric mode index).
+	if formatCode != "" && !isAllDigits(formatCode) {
+		args = append(args, "-format_code", strings.TrimSpace(formatCode))
+	}
+	args = append(args, "-f", "decklink", device)
 
 	cmd := exec.Command(m.ffmpegBin, args...)
 	stdout, err := cmd.StdoutPipe()
@@ -852,24 +857,34 @@ func (m *Manager) srtInputURL(c *Client) (string, error) {
 }
 
 func formatGeometry(code string) (w, h int, fps float64) {
-	// Sensible defaults; refine from known Blackmagic codes when possible.
 	w, h, fps = 1920, 1080, 25
-	switch strings.ToLower(code) {
+	switch strings.ToLower(strings.TrimSpace(code)) {
 	case "hp50", "hi50":
 		return 1920, 1080, 25
 	case "hp25", "hi25":
 		return 1920, 1080, 25
 	case "hp60", "hp59.94", "hp5994":
 		return 1920, 1080, 30
-	case "hp30", "hp29.97":
+	case "hp30", "hp29.97", "hp29":
 		return 1920, 1080, 30
 	case "hp24", "hp23.98":
 		return 1920, 1080, 24
 	case "hp720p50", "hp50p":
 		return 1280, 720, 50
 	}
-	// Try parse trailing digits as field/frame rate hint for scale/fps filter only.
 	return w, h, fps
+}
+
+func isAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *Manager) watchStderr(c *Client, r io.Reader) {

@@ -61,25 +61,6 @@ func main() {
 	}
 	mgr.LoadAssignments()
 
-	for _, ch := range cfg.Channels {
-		if err := mgr.Start(ch.ID); err != nil {
-			log.Printf("Failed to auto-start channel %d: %v", ch.ID, err)
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	recMgr := recording.NewManager(
-		cfg.RecordingsDir,
-		cfg.FFmpegBin,
-		mgr,
-		filepath.Join(filepath.Dir(cfgPath), "channel-categories.json"),
-		filepath.Join(filepath.Dir(cfgPath), "recordings-path.json"),
-	)
-	for _, ch := range cfg.Channels {
-		recMgr.Register(ch.ID)
-	}
-	recMgr.LoadCategoryAssignments()
-
 	hlsBase := fmt.Sprintf("http://localhost:%s", cfg.Port)
 	if v := os.Getenv("PUBLIC_URL"); v != "" {
 		hlsBase = v
@@ -101,6 +82,35 @@ func main() {
 		publicSRTHost = "127.0.0.1"
 	}
 
+	// Probe DeckLink outputs/formats BEFORE capture opens devices (exclusive lock).
+	playMgr := playout.NewManager(
+		cfg.FFmpegBin,
+		cfg.HLSDir,
+		filepath.Join(filepath.Dir(cfgPath), "playout-clients.json"),
+		publicSRTHost,
+	)
+	playMgr.Load()
+	playMgr.WarmProbe()
+
+	for _, ch := range cfg.Channels {
+		if err := mgr.Start(ch.ID); err != nil {
+			log.Printf("Failed to auto-start channel %d: %v", ch.ID, err)
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	recMgr := recording.NewManager(
+		cfg.RecordingsDir,
+		cfg.FFmpegBin,
+		mgr,
+		filepath.Join(filepath.Dir(cfgPath), "channel-categories.json"),
+		filepath.Join(filepath.Dir(cfgPath), "recordings-path.json"),
+	)
+	for _, ch := range cfg.Channels {
+		recMgr.Register(ch.ID)
+	}
+	recMgr.LoadCategoryAssignments()
+
 	srtMgr := srt.NewManager(
 		cfg.FFmpegBin,
 		mgr,
@@ -111,14 +121,6 @@ func main() {
 		srtMgr.Register(ch.ID)
 	}
 	srtMgr.LoadSettings()
-
-	playMgr := playout.NewManager(
-		cfg.FFmpegBin,
-		cfg.HLSDir,
-		filepath.Join(filepath.Dir(cfgPath), "playout-clients.json"),
-		publicSRTHost,
-	)
-	playMgr.Load()
 
 	hlsH := hlshandler.NewHandler(cfg.HLSDir, cfg.AllowedOrigins)
 	metrics := sysmetrics.NewCollector(recMgr.RecordingDir())

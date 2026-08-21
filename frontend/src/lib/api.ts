@@ -406,6 +406,7 @@ export interface PlayoutFormat {
 export interface PlayoutDevice {
   name: string;
   formats: PlayoutFormat[];
+  probe_log?: string;
 }
 
 export interface PlayoutClient {
@@ -452,8 +453,9 @@ export function isPlayoutOn(status: PlayoutClient["status"]): boolean {
   return status === "running" || status === "waiting";
 }
 
-export async function fetchPlayoutDevices(): Promise<PlayoutDevice[]> {
-  const res = await apiFetch("/api/playout/devices");
+export async function fetchPlayoutDevices(refresh = false): Promise<PlayoutDevice[]> {
+  const q = refresh ? "?refresh=1" : "";
+  const res = await apiFetch(`/api/playout/devices${q}`);
   if (!res.ok) throw new Error(`fetchPlayoutDevices: ${res.status}`);
   return res.json();
 }

@@ -90,20 +90,27 @@ export default function DecodeGrid() {
 
   useEffect(() => {
     let alive = true;
+    const silence: AudioLevels = { l: -90, r: -90 };
     const pollAudio = async () => {
-      const active = clientsRef.current.filter((c) => isPlayoutOn(c.status));
-      if (active.length === 0) return;
+      const all = clientsRef.current;
       const updates: Record<number, AudioLevels> = {};
+      for (const c of all) {
+        if (!isPlayoutOn(c.status)) {
+          updates[c.id] = silence;
+        }
+      }
+      const active = all.filter((c) => isPlayoutOn(c.status));
       await Promise.all(
         active.map(async (c) => {
           try {
             updates[c.id] = await fetchPlayoutAudioLevels(c.id);
           } catch {
-            // ignore
+            updates[c.id] = silence;
           }
         }),
       );
-      if (!alive || Object.keys(updates).length === 0) return;
+      if (!alive) return;
+      if (Object.keys(updates).length === 0) return;
       setAudio((prev) => ({ ...prev, ...updates }));
     };
     const interval = setInterval(pollAudio, 500);

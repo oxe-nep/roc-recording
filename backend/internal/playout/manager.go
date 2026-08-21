@@ -624,6 +624,12 @@ func (m *Manager) Stop(id int) (ClientInfo, error) {
 	for time.Now().Before(deadline) {
 		c.mu.Lock()
 		done := c.Status == StatusStopped && c.cmd == nil
+		if done {
+			c.AudioL = audioSilence
+			c.AudioR = audioSilence
+			c.Sending = false
+			c.BitrateKbps = 0
+		}
 		info := m.infoLocked(c)
 		c.mu.Unlock()
 		if done {
@@ -635,6 +641,10 @@ func (m *Manager) Stop(id int) (ClientInfo, error) {
 	c.cmd = nil
 	c.Status = StatusStopped
 	c.stopCh = nil
+	c.Sending = false
+	c.BitrateKbps = 0
+	c.AudioL = audioSilence
+	c.AudioR = audioSilence
 	info := m.infoLocked(c)
 	c.mu.Unlock()
 	return info, nil

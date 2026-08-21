@@ -74,6 +74,8 @@ type Client struct {
 	AudioL      float64
 	AudioR      float64
 	BitrateKbps float64
+	DurationSec float64 // file length; 0 if unknown / SRT
+	ElapsedSec  float64 // playback position (within current loop when looping)
 	Sending     bool
 	Reconnects  int
 	LastError   string
@@ -107,6 +109,9 @@ type ClientInfo struct {
 	HasPass     bool    `json:"has_passphrase"`
 	LatencyMS   int     `json:"latency_ms"`
 	BitrateKbps float64 `json:"bitrate_kbps,omitempty"`
+	DurationSec float64 `json:"duration_sec,omitempty"`
+	ElapsedSec  float64 `json:"elapsed_sec,omitempty"`
+	RemainSec   float64 `json:"remain_sec,omitempty"`
 	Sending     bool    `json:"sending"`
 	Reconnects  int     `json:"reconnects"`
 	Error       string  `json:"error,omitempty"`
@@ -582,9 +587,18 @@ func (m *Manager) infoLocked(c *Client) ClientInfo {
 		HasPass:     c.Passphrase != "",
 		LatencyMS:   c.LatencyMS,
 		BitrateKbps: c.BitrateKbps,
+		DurationSec: c.DurationSec,
+		ElapsedSec:  c.ElapsedSec,
 		Sending:     c.Sending && (c.Status == StatusRunning || c.Status == StatusWaiting || c.Status == StatusPaused),
 		Reconnects:  c.Reconnects,
 		Error:       c.LastError,
+	}
+	if c.DurationSec > 0 && (c.Status == StatusRunning || c.Status == StatusWaiting || c.Status == StatusPaused) {
+		rem := c.DurationSec - c.ElapsedSec
+		if rem < 0 {
+			rem = 0
+		}
+		info.RemainSec = rem
 	}
 	if c.FileID != "" {
 		if cat, name, ok := ParseLibraryRef(c.FileID); ok {
@@ -696,6 +710,8 @@ func (m *Manager) Start(id int) (ClientInfo, error) {
 	c.Sending = false
 	c.Reconnects = 0
 	c.deviceTryAlt = false
+	c.DurationSec = 0
+	c.ElapsedSec = 0
 	c.AudioL = audioSilence
 	c.AudioR = audioSilence
 	info := m.infoLocked(c)
@@ -976,6 +992,14 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			return err
 		}
 		filePath = p
+		dur := probeFileDurationSec(m.ffmpegBin, filePath)
+		c.mu.Lock()
+		c.DurationSec = dur
+		c.ElapsedSec = 0
+		c.mu.Unlock()
+		if dur > 0 {
+			c.appendLog(fmt.Sprintf("file duration %.1fs", dur))
+		}
 	}
 
 	useDeckLink := wantDeckLink && deviceRaw != "" && formatCode != ""
@@ -1737,6 +1761,30 @@ func (m *Manager) markReceiving(c *Client, why string) {
 	}
 }
 
+func (m *Manager) setElapsedFromMS(c *Client, outTimeMS int64) {
+	elapsed := float64(outTimeMS) / 1000.0
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.Source != SourceFile {
+		return
+	}
+	if c.DurationSec > 0 {
+		// Keep position within the current loop iteration.
+		mod := math.Mod(elapsed, c.DurationSec)
+		if mod < 0 {
+			mod += c.DurationSec
+		}
+		// At exact loop boundary Mod can be 0 while still "at end".
+		if outTimeMS > 0 && mod < 0.05 && elapsed >= c.DurationSec-0.05 {
+			c.ElapsedSec = c.DurationSec
+		} else {
+			c.ElapsedSec = mod
+		}
+	} else {
+		c.ElapsedSec = elapsed
+	}
+}
+
 func (m *Manager) watchProgress(c *Client, r io.Reader) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -1769,15 +1817,21 @@ func (m *Manager) watchProgress(c *Client, r io.Reader) {
 		}
 		if strings.HasPrefix(line, "out_time_ms=") {
 			n, err := strconv.ParseInt(strings.TrimPrefix(line, "out_time_ms="), 10, 64)
-			if err == nil && n > 0 {
-				m.markReceiving(c, "out_time")
+			if err == nil && n >= 0 {
+				m.setElapsedFromMS(c, n)
+				if n > 0 {
+					m.markReceiving(c, "out_time")
+				}
 			}
 			continue
 		}
 		if strings.HasPrefix(line, "out_time_us=") {
 			n, err := strconv.ParseInt(strings.TrimPrefix(line, "out_time_us="), 10, 64)
-			if err == nil && n > 0 {
-				m.markReceiving(c, "out_time")
+			if err == nil && n >= 0 {
+				m.setElapsedFromMS(c, n/1000)
+				if n > 0 {
+					m.markReceiving(c, "out_time")
+				}
 			}
 			continue
 		}

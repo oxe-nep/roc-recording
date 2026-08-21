@@ -5,6 +5,8 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -88,4 +90,26 @@ func fileHasAudioStream(ffmpegBin, path string) bool {
 	cmd := exec.Command(ffmpegBin, "-hide_banner", "-i", path)
 	out, _ := cmd.CombinedOutput()
 	return strings.Contains(strings.ToLower(string(out)), "audio:")
+}
+
+var reFFDuration = regexp.MustCompile(`(?i)Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)`)
+
+func probeFileDurationSec(ffmpegBin, path string) float64 {
+	if strings.TrimSpace(path) == "" {
+		return 0
+	}
+	cmd := exec.Command(ffmpegBin, "-hide_banner", "-i", path)
+	out, _ := cmd.CombinedOutput()
+	mm := reFFDuration.FindStringSubmatch(string(out))
+	if mm == nil {
+		return 0
+	}
+	h, _ := strconv.Atoi(mm[1])
+	m, _ := strconv.Atoi(mm[2])
+	s, _ := strconv.ParseFloat(mm[3], 64)
+	sec := float64(h*3600+m*60) + s
+	if sec < 0.1 {
+		return 0
+	}
+	return sec
 }

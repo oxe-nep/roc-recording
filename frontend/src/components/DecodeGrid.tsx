@@ -25,6 +25,18 @@ function formatBitrate(kbps?: number): string {
   return `${kbps.toFixed(0)} kbit/s`;
 }
 
+function formatClock(sec?: number): string {
+  if (sec == null || !Number.isFinite(sec) || sec < 0) return "--:--";
+  const s = Math.floor(sec);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = s % 60;
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
+  }
+  return `${m}:${String(r).padStart(2, "0")}`;
+}
+
 const METER_SEGMENTS = 24;
 const METER_MIN_DB = -50;
 const METER_MAX_DB = 0;
@@ -245,6 +257,11 @@ export default function DecodeGrid() {
                               ? `DECODE · ${formatBitrate(c.bitrate_kbps) === "--" ? "live" : formatBitrate(c.bitrate_kbps)}`
                               : waitingLabel(c)}
                         </div>
+                        {isFile && (c.duration_sec ?? 0) > 0 && (
+                          <div className="stream-badge waiting" title="Elapsed / remaining">
+                            {formatClock(c.elapsed_sec)} / −{formatClock(c.remain_sec)}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

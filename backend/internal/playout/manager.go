@@ -165,7 +165,7 @@ func (m *Manager) Load() {
 			ID:         id,
 			Name:       name,
 			Status:     StatusStopped,
-			Device:     cfg.Device,
+			Device:     NormalizeOpenDevice(cfg.Device),
 			FormatCode: cfg.FormatCode,
 			Mode:       mode,
 			Port:       port,
@@ -261,7 +261,7 @@ func (m *Manager) Create(in CreateInput) (ClientInfo, error) {
 		ID:         id,
 		Name:       name,
 		Status:     StatusStopped,
-		Device:     strings.TrimSpace(in.Device),
+		Device:     NormalizeOpenDevice(in.Device),
 		FormatCode: strings.TrimSpace(in.FormatCode),
 		Mode:       mode,
 		Port:       port,
@@ -298,7 +298,7 @@ func (m *Manager) Update(id int, in UpdateInput) (ClientInfo, error) {
 		c.Name = name
 	}
 	if in.Device != nil {
-		c.Device = strings.TrimSpace(*in.Device)
+		c.Device = NormalizeOpenDevice(*in.Device)
 	}
 	if in.FormatCode != nil {
 		c.FormatCode = strings.TrimSpace(*in.FormatCode)
@@ -464,7 +464,8 @@ func (m *Manager) listenURL(c *Client) string {
 		lat = 120
 	}
 	q := url.Values{}
-	q.Set("mode", "listener")
+	// URL for a remote peer pushing into our listener → they must be caller.
+	q.Set("mode", "caller")
 	q.Set("latency", strconv.Itoa(srtLatencyUs(lat)))
 	return fmt.Sprintf("srt://%s:%d?%s", m.publicHost, c.Port, q.Encode())
 }
@@ -493,6 +494,7 @@ func (m *Manager) Start(id int) (ClientInfo, error) {
 		c.mu.Unlock()
 		return ClientInfo{}, fmt.Errorf("DeckLink output device is required")
 	}
+	deviceRaw := c.Device
 	if strings.TrimSpace(c.FormatCode) == "" {
 		c.mu.Unlock()
 		return ClientInfo{}, fmt.Errorf("output format is required")
@@ -501,16 +503,18 @@ func (m *Manager) Start(id int) (ClientInfo, error) {
 		c.mu.Unlock()
 		return ClientInfo{}, fmt.Errorf("caller mode requires a target")
 	}
-	device := c.Device
 	mode := c.Mode
 	port := c.Port
 	c.mu.Unlock()
+
+	device := m.ResolveOpenDevice(deviceRaw)
 
 	if err := m.assertNoConflicts(id, device, mode, port); err != nil {
 		return ClientInfo{}, err
 	}
 
 	c.mu.Lock()
+	c.Device = device
 	if c.Status != StatusStopped {
 		c.mu.Unlock()
 		return ClientInfo{}, fmt.Errorf("decode client %d already active", id)
@@ -687,13 +691,19 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	audioSeg := filepath.Join(outDir, "audio_%03d.ts")
 
 	c.mu.Lock()
-	device := c.Device
+	deviceRaw := c.Device
 	formatCode := c.FormatCode
 	mode := c.Mode
 	srtURL, err := m.srtInputURL(c)
 	c.mu.Unlock()
 	if err != nil {
 		return err
+	}
+	device := m.ResolveOpenDevice(deviceRaw)
+	if device != deviceRaw {
+		c.mu.Lock()
+		c.Device = device
+		c.mu.Unlock()
 	}
 
 	devs, _ := m.Devices(false)

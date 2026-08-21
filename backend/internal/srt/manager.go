@@ -282,7 +282,8 @@ func (m *Manager) publishURL(st *channelState) string {
 		latency = 120
 	}
 	q := url.Values{}
-	q.Set("mode", string(st.mode))
+	// Shareable URL is for the remote peer. If we listen, they must call.
+	q.Set("mode", string(ModeCaller))
 	q.Set("latency", strconv.Itoa(srtLatencyUs(latency)))
 	if st.passphrase != "" {
 		q.Set("passphrase", st.passphrase)

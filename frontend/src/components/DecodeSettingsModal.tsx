@@ -212,7 +212,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                 <option value="">Select device…</option>
                 {devices.map((d) => (
                   <option key={d.name} value={d.name}>
-                    {d.name}
+                    {d.label || d.name}
                     {d.formats?.length ? ` (${d.formats.length} modes)` : " (no modes)"}
                   </option>
                 ))}

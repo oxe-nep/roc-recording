@@ -11,60 +11,129 @@ import (
 	"time"
 )
 
-// Device is a DeckLink output discovered via FFmpeg.
+// Device is a DeckLink *output* (sink) discovered via FFmpeg.
+// Name is the unique handle FFmpeg opens (BMDDeckLinkDeviceHandle).
+// Label is the human display name (may match an input with a different ID).
 type Device struct {
-	Name      string   `json:"name"`
-	Formats   []Format `json:"formats"`
-	ProbeLog  string   `json:"probe_log,omitempty"` // set when formats could not be parsed
+	Name       string   `json:"name"`  // unique id, e.g. "25fb7120:00000000"
+	Label      string   `json:"label"` // e.g. "DeckLink IP 100G (1)"
+	Formats    []Format `json:"formats"`
+	ProbeLog   string   `json:"probe_log,omitempty"`
+	Busy       bool     `json:"busy,omitempty"`
+	BusyReason string   `json:"busy_reason,omitempty"`
 }
 
 // Format is a DeckLink mode (format_code or mode index + geometry).
 type Format struct {
-	Code       string  `json:"code"`  // FourCC (Hi50) or numeric mode id ("11")
-	Label      string  `json:"label"` // e.g. "1080i50"
+	Code       string  `json:"code"`
+	Label      string  `json:"label"`
 	Width      int     `json:"width"`
 	Height     int     `json:"height"`
 	FPS        float64 `json:"fps"`
 	Interlaced bool    `json:"interlaced"`
 }
 
+type sinkDevice struct {
+	ID    string // unique handle for FFmpeg
+	Label string // display name
+}
+
 var (
 	reDeviceNum = regexp.MustCompile(`(?i)^\s*(\d+)\s*[:=\-]\s*['"]?(.+?)['"]?\s*$`)
 	reFormatHeader = regexp.MustCompile(`(?i)format_code\s+description|supported formats`)
-	// FourCC style: "Hi50 1920x1080 at 25000/1000 fps (interlaced, …)"
 	reFormatFourCC = regexp.MustCompile(
 		`(?i)^\s*(?:format_code\s+)?([A-Za-z][A-Za-z0-9 ]{2,7})\s+(\d+)x(\d+)\s+at\s+([\d.]+)(?:/([\d.]+))?\s*fps(.*)$`,
 	)
-	// Older style: "11 1920x1080 at 25000/1000 fps (interlaced, …)"
 	reFormatIndex = regexp.MustCompile(
 		`(?i)^\s*(\d+)\s+(\d+)x(\d+)\s+at\s+([\d.]+)(?:/([\d.]+))?\s*fps(.*)$`,
 	)
-	reSinkLine = regexp.MustCompile(`(?i)DeckLink`)
+	// ffmpeg -sinks: "25fb7120:00000000 [DeckLink IP 100G (1)] (none)"
+	// also older "55:00000000:00000000 [DeckLink Duo (1)]"
+	reSinkUIDLabel = regexp.MustCompile(`(?i)^\s*([0-9a-f]{2,}(?::[0-9a-f]+){1,})\s+\[([^\]]+)\]`)
+	reSinkUIDAlone = regexp.MustCompile(`(?i)^\s*([0-9a-f]{8}:[0-9a-f]{8})\s*$`)
+	reUniqueID     = regexp.MustCompile(`(?i)^[0-9a-f]{2,}(?::[0-9a-f]+){1,}$`)
 )
 
-// ListDevices probes FFmpeg for DeckLink output devices and their formats.
-// Does not invent fake modes — formats come only from FFmpeg probe output.
+// ParseSinkLine extracts unique id + display label from an ffmpeg -sinks line.
+func ParseSinkLine(line string) (sinkDevice, bool) {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(strings.ToLower(line), "auto-detected") {
+		return sinkDevice{}, false
+	}
+	if mm := reSinkUIDLabel.FindStringSubmatch(line); mm != nil {
+		return sinkDevice{ID: mm[1], Label: strings.TrimSpace(mm[2])}, true
+	}
+	if mm := reSinkUIDAlone.FindStringSubmatch(line); mm != nil {
+		return sinkDevice{ID: mm[1], Label: mm[1]}, true
+	}
+	if strings.Contains(line, "'") {
+		start := strings.Index(line, "'")
+		end := strings.LastIndex(line, "'")
+		if start >= 0 && end > start {
+			label := line[start+1 : end]
+			return sinkDevice{ID: label, Label: label}, true
+		}
+	}
+	if mm := reDeviceNum.FindStringSubmatch(line); mm != nil {
+		rest := strings.Trim(strings.TrimSpace(mm[2]), `'"`)
+		if s, ok := ParseSinkLine(rest); ok {
+			return s, true
+		}
+		return sinkDevice{ID: rest, Label: rest}, true
+	}
+	return sinkDevice{}, false
+}
+
+// NormalizeOpenDevice returns the FFmpeg open string for a stored device value.
+// Prefer unique sink IDs; strip junk from pasted sinks lines.
+func NormalizeOpenDevice(raw string) string {
+	raw = strings.TrimSpace(raw)
+	raw = strings.Trim(raw, `'"`)
+	if raw == "" {
+		return ""
+	}
+	if s, ok := ParseSinkLine(raw); ok {
+		return s.ID
+	}
+	if i := strings.Index(raw, " ["); i > 0 && reUniqueID.MatchString(strings.TrimSpace(raw[:i])) {
+		return strings.TrimSpace(raw[:i])
+	}
+	return raw
+}
+
+// ListDevices probes FFmpeg for DeckLink output sinks and their formats.
 func ListDevices(ffmpegBin string) ([]Device, error) {
 	if ffmpegBin == "" {
 		ffmpegBin = "ffmpeg"
 	}
-	names := listOutputDeviceNames(ffmpegBin)
-	if len(names) == 0 {
-		var err error
-		names, err = listDeviceNamesLegacy(ffmpegBin)
+	sinks := listOutputSinks(ffmpegBin)
+	if len(sinks) == 0 {
+		// Legacy fallback — display names only (ambiguous for IP 8in/8out).
+		names, err := listDeviceNamesLegacy(ffmpegBin)
 		if err != nil {
 			return nil, err
 		}
+		for _, n := range names {
+			sinks = append(sinks, sinkDevice{ID: n, Label: n})
+		}
 	}
-	out := make([]Device, 0, len(names))
-	for _, name := range names {
-		formats, raw := probeFormats(ffmpegBin, name)
-		d := Device{Name: name, Formats: formats}
+	out := make([]Device, 0, len(sinks))
+	for _, s := range sinks {
+		formats, raw := probeFormats(ffmpegBin, s.ID)
+		// Also try display name if unique id probe failed (older FFmpeg).
+		if len(formats) == 0 && s.Label != "" && s.Label != s.ID {
+			if f2, raw2 := probeFormats(ffmpegBin, s.Label); len(f2) > 0 {
+				formats, raw = f2, raw2
+			} else {
+				raw = raw + "\n" + raw2
+			}
+		}
+		d := Device{Name: s.ID, Label: s.Label, Formats: formats}
 		if len(formats) == 0 {
 			d.ProbeLog = trimProbeLog(raw)
-			log.Printf("[playout] format probe failed for %q (%d bytes log)", name, len(raw))
+			log.Printf("[playout] format probe failed for sink %q (%q) (%d bytes log)", s.ID, s.Label, len(raw))
 		} else {
-			log.Printf("[playout] probed %d formats for %q", len(formats), name)
+			log.Printf("[playout] probed %d formats for sink %q (%q)", len(formats), s.ID, s.Label)
 		}
 		out = append(out, d)
 	}
@@ -79,40 +148,20 @@ func trimProbeLog(raw string) string {
 	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
-func listOutputDeviceNames(ffmpegBin string) []string {
+func listOutputSinks(ffmpegBin string) []sinkDevice {
 	cmd := exec.Command(ffmpegBin, "-hide_banner", "-sinks", "decklink")
 	out, _ := cmd.CombinedOutput()
-	var names []string
+	var sinks []sinkDevice
 	seen := map[string]bool{}
 	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
+		s, ok := ParseSinkLine(line)
+		if !ok || s.ID == "" || seen[s.ID] {
 			continue
 		}
-		if mm := reDeviceNum.FindStringSubmatch(line); mm != nil {
-			name := strings.Trim(strings.TrimSpace(mm[2]), `'"`)
-			if i := strings.Index(name, " ["); i > 0 {
-				name = name[:i]
-			}
-			if name != "" && !seen[name] {
-				seen[name] = true
-				names = append(names, name)
-			}
-			continue
-		}
-		if reSinkLine.MatchString(line) && strings.Contains(line, "'") {
-			start := strings.Index(line, "'")
-			end := strings.LastIndex(line, "'")
-			if start >= 0 && end > start {
-				name := line[start+1 : end]
-				if name != "" && !seen[name] {
-					seen[name] = true
-					names = append(names, name)
-				}
-			}
-		}
+		seen[s.ID] = true
+		sinks = append(sinks, s)
 	}
-	return names
+	return sinks
 }
 
 func listDeviceNamesLegacy(ffmpegBin string) ([]string, error) {
@@ -120,31 +169,34 @@ func listDeviceNamesLegacy(ffmpegBin string) ([]string, error) {
 	out, _ := cmd.CombinedOutput()
 	var names []string
 	seen := map[string]bool{}
+	add := func(name string) {
+		name = strings.TrimSpace(strings.Trim(name, `'"`))
+		if name == "" || seen[name] {
+			return
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
 	for _, line := range strings.Split(string(out), "\n") {
+		if s, ok := ParseSinkLine(strings.TrimSpace(line)); ok {
+			add(s.Label)
+			continue
+		}
 		if mm := reDeviceNum.FindStringSubmatch(line); mm != nil {
-			name := strings.Trim(strings.TrimSpace(mm[2]), `'"`)
-			if name != "" && !seen[name] {
-				seen[name] = true
-				names = append(names, name)
-			}
+			add(mm[2])
 			continue
 		}
 		if strings.Contains(strings.ToLower(line), "decklink") && strings.Contains(line, "'") {
 			start := strings.Index(line, "'")
 			end := strings.LastIndex(line, "'")
 			if start >= 0 && end > start {
-				name := line[start+1 : end]
-				if name != "" && !seen[name] {
-					seen[name] = true
-					names = append(names, name)
-				}
+				add(line[start+1 : end])
 			}
 		}
 	}
 	return names, nil
 }
 
-// probeFormats tries several FFmpeg invocations used across DeckLink SDK / FFmpeg versions.
 func probeFormats(ffmpegBin, device string) ([]Format, string) {
 	var combined strings.Builder
 	try := func(label string, args []string) []Format {
@@ -155,7 +207,6 @@ func probeFormats(ffmpegBin, device string) ([]Format, string) {
 		return parseFormatLines(text)
 	}
 
-	// 1) Official outdev example shape (needs a dummy input).
 	if f := try("outdev-lavfi", []string{
 		"-hide_banner", "-loglevel", "info",
 		"-f", "lavfi", "-i", "color=c=black:s=1920x1080:r=25",
@@ -163,23 +214,18 @@ func probeFormats(ffmpegBin, device string) ([]Format, string) {
 	}); len(f) > 0 {
 		return f, combined.String()
 	}
-
-	// 2) Input-style list_formats (often works on IP cards for both directions).
 	if f := try("indev", []string{
 		"-hide_banner", "-loglevel", "info",
 		"-f", "decklink", "-list_formats", "1", "-i", device,
 	}); len(f) > 0 {
 		return f, combined.String()
 	}
-
-	// 3) Duplex full — some multi-subdevice cards need this to enumerate.
 	if f := try("indev-duplex-full", []string{
 		"-hide_banner", "-loglevel", "info",
 		"-f", "decklink", "-duplex_mode", "full", "-list_formats", "1", "-i", device,
 	}); len(f) > 0 {
 		return f, combined.String()
 	}
-
 	return nil, combined.String()
 }
 
@@ -217,7 +263,7 @@ func parseFormatLines(raw string) []Format {
 			}
 			tail = mm[6]
 		} else if mm := reFormatIndex.FindStringSubmatch(line); mm != nil {
-			code = mm[1] // numeric mode index
+			code = mm[1]
 			w, _ = strconv.Atoi(mm[2])
 			h, _ = strconv.Atoi(mm[3])
 			num, _ = strconv.ParseFloat(mm[4], 64)
@@ -237,10 +283,7 @@ func parseFormatLines(raw string) []Format {
 		if code == "" || strings.EqualFold(code, "format_code") || strings.EqualFold(code, "description") {
 			continue
 		}
-		if seen[code] {
-			continue
-		}
-		if w <= 0 || h <= 0 {
+		if seen[code] || w <= 0 || h <= 0 {
 			continue
 		}
 		fps := num / den
@@ -253,11 +296,10 @@ func parseFormatLines(raw string) []Format {
 		if interlaced {
 			scan = "i"
 		}
-		label := fmt.Sprintf("%d%s%d", h, scan, rate)
 		seen[code] = true
 		formats = append(formats, Format{
 			Code:       code,
-			Label:      label,
+			Label:      fmt.Sprintf("%d%s%d", h, scan, rate),
 			Width:      w,
 			Height:     h,
 			FPS:        fps,
@@ -267,7 +309,6 @@ func parseFormatLines(raw string) []Format {
 	return formats
 }
 
-// LookupFormat finds geometry for a format code from probed devices only.
 func LookupFormat(code string, devices []Device) (Format, bool) {
 	code = strings.TrimSpace(code)
 	if code == "" {
@@ -283,6 +324,53 @@ func LookupFormat(code string, devices []Device) (Format, bool) {
 	return Format{}, false
 }
 
+// ExtractDeckLinkName pulls a device name from an ffmpeg input arg string.
+func ExtractDeckLinkName(ffmpegInput string) string {
+	s := ffmpegInput
+	if i := strings.LastIndex(strings.ToLower(s), "-i"); i >= 0 {
+		s = strings.TrimSpace(s[i+2:])
+	}
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "'") {
+		if end := strings.Index(s[1:], "'"); end >= 0 {
+			return strings.TrimSpace(s[1 : 1+end])
+		}
+	}
+	if strings.HasPrefix(s, `"`) {
+		if end := strings.Index(s[1:], `"`); end >= 0 {
+			return strings.TrimSpace(s[1 : 1+end])
+		}
+	}
+	fields := strings.Fields(s)
+	if len(fields) > 0 {
+		return NormalizeOpenDevice(fields[0])
+	}
+	return NormalizeOpenDevice(s)
+}
+
+// ResolveOpenDevice maps a stored value (display name, sinks line, or id) to a sink unique id.
+func (m *Manager) ResolveOpenDevice(raw string) string {
+	raw = NormalizeOpenDevice(raw)
+	if raw == "" {
+		return ""
+	}
+	devs, err := m.devCache.get(m.ffmpegBin, 5*time.Minute)
+	if err != nil || len(devs) == 0 {
+		return raw
+	}
+	for _, d := range devs {
+		if strings.EqualFold(d.Name, raw) {
+			return d.Name
+		}
+	}
+	for _, d := range devs {
+		if strings.EqualFold(d.Label, raw) {
+			return d.Name
+		}
+	}
+	return raw
+}
+
 type deviceCache struct {
 	mu      sync.Mutex
 	at      time.Time
@@ -294,27 +382,59 @@ func (c *deviceCache) get(ffmpegBin string, maxAge time.Duration) ([]Device, err
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if time.Since(c.at) < maxAge && c.devices != nil {
-		return c.devices, c.err
+		return cloneDevices(c.devices), c.err
 	}
 	devs, err := ListDevices(ffmpegBin)
-	c.devices = devs
+	c.devices = mergeFormatCache(c.devices, devs)
 	c.err = err
 	c.at = time.Now()
-	return devs, err
+	return cloneDevices(c.devices), err
 }
 
 func (c *deviceCache) refresh(ffmpegBin string) ([]Device, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	devs, err := ListDevices(ffmpegBin)
-	c.devices = devs
+	c.devices = mergeFormatCache(c.devices, devs)
 	c.err = err
 	c.at = time.Now()
-	return devs, err
+	return cloneDevices(c.devices), err
 }
 
-// WarmProbe fills the device/format cache. Call before capture opens DeckLink
-// devices so list_formats is more likely to succeed.
+func cloneDevices(in []Device) []Device {
+	out := make([]Device, len(in))
+	copy(out, in)
+	for i := range out {
+		if in[i].Formats != nil {
+			out[i].Formats = append([]Format(nil), in[i].Formats...)
+		}
+	}
+	return out
+}
+
+// mergeFormatCache keeps previously probed formats when a re-probe returns empty
+// (e.g. sink briefly busy). Device list/ids still update from the new probe.
+func mergeFormatCache(prev, next []Device) []Device {
+	if len(prev) == 0 {
+		return next
+	}
+	byID := map[string]Device{}
+	for _, d := range prev {
+		byID[d.Name] = d
+	}
+	out := make([]Device, 0, len(next))
+	for _, d := range next {
+		if len(d.Formats) == 0 {
+			if old, ok := byID[d.Name]; ok && len(old.Formats) > 0 {
+				d.Formats = old.Formats
+				d.ProbeLog = ""
+			}
+		}
+		out = append(out, d)
+	}
+	return out
+}
+
 func (m *Manager) WarmProbe() {
 	devs, err := m.devCache.refresh(m.ffmpegBin)
 	if err != nil {
@@ -325,13 +445,14 @@ func (m *Manager) WarmProbe() {
 	for _, d := range devs {
 		nFmt += len(d.Formats)
 	}
-	log.Printf("[playout] warm probe: %d devices, %d formats total", len(devs), nFmt)
+	log.Printf("[playout] warm probe: %d output sinks, %d formats total", len(devs), nFmt)
 }
 
-// Devices returns cached probe results. Pass refresh=true to re-run FFmpeg.
+// Devices returns probed DeckLink outputs. Capture inputs are separate instances —
+// they are not marked busy here (8in/8out is supported).
 func (m *Manager) Devices(refresh bool) ([]Device, error) {
 	if refresh {
 		return m.devCache.refresh(m.ffmpegBin)
 	}
-	return m.devCache.get(m.ffmpegBin, 60*time.Second)
+	return m.devCache.get(m.ffmpegBin, 5*time.Minute)
 }

@@ -404,9 +404,12 @@ export interface PlayoutFormat {
 }
 
 export interface PlayoutDevice {
-  name: string;
+  name: string; // unique sink id for FFmpeg
+  label?: string; // display name
   formats: PlayoutFormat[];
   probe_log?: string;
+  busy?: boolean;
+  busy_reason?: string;
 }
 
 export interface PlayoutClient {

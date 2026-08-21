@@ -340,6 +340,8 @@ export interface SrtInfo {
   latency_ms: number;
   publish_url: string;
   error?: string;
+  bitrate_kbps?: number;
+  sending?: boolean;
 }
 
 export type SrtUpdateInput = {

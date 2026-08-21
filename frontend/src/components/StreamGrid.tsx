@@ -267,6 +267,16 @@ export default function StreamGrid() {
                   {isRecording && !isEncoding && (
                     <div className="rec-badge starting">STARTING…</div>
                   )}
+                  {srtOn && (
+                    <div
+                      className={`stream-badge${srtById[s.id]?.sending ? "" : " waiting"}`}
+                      title={srtById[s.id]?.publish_url || "SRT streaming"}
+                    >
+                      {srtById[s.id]?.sending
+                        ? `STREAM · ${formatBitrate(srtById[s.id]?.bitrate_kbps)}`
+                        : "STREAM · waiting"}
+                    </div>
+                  )}
                 </div>
                 <div
                   className="audio-meter"

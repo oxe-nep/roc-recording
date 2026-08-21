@@ -1,12 +1,15 @@
 package srt
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,15 +33,18 @@ const (
 )
 
 type channelState struct {
-	mu         sync.Mutex
-	status     Status
-	mode       Mode
-	port       int    // listener bind port
-	target     string // caller destination host:port or full srt:// URL
-	passphrase string
-	latencyMS  int
-	cmd        *exec.Cmd
-	lastError  string
+	mu          sync.Mutex
+	status      Status
+	mode        Mode
+	port        int    // listener bind port
+	target      string // caller destination host:port or full srt:// URL
+	passphrase  string
+	latencyMS   int
+	cmd         *exec.Cmd
+	stopCh      chan struct{}
+	lastError   string
+	bitrateKbps float64
+	sending     bool // true once FFmpeg reports real output bitrate (client connected)
 }
 
 type Manager struct {
@@ -51,16 +57,18 @@ type Manager struct {
 }
 
 type ChannelInfo struct {
-	ID         int    `json:"id"`
-	Status     Status `json:"status"`
-	Mode       Mode   `json:"mode"`
-	Port       int    `json:"port"`
-	Target     string `json:"target"`
-	Passphrase string `json:"passphrase,omitempty"` // only returned if set (masked in API)
-	HasPass    bool   `json:"has_passphrase"`
-	LatencyMS  int    `json:"latency_ms"`
-	PublishURL string `json:"publish_url"`
-	Error      string `json:"error,omitempty"`
+	ID          int     `json:"id"`
+	Status      Status  `json:"status"`
+	Mode        Mode    `json:"mode"`
+	Port        int     `json:"port"`
+	Target      string  `json:"target"`
+	Passphrase  string  `json:"passphrase,omitempty"` // only returned if set (masked in API)
+	HasPass     bool    `json:"has_passphrase"`
+	LatencyMS   int     `json:"latency_ms"`
+	PublishURL  string  `json:"publish_url"`
+	Error       string  `json:"error,omitempty"`
+	BitrateKbps float64 `json:"bitrate_kbps,omitempty"`
+	Sending     bool    `json:"sending"`
 }
 
 type settingsFile struct {
@@ -242,14 +250,16 @@ func (m *Manager) Get(id int) (ChannelInfo, error) {
 
 func (m *Manager) buildInfo(id int, st *channelState) ChannelInfo {
 	info := ChannelInfo{
-		ID:        id,
-		Status:    st.status,
-		Mode:      st.mode,
-		Port:      st.port,
-		Target:    st.target,
-		HasPass:   st.passphrase != "",
-		LatencyMS: st.latencyMS,
-		Error:     st.lastError,
+		ID:          id,
+		Status:      st.status,
+		Mode:        st.mode,
+		Port:        st.port,
+		Target:      st.target,
+		HasPass:     st.passphrase != "",
+		LatencyMS:   st.latencyMS,
+		Error:       st.lastError,
+		BitrateKbps: st.bitrateKbps,
+		Sending:     st.sending && st.status == StatusStreaming,
 	}
 	info.PublishURL = m.publishURL(st)
 	// Don't include passphrase in publish URL for API responses shown in UI logs —
@@ -348,62 +358,191 @@ func (m *Manager) Start(id int) (ChannelInfo, error) {
 	if !ok || status != capture.StatusRunning {
 		return ChannelInfo{}, fmt.Errorf("channel must be running before SRT can start")
 	}
-	feedURL, ok := m.captureMgr.FeedURL(id)
-	if !ok {
+	if _, ok := m.captureMgr.FeedURL(id); !ok {
 		return ChannelInfo{}, fmt.Errorf("channel %d has no feed url", id)
 	}
 
 	st.mu.Lock()
-	defer st.mu.Unlock()
 	if st.status == StatusStreaming {
+		st.mu.Unlock()
 		return ChannelInfo{}, fmt.Errorf("channel %d SRT already streaming", id)
 	}
-
-	outURL, err := m.outputURL(st)
-	if err != nil {
+	if _, err := m.outputURL(st); err != nil {
+		st.mu.Unlock()
 		return ChannelInfo{}, err
 	}
 
-	// Remux master UDP TS → SRT (no second encode).
-	args := []string{
-		"-hide_banner",
-		"-loglevel", "warning",
-		"-fflags", "+genpts+discardcorrupt",
-		"-f", "mpegts",
-		"-i", feedURL,
-		"-map", "0:v:0",
-		"-map", "0:a:0?",
-		"-c", "copy",
-		"-f", "mpegts",
-		outURL,
-	}
-	cmd := exec.Command(m.ffmpegBin, args...)
-	if err := cmd.Start(); err != nil {
-		return ChannelInfo{}, fmt.Errorf("start srt ffmpeg: %w", err)
-	}
-
-	st.cmd = cmd
+	st.stopCh = make(chan struct{})
 	st.status = StatusStreaming
 	st.lastError = ""
-	log.Printf("[srt %d] started %s → %s", id, st.mode, m.publishURL(st))
+	info := m.buildInfo(id, st)
+	st.mu.Unlock()
 
-	go func(chID int, state *channelState, c *exec.Cmd) {
-		err := c.Wait()
-		state.mu.Lock()
-		defer state.mu.Unlock()
-		if state.cmd == c {
-			state.cmd = nil
-			state.status = StatusIdle
+	log.Printf("[srt %d] started %s → %s", id, info.Mode, info.PublishURL)
+	go m.runLoop(id, st)
+	return info, nil
+}
+
+// runLoop keeps FFmpeg remuxing to SRT while the operator has STREAM on.
+// Listener mode exits when a client disconnects — we restart so the endpoint
+// stays published until Stop is called.
+func (m *Manager) runLoop(id int, st *channelState) {
+	const restartDelay = 800 * time.Millisecond
+
+	defer func() {
+		st.mu.Lock()
+		if st.cmd != nil && st.cmd.Process != nil {
+			_ = st.cmd.Process.Kill()
+			st.cmd = nil
+		}
+		st.status = StatusIdle
+		st.stopCh = nil
+		st.bitrateKbps = 0
+		st.sending = false
+		st.mu.Unlock()
+		log.Printf("[srt %d] stopped", id)
+	}()
+
+	for {
+		st.mu.Lock()
+		stopCh := st.stopCh
+		st.mu.Unlock()
+		if stopCh == nil {
+			return
+		}
+
+		select {
+		case <-stopCh:
+			return
+		default:
+		}
+
+		status, ok := m.captureMgr.StatusByID(id)
+		if !ok || status != capture.StatusRunning {
+			st.mu.Lock()
+			st.lastError = "waiting for channel signal"
+			st.mu.Unlock()
+			select {
+			case <-stopCh:
+				return
+			case <-time.After(1 * time.Second):
+			}
+			continue
+		}
+
+		feedURL, ok := m.captureMgr.FeedURL(id)
+		if !ok {
+			select {
+			case <-stopCh:
+				return
+			case <-time.After(1 * time.Second):
+			}
+			continue
+		}
+
+		st.mu.Lock()
+		outURL, err := m.outputURL(st)
+		mode := st.mode
+		if err != nil {
+			st.lastError = err.Error()
+			st.mu.Unlock()
+			select {
+			case <-stopCh:
+				return
+			case <-time.After(2 * time.Second):
+			}
+			continue
+		}
+
+		args := []string{
+			"-hide_banner",
+			"-loglevel", "warning",
+			"-fflags", "+genpts+discardcorrupt",
+			"-f", "mpegts",
+			"-i", feedURL,
+			"-map", "0:v:0",
+			"-map", "0:a:0?",
+			"-c", "copy",
+			"-f", "mpegts",
+			"-progress", "pipe:1",
+			"-nostats",
+			outURL,
+		}
+		cmd := exec.Command(m.ffmpegBin, args...)
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			st.lastError = err.Error()
+			st.mu.Unlock()
+			select {
+			case <-stopCh:
+				return
+			case <-time.After(2 * time.Second):
+			}
+			continue
+		}
+		if err := cmd.Start(); err != nil {
+			st.lastError = err.Error()
+			st.cmd = nil
+			st.bitrateKbps = 0
+			st.sending = false
+			st.mu.Unlock()
+			log.Printf("[srt %d] failed to start ffmpeg: %v", id, err)
+			select {
+			case <-stopCh:
+				return
+			case <-time.After(2 * time.Second):
+			}
+			continue
+		}
+
+		st.cmd = cmd
+		st.lastError = ""
+		st.bitrateKbps = 0
+		st.sending = false
+		st.mu.Unlock()
+		log.Printf("[srt %d] ffmpeg remux running (%s)", id, mode)
+
+		go m.watchProgress(id, st, stdout)
+
+		done := make(chan error, 1)
+		go func() { done <- cmd.Wait() }()
+
+		select {
+		case <-stopCh:
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+			<-done
+			st.mu.Lock()
+			st.cmd = nil
+			st.lastError = ""
+			st.bitrateKbps = 0
+			st.sending = false
+			st.mu.Unlock()
+			return
+		case err := <-done:
+			st.mu.Lock()
+			if st.cmd == cmd {
+				st.cmd = nil
+			}
+			// Client disconnect / feed glitch — keep STREAM on and restart quietly.
+			st.lastError = ""
+			st.bitrateKbps = 0
+			st.sending = false
 			if err != nil {
-				state.lastError = err.Error()
-				log.Printf("[srt %d] ffmpeg exited: %v", chID, err)
+				log.Printf("[srt %d] ffmpeg exited: %v – restarting (client disconnect or feed loss)", id, err)
 			} else {
-				log.Printf("[srt %d] stopped", chID)
+				log.Printf("[srt %d] ffmpeg exited cleanly – restarting", id)
+			}
+			st.mu.Unlock()
+
+			select {
+			case <-stopCh:
+				return
+			case <-time.After(restartDelay):
 			}
 		}
-	}(id, st, cmd)
-
-	return m.buildInfo(id, st), nil
+	}
 }
 
 func (m *Manager) Stop(id int) (ChannelInfo, error) {
@@ -419,13 +558,20 @@ func (m *Manager) Stop(id int) (ChannelInfo, error) {
 		st.mu.Unlock()
 		return ChannelInfo{}, fmt.Errorf("channel %d SRT is not streaming", id)
 	}
+	if st.stopCh != nil {
+		select {
+		case <-st.stopCh:
+		default:
+			close(st.stopCh)
+		}
+	}
 	cmd := st.cmd
 	if cmd != nil && cmd.Process != nil {
 		_ = cmd.Process.Kill()
 	}
 	st.mu.Unlock()
 
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		st.mu.Lock()
 		done := st.status == StatusIdle && st.cmd == nil
@@ -440,6 +586,9 @@ func (m *Manager) Stop(id int) (ChannelInfo, error) {
 	st.mu.Lock()
 	st.cmd = nil
 	st.status = StatusIdle
+	st.stopCh = nil
+	st.bitrateKbps = 0
+	st.sending = false
 	info := m.buildInfo(id, st)
 	st.mu.Unlock()
 	return info, nil
@@ -454,5 +603,63 @@ func (m *Manager) StopAll() {
 	m.mu.RUnlock()
 	for _, id := range ids {
 		_, _ = m.Stop(id)
+	}
+}
+
+var reSrtBitrate = regexp.MustCompile(`(?i)^bitrate=\s*([0-9.]+)([kKmM])?bits/s`)
+
+func (m *Manager) watchProgress(id int, st *channelState, r io.Reader) {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	scanner.Split(func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+		if atEOF && len(data) == 0 {
+			return 0, nil, nil
+		}
+		for i, b := range data {
+			if b == '\n' || b == '\r' {
+				adv := i + 1
+				if b == '\r' && i+1 < len(data) && data[i+1] == '\n' {
+					adv = i + 2
+				}
+				return adv, data[0:i], nil
+			}
+		}
+		if atEOF {
+			return len(data), data, nil
+		}
+		return 0, nil, nil
+	})
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		br, ok := parseSrtBitrate(line)
+		if !ok || br <= 0 {
+			continue
+		}
+		st.mu.Lock()
+		if st.status == StatusStreaming {
+			st.bitrateKbps = br
+			if !st.sending {
+				st.sending = true
+				log.Printf("[srt %d] remux sending (client connected / bitrate reported)", id)
+			}
+		}
+		st.mu.Unlock()
+	}
+}
+
+func parseSrtBitrate(line string) (kbps float64, ok bool) {
+	mm := reSrtBitrate.FindStringSubmatch(line)
+	if mm == nil {
+		return 0, false
+	}
+	val, err := strconv.ParseFloat(mm[1], 64)
+	if err != nil {
+		return 0, false
+	}
+	switch strings.ToLower(mm[2]) {
+	case "m":
+		return val * 1000, true
+	default:
+		return val, true
 	}
 }

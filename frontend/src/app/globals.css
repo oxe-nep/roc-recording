@@ -220,6 +220,27 @@ body {
   color: #1a1208;
 }
 
+.stream-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(12, 14, 18, 0.78);
+  color: #9ec9ef;
+  font-size: 0.64rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 3px 7px;
+  border-radius: 4px;
+  pointer-events: none;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid rgba(91, 159, 212, 0.35);
+}
+
+.stream-badge.waiting {
+  color: #c8d0da;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
 .compact-header h1 {
   font-size: 1.25rem;
   font-weight: 600;
@@ -837,7 +858,6 @@ body {
   background: rgba(200, 30, 30, 0.92);
   color: #fff;
   box-shadow: 0 0 10px rgba(231, 76, 60, 0.45);
-  animation: rec-pulse 1.4s ease-in-out infinite;
 }
 
 .rec-btn.recording:hover:not(:disabled) {
@@ -881,21 +901,10 @@ body {
   background: rgba(46, 125, 160, 0.92);
   color: #fff;
   box-shadow: 0 0 10px rgba(46, 125, 160, 0.4);
-  animation: stream-pulse 1.4s ease-in-out infinite;
 }
 
 .stream-btn.streaming:hover:not(:disabled) {
   background: rgba(37, 106, 136, 0.98);
-}
-
-@keyframes stream-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
-}
-
-@keyframes rec-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
 }
 
 .global-rec-bar {
@@ -927,12 +936,10 @@ body {
 .global-rec-btn.recording {
   background: rgba(231, 76, 60, 0.2);
   color: #ff6b6b;
-  animation: rec-pulse 1.4s ease-in-out infinite;
 }
 
 .global-rec-btn.recording:hover {
   background: rgba(231, 76, 60, 0.35);
-  animation: none;
 }
 
 .files-btn {

@@ -73,6 +73,21 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 		w.Header().Set("Cache-Control", "no-cache, no-store")
 		jsonOK(w, map[string]float64{"l": l, "r": r2})
 	})
+	r.Get("/audio/playout/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.Atoi(chi.URLParam(r, "id"))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		l, r2, ok := playMgr.AudioLevels(id)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
+		w.Header().Set("Cache-Control", "no-cache, no-store")
+		jsonOK(w, map[string]float64{"l": l, "r": r2})
+	})
 	r.Get("/thumb/{id}", func(w http.ResponseWriter, r *http.Request) {
 		idParam := chi.URLParam(r, "id")
 		id, err := strconv.Atoi(idParam)

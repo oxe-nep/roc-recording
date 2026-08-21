@@ -760,7 +760,8 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	var args []string
 	base := []string{
 		"-hide_banner",
-		"-loglevel", "warning",
+		// info (not warning): ametadata=print peak lines are AV_LOG_INFO and drive UI meters.
+		"-loglevel", "info",
 		"-fflags", "+genpts+discardcorrupt",
 		"-progress", "pipe:1",
 		"-nostats",
@@ -1046,6 +1047,7 @@ func (m *Manager) watchStderr(c *Client, r io.Reader) {
 			log.Printf("[playout %d] %s", c.ID, line)
 			c.appendLog(line)
 		}
+		// ametadata=print may prefix the line; match Peak_level anywhere.
 		if mm := reAstatsPeak.FindStringSubmatch(line); mm != nil {
 			ch, _ := strconv.Atoi(mm[1])
 			val := audioSilence

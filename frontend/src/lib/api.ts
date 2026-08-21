@@ -530,7 +530,8 @@ export async function fetchPlayoutLogs(id: number): Promise<string[]> {
 }
 
 export async function fetchPlayoutAudioLevels(id: number): Promise<AudioLevels> {
-  const res = await apiFetch(`/api/playout/${id}/audio`);
+  // Public path under /audio/ (nginx already proxies it) — same pattern as encode meters.
+  const res = await fetch(`${BASE}/audio/playout/${id}`);
   if (!res.ok) throw new Error(`fetchPlayoutAudioLevels: ${res.status}`);
   return res.json();
 }

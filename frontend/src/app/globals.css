@@ -320,52 +320,33 @@ html {
   color: #e0b860;
 }
 
-.card-tsl-source {
-  display: block;
-  margin-top: 2px;
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: #c8d0da;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.card-tsl-source.on-air {
-  color: #ffb4a8;
-}
-
-.card-meta-tsl {
-  color: #b8c4d0;
-  max-width: 8rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.card-meta-tsl.on-air {
-  color: #ff9a8a;
-}
-
-.card-panel.tsl-on-air {
-  border-color: rgba(231, 76, 60, 0.28);
+.thumb-tsl-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 8px;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 2;
+  padding: 0 10px;
 }
 
 .tsl-badge {
-  position: static;
-  max-width: 100%;
+  max-width: calc(100% - 20px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  background: rgba(16, 20, 26, 0.82);
+  background: rgba(12, 14, 18, 0.82);
   font-size: 0.64rem;
   font-weight: 600;
   letter-spacing: 0.02em;
-  padding: 3px 7px;
+  padding: 3px 10px;
   border-radius: 4px;
   font-variant-numeric: tabular-nums;
-  color: #b8c8d8;
-  border: 1px solid rgba(140, 160, 180, 0.35);
+  color: #d8e0ea;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  text-align: center;
 }
 
 .tsl-badge.on-air {

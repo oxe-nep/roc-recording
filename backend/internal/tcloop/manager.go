@@ -628,9 +628,9 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		)
 	}
 	filter := vbase + ",split=2[vdl][vthumbsrc];" +
-		"[vthumbsrc]scale=640:360,format=yuv420p[vthumb];" +
+		"[vthumbsrc]scale=640:360,format=yuv420p,split=2[vthumbenc][vthumbplay];" +
 		fmt.Sprintf(
-			"[0:a]aformat=channel_layouts=stereo,asplit=3[adeck][ameter][ahls];"+
+			"[0:a]aformat=channel_layouts=stereo,asplit=4[adeck][ameter][ahlse][ahlsd];"+
 				"[adeck]asetnsamples=n=%d:p=0[aout];"+
 				"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none,"+
 				"ametadata=print,anullsink",
@@ -660,21 +660,21 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 	}
 	args = append(args, "-preroll", "0.5", "-f", "decklink", openDevice,
 		// Output #2: encode-side thumbnail
-		"-map", "[vthumb]",
+		"-map", "[vthumbenc]",
 		"-r", "1",
 		"-q:v", "4",
 		"-update", "1",
 		"-f", "image2",
 		encodeThumb,
 		// Output #3: decode-side thumbnail
-		"-map", "[vthumb]",
+		"-map", "[vthumbplay]",
 		"-r", "1",
 		"-q:v", "4",
 		"-update", "1",
 		"-f", "image2",
 		playoutThumb,
 		// Output #4: encode-side HLS audio
-		"-map", "[ahls]",
+		"-map", "[ahlse]",
 		"-c:a", "aac",
 		"-b:a", "128k",
 		"-ar", "48000",
@@ -686,7 +686,7 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		"-hls_segment_filename", encodeAudioSeg,
 		encodeAudioPlaylist,
 		// Output #5: decode-side HLS audio
-		"-map", "[ahls]",
+		"-map", "[ahlsd]",
 		"-c:a", "aac",
 		"-b:a", "128k",
 		"-ar", "48000",
@@ -824,23 +824,32 @@ func isFilterConfigError(msg string) bool {
 	lower := strings.ToLower(msg)
 	return strings.Contains(lower, "error parsing") ||
 		strings.Contains(lower, "no option name") ||
-		strings.Contains(lower, "invalid argument") && strings.Contains(lower, "filter")
+		strings.Contains(lower, "filter graph") ||
+		strings.Contains(lower, "does not exist in any defined filter") ||
+		(strings.Contains(lower, "invalid argument") && strings.Contains(lower, "filter"))
 }
 
 func isDeckLinkOpenFailure(lines []string) bool {
 	for _, line := range lines {
 		lower := strings.ToLower(line)
-		if strings.Contains(lower, "error parsing") || strings.Contains(lower, "no option name") {
+		if strings.Contains(lower, "error parsing") ||
+			strings.Contains(lower, "no option name") ||
+			strings.Contains(lower, "filter graph") ||
+			strings.Contains(lower, "does not exist in any defined filter") {
 			return false
 		}
 	}
 	for _, line := range lines {
 		lower := strings.ToLower(line)
+		if strings.Contains(lower, "error opening output file") ||
+			strings.Contains(lower, "error opening output files") {
+			continue
+		}
 		if strings.Contains(lower, "decklink") ||
 			strings.Contains(lower, "no such device") ||
 			strings.Contains(lower, "device or resource busy") ||
 			strings.Contains(lower, "could not write header") ||
-			strings.Contains(lower, "error opening") {
+			strings.Contains(lower, "error opening input") {
 			return true
 		}
 	}

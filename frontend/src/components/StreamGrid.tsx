@@ -304,23 +304,24 @@ export default function StreamGrid() {
           return (
             <div
               key={s.id}
-              className={`card-panel ${s.status}${tcOn ? " tc-active" : ""}${tcLive ? " tc-live" : ""}${tslOnAir ? " tsl-on-air" : ""}`}
+              className={`card-panel ${s.status}${tcOn ? " tc-active" : ""}${tcLive ? " tc-live" : ""}`}
             >
               <AudioMonitor id={s.id} active={hasSignal || tcLive} listening={isListening} />
               <div className="card-stage">
                 <div className="card-thumb">
                   <Thumbnail id={s.id} active={captureOn || tcLive} />
-                  {(isRecording || srtOn || tcOn || tslText) && (
+                  {tslText && (
+                    <div className="thumb-tsl-overlay">
+                      <div
+                        className={`tsl-badge${tslOnAir ? " on-air" : ""}`}
+                        title={`TSL ${s.tsl_index ?? s.id}${tslOnAir ? " · on air" : ""}`}
+                      >
+                        {tslText}
+                      </div>
+                    </div>
+                  )}
+                  {(isRecording || srtOn || tcOn) && (
                     <div className="thumb-badges">
-                      {tslText && (
-                        <div
-                          className={`tsl-badge${tslOnAir ? " on-air" : ""}`}
-                          title={`TSL ${s.tsl_index ?? s.id}${tslOnAir ? " · on air" : ""}`}
-                        >
-                          {tslOnAir ? "ON AIR · " : "SRC · "}
-                          {tslText}
-                        </div>
-                      )}
                       {tcBadge && (
                         <div
                           className={`tc-badge${tc?.status === "error" ? " error" : tcLive ? "" : " starting"}`}
@@ -372,19 +373,10 @@ export default function StreamGrid() {
                       <span className="card-name" title={rec?.name || `ch${s.id}`}>
                         {rec?.name || `ch${s.id}`}
                       </span>
-                      {tslText && (
-                        <span
-                          className={`card-tsl-source${tslOnAir ? " on-air" : ""}`}
-                          title={`TSL index ${s.tsl_index ?? s.id}`}
-                        >
-                          {tslText}
-                        </span>
-                      )}
                     </div>
                     <div
                       className="card-meta"
                       title={[
-                        tslText ? `Source: ${tslText}` : null,
                         s.format || (s.status === "waiting" ? "Waiting for signal" : null),
                         cat === "_unsorted" ? "Unsorted" : cat,
                         activePreset?.label || s.encode_preset || null,
@@ -414,14 +406,6 @@ export default function StreamGrid() {
                         <>
                           <span className="card-meta-sep">·</span>
                           <span className="card-meta-item card-meta-tc">TC burn-in</span>
-                        </>
-                      )}
-                      {tslText && (
-                        <>
-                          <span className="card-meta-sep">·</span>
-                          <span className={`card-meta-item card-meta-tsl${tslOnAir ? " on-air" : ""}`}>
-                            {tslText}
-                          </span>
                         </>
                       )}
                     </div>

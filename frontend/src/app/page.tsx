@@ -38,7 +38,7 @@ export default function Home() {
             className="header-library-link header-link-btn"
             onClick={() => setLibraryOpen(true)}
           >
-            Recordings
+            Media Library
           </button>
           <button
             type="button"

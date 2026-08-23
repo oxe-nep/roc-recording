@@ -1,20 +1,26 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createLibraryCategory,
   deleteLibraryCategory,
   deleteLibraryFile,
+  deletePlayoutMedia,
   fetchLibraryCategories,
   fetchLibraryFiles,
+  fetchPlayoutMedia,
   fetchRecordingsPath,
   libraryFileURL,
   moveLibraryFile,
   renameLibraryCategory,
+  uploadPlayoutMedia,
   type LibraryCategory,
   type LibraryFile,
+  type PlayoutMediaItem,
 } from "@/lib/api";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
+
+const UPLOADS_SECTION = "__uploads__";
 
 type Props = {
   open: boolean;
@@ -24,29 +30,43 @@ type Props = {
   onPick?: (file: LibraryFile) => void;
 };
 
+function formatUploadSize(n: number): string {
+  if (n >= 1 << 30) return `${(n / (1 << 30)).toFixed(1)} GB`;
+  if (n >= 1 << 20) return `${(n / (1 << 20)).toFixed(1)} MB`;
+  if (n >= 1 << 10) return `${(n / (1 << 10)).toFixed(0)} KB`;
+  return `${n} B`;
+}
+
 export default function LibraryModal({ open, onClose, pickMode, onPick }: Props) {
   const [categories, setCategories] = useState<LibraryCategory[]>([]);
   const [files, setFiles] = useState<LibraryFile[]>([]);
+  const [uploads, setUploads] = useState<PlayoutMediaItem[]>([]);
   const [selectedCat, setSelectedCat] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [uploadBusy, setUploadBusy] = useState(false);
   const [newCat, setNewCat] = useState("");
   const [storagePath, setStoragePath] = useState("");
   const [playerURL, setPlayerURL] = useState<string | null>(null);
   const [playingKey, setPlayingKey] = useState<string | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
 
   useBodyScrollLock(open);
 
+  const showingUploads = !pickMode && selectedCat === UPLOADS_SECTION;
+
   const load = useCallback(async () => {
     try {
-      const [cats, list, path] = await Promise.all([
+      const [cats, list, path, media] = await Promise.all([
         fetchLibraryCategories(),
-        fetchLibraryFiles(selectedCat || undefined),
+        fetchLibraryFiles(selectedCat && selectedCat !== UPLOADS_SECTION ? selectedCat : undefined),
         fetchRecordingsPath(),
+        fetchPlayoutMedia(),
       ]);
       setCategories(cats);
       setFiles(list);
+      setUploads(media);
       setStoragePath(path);
       setError(null);
     } catch (e) {
@@ -74,18 +94,18 @@ export default function LibraryModal({ open, onClose, pickMode, onPick }: Props)
     if (open) return;
     setPlayerURL(null);
     setPlayingKey(null);
-    // Ensure channel category dropdowns pick up creates/renames done in the modal.
-    window.dispatchEvent(new Event("roc-library-changed"));
+    setSelectedCat("");
+    notifyLibraryChanged();
   }, [open]);
 
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && !uploadBusy) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, uploadBusy]);
 
   if (!open) return null;
 
@@ -177,35 +197,93 @@ export default function LibraryModal({ open, onClose, pickMode, onPick }: Props)
     }
   };
 
+  const onUpload = async (file: File | null) => {
+    if (!file) return;
+    setUploadBusy(true);
+    setError(null);
+    try {
+      await uploadPlayoutMedia(file);
+      setSelectedCat(UPLOADS_SECTION);
+      await load();
+      notifyLibraryChanged();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setUploadBusy(false);
+      if (uploadInputRef.current) uploadInputRef.current.value = "";
+    }
+  };
+
+  const removeUpload = async (id: string, name: string) => {
+    if (!window.confirm(`Delete “${name}” from uploads?`)) return;
+    setBusyKey(id);
+    try {
+      await deletePlayoutMedia(id);
+      await load();
+      notifyLibraryChanged();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const modalTitle = pickMode ? "Select recording" : "Media Library";
+
   return (
-    <div className="modal-backdrop library-backdrop" onClick={onClose} role="presentation">
+    <div className="modal-backdrop library-backdrop" onClick={() => !uploadBusy && onClose()} role="presentation">
       <div
         className="modal-panel library-modal"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
-        aria-label={pickMode ? "Select recording" : "Recordings library"}
+        aria-label={modalTitle}
       >
         <div className="modal-header">
-          <h2>{pickMode ? "Select recording" : "Recordings library"}</h2>
+          <h2>{modalTitle}</h2>
           <div className="library-modal-header-actions">
-            <button type="button" className="badge files-btn" onClick={load} disabled={loading}>
+            {!pickMode && (
+              <>
+                <input
+                  ref={uploadInputRef}
+                  type="file"
+                  accept=".mp4,.mov,.mkv,.mxf,.ts,video/*"
+                  hidden
+                  onChange={(e) => onUpload(e.target.files?.[0] ?? null)}
+                />
+                <button
+                  type="button"
+                  className="global-rec-btn"
+                  disabled={loading || uploadBusy}
+                  onClick={() => uploadInputRef.current?.click()}
+                >
+                  {uploadBusy ? "…" : "Upload"}
+                </button>
+              </>
+            )}
+            <button type="button" className="badge files-btn" onClick={load} disabled={loading || uploadBusy}>
               {loading ? "…" : "Refresh"}
             </button>
-            <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
+            <button type="button" className="modal-close" onClick={onClose} aria-label="Close" disabled={uploadBusy}>
               ×
             </button>
           </div>
         </div>
 
-        {!pickMode && storagePath && (
-        <p className="library-path-note" title={storagePath}>
-          Storage: {storagePath}
-        </p>
+        {!pickMode && !showingUploads && storagePath && (
+          <p className="library-path-note" title={storagePath}>
+            Recordings storage: {storagePath}
+          </p>
+        )}
+
+        {!pickMode && showingUploads && (
+          <p className="library-path-note">
+            External files for decode File mode. Supported: mp4, mov, mkv, mxf, ts.
+          </p>
         )}
 
         {error && <div className="error-message">{error}</div>}
 
-        <div className="library-layout">
+        <div className={`library-layout${showingUploads ? " library-layout-uploads" : ""}`}>
           <aside className="library-sidebar">
             <div className="library-sidebar-title">Categories</div>
             <button
@@ -213,7 +291,7 @@ export default function LibraryModal({ open, onClose, pickMode, onPick }: Props)
               className={`library-cat ${selectedCat === "" ? "active" : ""}`}
               onClick={() => setSelectedCat("")}
             >
-              All
+              All recordings
             </button>
             {categories.map((c) => (
               <div key={c.name} className="library-cat-row">
@@ -237,23 +315,58 @@ export default function LibraryModal({ open, onClose, pickMode, onPick }: Props)
                 )}
               </div>
             ))}
-            <div className="library-new-cat">
-              <input
-                value={newCat}
-                onChange={(e) => setNewCat(e.target.value)}
-                placeholder="New category"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") addCategory();
-                }}
-              />
-              <button type="button" className="badge files-btn" onClick={addCategory}>
-                Add
+            {!pickMode && (
+              <button
+                type="button"
+                className={`library-cat ${showingUploads ? "active" : ""}`}
+                onClick={() => setSelectedCat(UPLOADS_SECTION)}
+              >
+                <span>Uploads</span>
+                <span className="library-cat-count">{uploads.length}</span>
               </button>
-            </div>
+            )}
+            {!pickMode && (
+              <div className="library-new-cat">
+                <input
+                  value={newCat}
+                  onChange={(e) => setNewCat(e.target.value)}
+                  placeholder="New category"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") addCategory();
+                  }}
+                />
+                <button type="button" className="badge files-btn" onClick={addCategory}>
+                  Add
+                </button>
+              </div>
+            )}
           </aside>
 
           <div className="recordings-list">
-            {files.length === 0 ? (
+            {showingUploads ? (
+              uploads.length === 0 ? (
+                <div className="files-empty">No uploaded files yet.</div>
+              ) : (
+                uploads.map((it) => (
+                  <div key={it.id} className="recording-row">
+                    <div className="recording-meta">
+                      <div className="recording-name">{it.name}</div>
+                      <div className="recording-sub">Upload · {formatUploadSize(it.size)}</div>
+                    </div>
+                    <div className="recording-actions">
+                      <button
+                        type="button"
+                        className="badge delete-btn"
+                        disabled={busyKey === it.id || uploadBusy}
+                        onClick={() => removeUpload(it.id, it.name)}
+                      >
+                        {busyKey === it.id ? "…" : "Delete"}
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )
+            ) : files.length === 0 ? (
               <div className="files-empty">No recordings found.</div>
             ) : (
               files.map((f) => {
@@ -282,39 +395,39 @@ export default function LibraryModal({ open, onClose, pickMode, onPick }: Props)
                         </button>
                       ) : (
                         <>
-                      <select
-                        className="encode-preset-select"
-                        value=""
-                        disabled={busyKey === key}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          e.target.value = "";
-                          if (v) moveFile(f, v);
-                        }}
-                        title="Move to category"
-                      >
-                        <option value="">Move…</option>
-                        {categories
-                          .filter((c) => c.name !== f.category)
-                          .map((c) => (
-                            <option key={c.name} value={c.name}>
-                              {c.name === "_unsorted" ? "Unsorted" : c.name}
-                            </option>
-                          ))}
-                      </select>
-                      <button
-                        className="badge files-btn"
-                        onClick={() => playFile(f)}
-                        disabled={busyKey === key}
-                      >
-                        {busyKey === key ? "…" : "Play"}
-                      </button>
-                      <button className="badge" onClick={() => downloadFile(f)} disabled={busyKey === key}>
-                        Download
-                      </button>
-                      <button className="badge delete-btn" onClick={() => removeFile(f)} disabled={busyKey === key}>
-                        Delete
-                      </button>
+                          <select
+                            className="encode-preset-select"
+                            value=""
+                            disabled={busyKey === key}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              e.target.value = "";
+                              if (v) moveFile(f, v);
+                            }}
+                            title="Move to category"
+                          >
+                            <option value="">Move…</option>
+                            {categories
+                              .filter((c) => c.name !== f.category)
+                              .map((c) => (
+                                <option key={c.name} value={c.name}>
+                                  {c.name === "_unsorted" ? "Unsorted" : c.name}
+                                </option>
+                              ))}
+                          </select>
+                          <button
+                            className="badge files-btn"
+                            onClick={() => playFile(f)}
+                            disabled={busyKey === key}
+                          >
+                            {busyKey === key ? "…" : "Play"}
+                          </button>
+                          <button className="badge" onClick={() => downloadFile(f)} disabled={busyKey === key}>
+                            Download
+                          </button>
+                          <button className="badge delete-btn" onClick={() => removeFile(f)} disabled={busyKey === key}>
+                            Delete
+                          </button>
                         </>
                       )}
                     </div>
@@ -324,14 +437,14 @@ export default function LibraryModal({ open, onClose, pickMode, onPick }: Props)
             )}
           </div>
 
-          {!pickMode && (
-          <div className="recordings-player-wrap">
-            {playerURL ? (
-              <video className="recordings-player" controls autoPlay src={playerURL} />
-            ) : (
-              <div className="files-empty">Select a file to play.</div>
-            )}
-          </div>
+          {!pickMode && !showingUploads && (
+            <div className="recordings-player-wrap">
+              {playerURL ? (
+                <video className="recordings-player" controls autoPlay src={playerURL} />
+              ) : (
+                <div className="files-empty">Select a file to play.</div>
+              )}
+            </div>
           )}
         </div>
       </div>

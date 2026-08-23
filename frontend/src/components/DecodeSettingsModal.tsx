@@ -98,6 +98,17 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
   }, [open, client, channelId]);
 
   useEffect(() => {
+    if (!open) return;
+    const onLibraryChanged = () => {
+      fetchPlayoutMedia()
+        .then(setMedia)
+        .catch(() => {});
+    };
+    window.addEventListener("roc-library-changed", onLibraryChanged);
+    return () => window.removeEventListener("roc-library-changed", onLibraryChanged);
+  }, [open]);
+
+  useEffect(() => {
     if (!open || channelId == null || !logsOpen) return;
     let alive = true;
     const tick = async () => {
@@ -321,7 +332,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                       disabled={busy || active}
                       onClick={() => setLibraryOpen(true)}
                     >
-                      Browse recordings…
+                      Browse library…
                     </button>
                     {media.length > 0 && (
                       <select

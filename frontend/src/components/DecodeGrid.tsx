@@ -17,7 +17,6 @@ import { useWorkflows } from "@/hooks/useWorkflows";
 import { useDashboard } from "@/hooks/useDashboard";
 import HlsPreview from "@/components/HlsPreview";
 import DecodeSettingsModal from "@/components/DecodeSettingsModal";
-import MediaLibraryModal from "@/components/MediaLibraryModal";
 
 function formatBitrate(kbps?: number): string {
   if (!kbps || kbps <= 0) return "--";
@@ -120,7 +119,6 @@ export default function DecodeGrid() {
   const [busy, setBusy] = useState<Record<number, boolean>>({});
   const [listening, setListening] = useState<Record<number, boolean>>({});
   const [settingsId, setSettingsId] = useState<number | null>(null);
-  const [mediaOpen, setMediaOpen] = useState(false);
   const { workflows } = useWorkflows();
 
   const withBusy = async (id: number, fn: () => Promise<unknown>) => {
@@ -155,9 +153,6 @@ export default function DecodeGrid() {
     <section className="io-section">
       <div className="io-section-head">
         <h2 className="io-section-title">Decode</h2>
-        <button type="button" className="badge" onClick={() => setMediaOpen(true)}>
-          Media
-        </button>
       </div>
 
       {error && (
@@ -331,7 +326,6 @@ export default function DecodeGrid() {
         onClose={() => setSettingsId(null)}
         onSaved={() => {}}
       />
-      <MediaLibraryModal open={mediaOpen} onClose={() => setMediaOpen(false)} />
     </section>
   );
 }

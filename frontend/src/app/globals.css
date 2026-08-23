@@ -370,14 +370,6 @@ html {
   min-width: 0;
 }
 
-.header-product-title {
-  font-size: 1.05rem;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  color: var(--text-primary);
-  white-space: nowrap;
-}
-
 .header-actions {
   display: flex;
   align-items: center;

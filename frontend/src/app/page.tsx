@@ -33,7 +33,6 @@ export default function Home() {
       <header className="compact-header">
         <div className="header-brand">
           <img src="/nep-logo.svg" alt="NEP" className="nep-logo" />
-          <h1 className="header-product-title">ROC Recording</h1>
         </div>
         <div className="header-actions">
           <SystemStatus />

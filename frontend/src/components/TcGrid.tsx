@@ -113,6 +113,13 @@ export default function TcGrid() {
               const tcLive = tcPreviewHasSignal(tc);
               const isListening = !!listening[s.id];
               const tslText = s.tsl_text?.trim();
+              const numClass = tcLive
+                ? "running"
+                : tc?.status === "error"
+                  ? "error"
+                  : tcOn
+                    ? "waiting"
+                    : "stopped";
               return (
                 <div
                   key={s.id}
@@ -143,7 +150,7 @@ export default function TcGrid() {
                   <div className="card-footer">
                     <div className="card-top">
                       <div className="card-identity">
-                        <span className={`card-channel-num ${s.status}`}>{s.id}</span>
+                        <span className={`card-channel-num ${numClass}`}>{s.id}</span>
                         <div className="card-identity-text">
                           <span className="card-name">TC</span>
                           <div

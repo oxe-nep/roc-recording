@@ -165,16 +165,21 @@ export default function ChannelSettingsModal({
         await setEncodePreset(stream.id, preset);
       }
 
-      // Always restart an active capture so encode takes effect now.
+      // Restart active capture so encode takes effect; start if stopped
+      // (e.g. after TC → Encode workflow switch left the channel off).
+      try {
+        await stopSrt(stream.id);
+      } catch {
+        // ignore if SRT was not running
+      }
       if (captureOn) {
         try {
-          await stopSrt(stream.id);
+          await stopStream(stream.id);
         } catch {
-          // ignore if SRT was not running
+          // already stopped
         }
-        await stopStream(stream.id);
-        await startStream(stream.id);
       }
+      await startStream(stream.id);
 
       onSaved();
       onClose();

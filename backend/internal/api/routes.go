@@ -649,14 +649,33 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 			if tcMgr != nil {
 				leavingTC := prev.Mode == workflow.ModeTC && cfg.Mode != workflow.ModeTC
 				enteringTC := cfg.Mode == workflow.ModeTC && prev.Mode != workflow.ModeTC
-				tcActive := tcMgr.IsEnabled(id) || tcMgr.IsRunning(id)
 
-				if leavingTC && tcActive {
-					disabled := false
-					if _, err := tcMgr.Update(id, tcloop.UpdateInput{Enabled: &disabled}); err != nil {
-						log.Printf("[workflow] channel %d: stop TC: %v", id, err)
-					} else if err := mgr.Start(id); err != nil {
-						log.Printf("[workflow] channel %d: restart encode after TC: %v", id, err)
+				if leavingTC {
+					if tcMgr.IsEnabled(id) || tcMgr.IsRunning(id) {
+						disabled := false
+						if _, err := tcMgr.Update(id, tcloop.UpdateInput{Enabled: &disabled}); err != nil {
+							log.Printf("[workflow] channel %d: stop TC: %v", id, err)
+						}
+					}
+					// Always restore encode for pair mode. Previously we only started
+					// when TC was still active — if TC was already Off, capture stayed
+					// stopped with no UI path to recover.
+					var startErr error
+					for attempt := 0; attempt < 3; attempt++ {
+						if mgr.IsActive(id) {
+							startErr = nil
+							break
+						}
+						startErr = mgr.Start(id)
+						if startErr == nil {
+							break
+						}
+						log.Printf("[workflow] channel %d: start encode after TC (attempt %d): %v",
+							id, attempt+1, startErr)
+						time.Sleep(2 * time.Second)
+					}
+					if startErr != nil {
+						log.Printf("[workflow] channel %d: failed to restart encode after TC: %v", id, startErr)
 					} else if runtimeStore != nil {
 						runtimeStore.SetCapture(id, true)
 					}

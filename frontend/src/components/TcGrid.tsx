@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { updateTcLoop } from "@/lib/api";
-import { tcIsActive, tcPreviewHasSignal, tcSourceLabel, tcSourceShort } from "@/lib/tcUi";
+import { tcCardStatusMeta, tcIsActive, tcPreviewHasSignal, tcSourceLabel } from "@/lib/tcUi";
 import { showTcCard } from "@/lib/workflow";
 import { sortByChannelId } from "@/lib/sortChannels";
 import { useWorkflows } from "@/hooks/useWorkflows";
@@ -45,19 +45,6 @@ function SegmentedMeter({ db, label }: { db?: number; label: string }) {
       <span className="audio-label">{label}</span>
     </div>
   );
-}
-
-function statusMeta(tc?: TcLoopInfo, live?: boolean): string {
-  const code = tc?.timecode?.trim();
-  if (code && code !== "--:--:--") {
-    if (live) return code;
-    if (tcIsActive(tc)) return code;
-  }
-  if (live) return `Live · ${tcSourceShort(tc?.source)}`;
-  if (tc?.status === "restarting") return "Starting…";
-  if (tc?.status === "error") return "Error";
-  if (tcIsActive(tc)) return "Starting…";
-  return "Off";
 }
 
 export default function TcGrid() {
@@ -146,16 +133,6 @@ export default function TcGrid() {
                           </div>
                         </div>
                       )}
-                      {tcOn && !tcLive && (
-                        <div className="thumb-badges">
-                          <div
-                            className={`tc-badge${tc?.status === "error" ? " error" : " starting"}`}
-                            title={tcSourceLabel(tc?.source, tc?.udp_port, s.id)}
-                          >
-                            {tc?.status === "error" ? "Error" : "Starting…"}
-                          </div>
-                        </div>
-                      )}
                     </div>
                     <div className="audio-meter">
                       <SegmentedMeter label="L" db={audio[s.id]?.l} />
@@ -174,7 +151,7 @@ export default function TcGrid() {
                           className="card-meta"
                           title={tcOn ? tcSourceLabel(tc?.source, tc?.udp_port, s.id) : undefined}
                         >
-                          <span className="card-meta-item card-meta-tc">{statusMeta(tc, tcLive)}</span>
+                          <span className="card-meta-item card-meta-tc">{tcCardStatusMeta(tc, tcLive)}</span>
                         </div>
                       </div>
                       <div className="card-actions">

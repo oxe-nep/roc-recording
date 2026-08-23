@@ -8,6 +8,27 @@ export function tcSourceShort(source?: TcLoopSource): string {
   return source === "external" ? "UDP" : "TOD";
 }
 
+/** Compact source label for card status (before timecode). */
+export function tcSourceStatusLabel(source?: TcLoopSource): string {
+  return source === "external" ? "UDP TC" : "Time of day";
+}
+
+/** Card footer status: source prefix + timecode / state. */
+export function tcCardStatusMeta(tc?: TcLoopInfo, live?: boolean): string {
+  const src = tcSourceStatusLabel(tc?.source);
+  const code = tc?.timecode?.trim();
+  const hasCode = !!code && code !== "--:--:--";
+
+  if (live && hasCode) return `${src} · ${code}`;
+  if (hasCode && tcIsActive(tc)) return `${src} · ${code}`;
+
+  if (live) return `${src} · Live`;
+  if (tc?.status === "restarting") return `${src} · Starting…`;
+  if (tc?.status === "error") return `${src} · Error`;
+  if (tcIsActive(tc)) return `${src} · Starting…`;
+  return "Off";
+}
+
 export function tcSourceLabel(
   source?: TcLoopSource,
   udpPort?: number,

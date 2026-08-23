@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -523,6 +524,7 @@ func (m *Manager) List() []ClientInfo {
 		out = append(out, m.infoLocked(c))
 		c.mu.Unlock()
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
 

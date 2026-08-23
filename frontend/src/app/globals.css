@@ -419,7 +419,7 @@ html {
   border: 1px solid var(--border-subtle);
   border-radius: var(--border-radius);
   overflow: hidden;
-  transition: var(--transition);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
   display: flex;
   flex-direction: column;
 }
@@ -472,6 +472,13 @@ html {
 
 .card-thumb video.hls-preview {
   background: #000;
+}
+
+.card-thumb video.hls-preview-off {
+  visibility: hidden;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
 }
 
 .card-thumb img.thumb-hidden {

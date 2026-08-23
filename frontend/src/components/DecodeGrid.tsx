@@ -12,6 +12,7 @@ import {
   type PlayoutClient,
 } from "@/lib/api";
 import { showDecodeCard } from "@/lib/workflow";
+import { sortByChannelId } from "@/lib/sortChannels";
 import { useWorkflows } from "@/hooks/useWorkflows";
 import { useDashboard } from "@/hooks/useDashboard";
 import HlsPreview from "@/components/HlsPreview";
@@ -144,7 +145,7 @@ export default function DecodeGrid() {
   };
 
   const settingsClient = settingsId != null ? clients.find((c) => c.id === settingsId) ?? null : null;
-  const visibleClients = clients.filter((c) => showDecodeCard(workflows, c.id));
+  const visibleClients = sortByChannelId(clients.filter((c) => showDecodeCard(workflows, c.id)));
 
   if (!loading && visibleClients.length === 0) {
     return null;

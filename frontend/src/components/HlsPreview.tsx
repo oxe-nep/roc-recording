@@ -11,7 +11,7 @@ type Props = {
   playlistPath: string;
 };
 
-/** Low-latency HLS video+audio preview for TC cards. */
+/** Low-latency HLS video+audio preview for dashboard cards. */
 export default function HlsPreview({ active, listening, playlistPath }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -68,17 +68,16 @@ export default function HlsPreview({ active, listening, playlistPath }: Props) {
     }
   }, [listening, active]);
 
-  if (!active) {
-    return <span className="no-signal">No signal</span>;
-  }
-
   return (
-    <video
-      ref={videoRef}
-      className="hls-preview"
-      playsInline
-      muted={!listening}
-      autoPlay
-    />
+    <>
+      {!active && <span className="no-signal">No signal</span>}
+      <video
+        ref={videoRef}
+        className={`hls-preview${active ? "" : " hls-preview-off"}`}
+        playsInline
+        muted={!listening}
+        autoPlay
+      />
+    </>
   );
 }

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { updateTcLoop } from "@/lib/api";
 import { tcIsActive, tcPreviewHasSignal, tcSourceLabel, tcSourceShort } from "@/lib/tcUi";
 import { showTcCard } from "@/lib/workflow";
+import { sortByChannelId } from "@/lib/sortChannels";
 import { useWorkflows } from "@/hooks/useWorkflows";
 import { useDashboard } from "@/hooks/useDashboard";
 import HlsPreview from "@/components/HlsPreview";
@@ -67,7 +68,8 @@ export default function TcGrid() {
   const [settingsId, setSettingsId] = useState<number | null>(null);
   const { workflows } = useWorkflows();
 
-  const channelIds = streams.filter((s) => showTcCard(workflows, s.id)).map((s) => s.id);
+  const tcStreams = sortByChannelId(streams.filter((s) => showTcCard(workflows, s.id)));
+  const channelIds = tcStreams.map((s) => s.id);
 
   const stopTc = async (id: number) => {
     setBusy((b) => ({ ...b, [id]: true }));
@@ -106,9 +108,7 @@ export default function TcGrid() {
         </div>
       ) : (
         <div className="cards-grid">
-          {streams
-            .filter((s) => showTcCard(workflows, s.id))
-            .map((s) => {
+          {tcStreams.map((s) => {
               const tc = tcById[s.id];
               const tcOn = tcIsActive(tc);
               const tcLive = tcPreviewHasSignal(tc);

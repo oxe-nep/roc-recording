@@ -21,6 +21,7 @@ import {
   type TcLoopInfo,
 } from "@/lib/api";
 import { mediaBase } from "@/lib/mediaBase";
+import { sortByChannelId } from "@/lib/sortChannels";
 
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? "";
 
@@ -80,8 +81,8 @@ function snapshotToState(msg: DashboardSnapshot, connected: boolean): DashboardS
   return {
     connected,
     loading: false,
-    streams: msg.streams ?? [],
-    playout: msg.playout ?? [],
+    streams: sortByChannelId(msg.streams ?? []),
+    playout: sortByChannelId(msg.playout ?? []),
     tcById: tc,
     recordings: rec,
     srtById: srt,

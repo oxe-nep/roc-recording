@@ -13,6 +13,7 @@ import {
   isCaptureOn,
 } from "@/lib/api";
 import { showEncodeCard } from "@/lib/workflow";
+import { sortByChannelId } from "@/lib/sortChannels";
 import { useWorkflows } from "@/hooks/useWorkflows";
 import { useDashboard } from "@/hooks/useDashboard";
 import HlsPreview from "@/components/HlsPreview";
@@ -154,7 +155,7 @@ export default function StreamGrid() {
   };
 
   const settingsStream = settingsId != null ? streams.find((s) => s.id === settingsId) ?? null : null;
-  const visibleStreams = streams.filter((s) => showEncodeCard(workflows, s.id));
+  const visibleStreams = sortByChannelId(streams.filter((s) => showEncodeCard(workflows, s.id)));
 
   return (
     <>

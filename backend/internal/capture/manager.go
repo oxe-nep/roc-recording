@@ -423,6 +423,7 @@ func (m *Manager) List() []*Stream {
 	for _, s := range m.streams {
 		result = append(result, s)
 	}
+	sort.Slice(result, func(i, j int) bool { return result[i].ID < result[j].ID })
 	return result
 }
 

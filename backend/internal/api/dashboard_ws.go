@@ -3,6 +3,7 @@ package api
 import (
 	"log"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -49,7 +50,9 @@ func startDashboardWS(
 			if hub.ClientCount() == 0 {
 				continue
 			}
-			hub.BroadcastJSON(buildDashboardSnapshot(mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, hlsBaseURL))
+			snap := buildDashboardSnapshot(mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, hlsBaseURL)
+			sortDashboardSnapshot(&snap)
+			hub.BroadcastJSON(snap)
 		}
 	}()
 	log.Printf("[ws] dashboard hub started (500ms snapshots while clients connected)")
@@ -124,6 +127,14 @@ func buildDashboardSnapshot(
 	}
 }
 
+func sortDashboardSnapshot(s *dashboardSnapshot) {
+	sort.Slice(s.Streams, func(i, j int) bool { return s.Streams[i].ID < s.Streams[j].ID })
+	sort.Slice(s.Playout, func(i, j int) bool { return s.Playout[i].ID < s.Playout[j].ID })
+	sort.Slice(s.TC, func(i, j int) bool { return s.TC[i].ID < s.TC[j].ID })
+	sort.Slice(s.Recordings, func(i, j int) bool { return s.Recordings[i].ID < s.Recordings[j].ID })
+	sort.Slice(s.SRT, func(i, j int) bool { return s.SRT[i].ID < s.SRT[j].ID })
+}
+
 func registerDashboardWS(r chiRouter, hub *ws.Hub, apiKey string) {
 	r.Get("/ws", func(w http.ResponseWriter, req *http.Request) {
 		if apiKey != "" {
@@ -151,7 +162,9 @@ func registerDashboardHTTP(
 	hlsBaseURL string,
 ) {
 	r.Get("/api/dashboard", func(w http.ResponseWriter, req *http.Request) {
-		jsonOK(w, buildDashboardSnapshot(mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, hlsBaseURL))
+		snap := buildDashboardSnapshot(mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, hlsBaseURL)
+		sortDashboardSnapshot(&snap)
+		jsonOK(w, snap)
 	})
 }
 

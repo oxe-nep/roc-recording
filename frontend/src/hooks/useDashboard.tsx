@@ -11,7 +11,6 @@ import {
   type ReactNode,
 } from "react";
 import {
-  fetchDashboardSnapshot,
   type AudioLevels,
   type DashboardSnapshot,
   type PlayoutClient,
@@ -22,8 +21,10 @@ import {
 } from "@/lib/api";
 import { mediaBase } from "@/lib/mediaBase";
 import { sortByChannelId } from "@/lib/sortChannels";
+import { normalizeWorkflowConfig, type ChannelWorkflowConfig } from "@/lib/workflow";
 
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? "";
+const WS_CONNECT_TIMEOUT_MS = 8_000;
 
 export type { DashboardSnapshot };
 
@@ -35,6 +36,7 @@ type DashboardState = {
   tcById: Record<number, TcLoopInfo>;
   recordings: Record<number, RecordingInfo>;
   srtById: Record<number, SrtInfo>;
+  workflows: Record<number, ChannelWorkflowConfig>;
   metersEncode: Record<number, AudioLevels>;
   metersPlayout: Record<number, AudioLevels>;
 };
@@ -47,6 +49,7 @@ const EMPTY: DashboardState = {
   tcById: {},
   recordings: {},
   srtById: {},
+  workflows: {},
   metersEncode: {},
   metersPlayout: {},
 };
@@ -71,6 +74,18 @@ function mapMeters(raw?: Record<string, AudioLevels>): Record<number, AudioLevel
   return out;
 }
 
+function mapWorkflows(
+  raw?: Record<string, Partial<ChannelWorkflowConfig>>,
+): Record<number, ChannelWorkflowConfig> {
+  const out: Record<number, ChannelWorkflowConfig> = {};
+  if (!raw) return out;
+  for (const [key, value] of Object.entries(raw)) {
+    const id = Number(key);
+    if (Number.isFinite(id)) out[id] = normalizeWorkflowConfig(value);
+  }
+  return out;
+}
+
 function snapshotToState(msg: DashboardSnapshot, connected: boolean): DashboardState {
   const rec: Record<number, RecordingInfo> = {};
   for (const r of msg.recordings ?? []) rec[r.id] = r;
@@ -86,6 +101,7 @@ function snapshotToState(msg: DashboardSnapshot, connected: boolean): DashboardS
     tcById: tc,
     recordings: rec,
     srtById: srt,
+    workflows: mapWorkflows(msg.workflows),
     metersEncode: mapMeters(msg.meters_encode),
     metersPlayout: mapMeters(msg.meters_playout),
   };
@@ -96,8 +112,11 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const retryRef = useRef(0);
   const wsRef = useRef<WebSocket | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const intentionalCloseRef = useRef(false);
-  const mountedRef = useRef(false);
+  const sessionRef = useRef(0);
+  const hadDataRef = useRef(false);
+  const connectRef = useRef<(session: number) => void>(() => {});
 
   const clearRetryTimer = useCallback(() => {
     if (retryTimerRef.current != null) {
@@ -106,86 +125,119 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const applySnapshot = useCallback((msg: DashboardSnapshot, connected: boolean) => {
-    if (!mountedRef.current) return;
+  const clearConnectTimer = useCallback(() => {
+    if (connectTimerRef.current != null) {
+      clearTimeout(connectTimerRef.current);
+      connectTimerRef.current = null;
+    }
+  }, []);
+
+  const applySnapshot = useCallback((msg: DashboardSnapshot, connected: boolean, session: number) => {
+    if (session !== sessionRef.current) return;
+    hadDataRef.current = true;
     setState(snapshotToState(msg, connected));
   }, []);
 
-  const connect = useCallback(() => {
-    if (!mountedRef.current || typeof window === "undefined") return;
-
-    clearRetryTimer();
-    intentionalCloseRef.current = false;
-
-    const existing = wsRef.current;
-    if (existing && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) {
-      return;
-    }
-
-    if (existing) {
-      intentionalCloseRef.current = true;
-      try {
-        existing.close();
-      } catch {
-        /* ignore */
-      }
-      wsRef.current = null;
-      intentionalCloseRef.current = false;
-    }
-
-    const sock = new WebSocket(wsURL());
-    wsRef.current = sock;
-
-    sock.onopen = () => {
-      if (!mountedRef.current || wsRef.current !== sock) return;
-      retryRef.current = 0;
-      setState((prev) => ({ ...prev, connected: true }));
-    };
-
-    sock.onmessage = (ev) => {
-      if (!mountedRef.current || wsRef.current !== sock) return;
-      try {
-        const msg = JSON.parse(String(ev.data)) as DashboardSnapshot;
-        if (msg?.type !== "snapshot") return;
-        applySnapshot(msg, true);
-      } catch {
-        /* ignore bad frames */
-      }
-    };
-
-    sock.onclose = () => {
-      if (!mountedRef.current || wsRef.current !== sock) return;
-      wsRef.current = null;
-      if (intentionalCloseRef.current) return;
-
-      setState((prev) => ({ ...prev, connected: false }));
+  const scheduleReconnect = useCallback(
+    (session: number) => {
       const attempt = retryRef.current++;
       const delay = Math.min(10_000, 500 * 2 ** Math.min(attempt, 4));
       retryTimerRef.current = setTimeout(() => {
         retryTimerRef.current = null;
-        connect();
+        connectRef.current(session);
       }, delay);
-    };
+    },
+    [],
+  );
 
-    sock.onerror = () => {
-      sock.close();
-    };
-  }, [applySnapshot, clearRetryTimer]);
+  const connect = useCallback(
+    (session: number) => {
+      if (typeof window === "undefined") return;
+
+      clearRetryTimer();
+      clearConnectTimer();
+      intentionalCloseRef.current = false;
+
+      const existing = wsRef.current;
+      if (existing) {
+        intentionalCloseRef.current = true;
+        try {
+          existing.close();
+        } catch {
+          /* ignore */
+        }
+        wsRef.current = null;
+        intentionalCloseRef.current = false;
+      }
+
+      const sock = new WebSocket(wsURL());
+      wsRef.current = sock;
+
+      connectTimerRef.current = setTimeout(() => {
+        connectTimerRef.current = null;
+        if (session !== sessionRef.current || wsRef.current !== sock) return;
+        if (sock.readyState !== WebSocket.CONNECTING) return;
+        intentionalCloseRef.current = true;
+        try {
+          sock.close();
+        } catch {
+          /* ignore */
+        }
+        intentionalCloseRef.current = false;
+        wsRef.current = null;
+        if (!hadDataRef.current) {
+          setState((prev) => ({ ...prev, loading: false, connected: false }));
+        } else {
+          setState((prev) => ({ ...prev, connected: false }));
+        }
+        scheduleReconnect(session);
+      }, WS_CONNECT_TIMEOUT_MS);
+
+      sock.onopen = () => {
+        if (session !== sessionRef.current || wsRef.current !== sock) return;
+        clearConnectTimer();
+        retryRef.current = 0;
+        setState((prev) => ({ ...prev, connected: true }));
+      };
+
+      sock.onmessage = (ev) => {
+        if (session !== sessionRef.current || wsRef.current !== sock) return;
+        try {
+          const msg = JSON.parse(String(ev.data)) as DashboardSnapshot;
+          if (msg?.type !== "snapshot") return;
+          applySnapshot(msg, true, session);
+        } catch {
+          /* ignore bad frames */
+        }
+      };
+
+      sock.onclose = () => {
+        if (session !== sessionRef.current || wsRef.current !== sock) return;
+        clearConnectTimer();
+        wsRef.current = null;
+        if (intentionalCloseRef.current) return;
+
+        setState((prev) => ({ ...prev, connected: false }));
+        scheduleReconnect(session);
+      };
+
+      sock.onerror = () => {
+        sock.close();
+      };
+    },
+    [applySnapshot, clearConnectTimer, clearRetryTimer, scheduleReconnect],
+  );
+
+  connectRef.current = connect;
 
   useEffect(() => {
-    mountedRef.current = true;
-
-    void fetchDashboardSnapshot()
-      .then((msg) => applySnapshot(msg, false))
-      .catch(() => {
-        /* WS reconnect will retry */
-      });
-
-    connect();
+    const session = ++sessionRef.current;
+    connect(session);
 
     return () => {
-      mountedRef.current = false;
+      sessionRef.current++;
       clearRetryTimer();
+      clearConnectTimer();
       intentionalCloseRef.current = true;
       try {
         wsRef.current?.close();
@@ -194,7 +246,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       }
       wsRef.current = null;
     };
-  }, [connect, applySnapshot, clearRetryTimer]);
+  }, [connect, clearRetryTimer, clearConnectTimer]);
 
   const value = useMemo(() => state, [state]);
   return <DashboardContext.Provider value={value}>{children}</DashboardContext.Provider>;

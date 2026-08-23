@@ -97,6 +97,7 @@ type PlayoutBridge interface {
 	ChannelExists(id int) bool
 	IsActive(id int) bool
 	Stop(id int) error
+	Start(id int) error
 	Sink(id int) (device, formatCode string, err error)
 	ResolveOpenDevice(device string) string
 	LookupDeviceOpen(device string) string
@@ -105,6 +106,7 @@ type PlayoutBridge interface {
 }
 
 type channelState struct {
+	opMu      sync.Mutex
 	mu        sync.Mutex
 	settings  Settings
 	status    Status
@@ -343,6 +345,12 @@ func (m *Manager) Update(id int, in UpdateInput) (Info, error) {
 	}
 	m.EnsureChannel(id)
 	st := m.get(id)
+	if st == nil {
+		return Info{}, fmt.Errorf("channel %d not found", id)
+	}
+	st.opMu.Lock()
+	defer st.opMu.Unlock()
+
 	st.mu.Lock()
 	cfg := st.settings
 	if in.Enabled != nil {
@@ -372,12 +380,12 @@ func (m *Manager) Update(id int, in UpdateInput) (Info, error) {
 	m.mu.Unlock()
 
 	if cfg.Enabled {
-		_ = m.Stop(id)
+		m.stopLocked(id, st)
 		if !m.waitStopped(id, releaseWait) {
 			log.Printf("[tcloop] channel %d: previous TC process did not exit in time", id)
 		}
 		time.Sleep(decklinkSettle)
-		if err := m.Start(id); err != nil {
+		if err := m.startLocked(id, st); err != nil {
 			st.mu.Lock()
 			st.settings.Enabled = false
 			st.mu.Unlock()
@@ -387,12 +395,13 @@ func (m *Manager) Update(id int, in UpdateInput) (Info, error) {
 			return Info{}, err
 		}
 	} else {
-		_ = m.Stop(id)
+		m.stopLocked(id, st)
 		if !m.waitStopped(id, releaseWait) {
 			log.Printf("[tcloop] channel %d: TC process did not exit in time", id)
 		}
 		time.Sleep(decklinkSettle)
 		m.restartCapture(id)
+		m.restartPlayout(id)
 	}
 	return m.Get(id)
 }
@@ -403,14 +412,20 @@ func (m *Manager) Start(id int) error {
 	if st == nil {
 		return fmt.Errorf("channel %d not found", id)
 	}
+	st.opMu.Lock()
+	defer st.opMu.Unlock()
+	return m.startLocked(id, st)
+}
+
+func (m *Manager) startLocked(id int, st *channelState) error {
 	if err := m.releaseInput(id); err != nil {
 		return err
 	}
 
 	st.mu.Lock()
-	if st.status == StatusRunning {
+	if st.status == StatusRunning || st.status == StatusRestarting {
 		st.mu.Unlock()
-		return fmt.Errorf("TC Burn-in on channel %d is already running", id)
+		return fmt.Errorf("TC Burn-in on channel %d is already starting or running", id)
 	}
 	st.settings.Enabled = true
 	st.settings = normalizeSettings(st.settings)
@@ -492,11 +507,29 @@ func (m *Manager) restartCapture(id int) {
 	log.Printf("[tcloop] channel %d encode restarted after TC Burn-in off", id)
 }
 
+func (m *Manager) restartPlayout(id int) {
+	if m.playout == nil {
+		return
+	}
+	if err := m.playout.Start(id); err != nil {
+		log.Printf("[tcloop] channel %d decode restart after TC Burn-in off: %v", id, err)
+		return
+	}
+	log.Printf("[tcloop] channel %d decode restarted after TC Burn-in off", id)
+}
+
 func (m *Manager) Stop(id int) error {
 	st := m.get(id)
 	if st == nil {
 		return nil
 	}
+	st.opMu.Lock()
+	defer st.opMu.Unlock()
+	m.stopLocked(id, st)
+	return nil
+}
+
+func (m *Manager) stopLocked(id int, st *channelState) {
 	st.mu.Lock()
 	if st.stopCh != nil {
 		select {
@@ -510,7 +543,6 @@ func (m *Manager) Stop(id int) error {
 	}
 	st.status = StatusOff
 	st.mu.Unlock()
-	return nil
 }
 
 func (m *Manager) StopAll() {

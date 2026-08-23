@@ -17,6 +17,8 @@ const (
 	maxMsgSize = 512
 )
 
+type ConnectHook func(*Client)
+
 // Hub fans out dashboard snapshots to connected browsers.
 type Hub struct {
 	mu         sync.Mutex
@@ -25,12 +27,23 @@ type Hub struct {
 	unregister chan *Client
 	broadcast  chan []byte
 	upgrader   websocket.Upgrader
+	onConnect  ConnectHook
 }
 
 type Client struct {
 	hub  *Hub
 	conn *websocket.Conn
 	send chan []byte
+}
+
+// TrySend queues one message without blocking the dropping slow clients.
+func (c *Client) TrySend(data []byte) bool {
+	select {
+	case c.send <- data:
+		return true
+	default:
+		return false
+	}
 }
 
 func NewHub(allowedOrigin string) *Hub {
@@ -53,6 +66,12 @@ func NewHub(allowedOrigin string) *Hub {
 	}
 }
 
+func (h *Hub) SetConnectHook(fn ConnectHook) {
+	h.mu.Lock()
+	h.onConnect = fn
+	h.mu.Unlock()
+}
+
 func (h *Hub) Run() {
 	for {
 		select {
@@ -60,8 +79,12 @@ func (h *Hub) Run() {
 			h.mu.Lock()
 			h.clients[c] = struct{}{}
 			n := len(h.clients)
+			hook := h.onConnect
 			h.mu.Unlock()
 			log.Printf("[ws] client connected (%d)", n)
+			if hook != nil {
+				hook(c)
+			}
 		case c := <-h.unregister:
 			h.mu.Lock()
 			if _, ok := h.clients[c]; ok {

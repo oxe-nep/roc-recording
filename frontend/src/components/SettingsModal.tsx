@@ -35,7 +35,7 @@ export default function SettingsModal({
   const [error, setError] = useState<string | null>(null);
   const [channelIds, setChannelIds] = useState<number[]>([]);
   const [wfBusy, setWfBusy] = useState<number | null>(null);
-  const { workflows, reload: reloadWorkflows } = useWorkflows();
+  const { workflows } = useWorkflows();
 
   useBodyScrollLock(open);
 
@@ -57,10 +57,10 @@ export default function SettingsModal({
     if (!open) return;
     setTab(initialTab);
     setError(null);
-    void Promise.all([loadStorage(), loadChannels(), reloadWorkflows()]).catch((e) =>
+    void Promise.all([loadStorage(), loadChannels()]).catch((e) =>
       setError(String(e)),
     );
-  }, [open, initialTab, loadStorage, loadChannels, reloadWorkflows]);
+  }, [open, initialTab, loadStorage, loadChannels]);
 
   useEffect(() => {
     if (!open) return;
@@ -91,8 +91,6 @@ export default function SettingsModal({
     setError(null);
     try {
       await updateWorkflow(id, { mode });
-      await reloadWorkflows();
-      window.dispatchEvent(new Event("roc-workflows-changed"));
     } catch (e) {
       setError(String(e));
     } finally {

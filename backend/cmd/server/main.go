@@ -37,6 +37,11 @@ func (b tcPlayoutBridge) Stop(id int) error {
 	return err
 }
 
+func (b tcPlayoutBridge) Start(id int) error {
+	_, err := b.Manager.Start(id)
+	return err
+}
+
 func main() {
 	cfgPath := "config.yaml"
 	if len(os.Args) > 1 {

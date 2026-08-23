@@ -1,4 +1,5 @@
-const BASE = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8080";
+import { mediaBase } from "@/lib/mediaBase";
+
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? "";
 
 // Local: set NEXT_PUBLIC_* in .env.local and talk to backend directly.
@@ -39,16 +40,19 @@ export interface EncodeCodecOption {
   presets: { id: string; label: string }[];
 }
 
+function apiURL(path: string): string {
+  return new URL(path, mediaBase()).toString();
+}
+
 async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
-  const res = await fetch(`${BASE}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      "X-API-Key": API_KEY,
-      ...(init?.headers ?? {}),
-    },
-  });
-  return res;
+  const headers = new Headers(init?.headers);
+  if (!headers.has("Content-Type") && init?.body) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (API_KEY) {
+    headers.set("X-API-Key", API_KEY);
+  }
+  return fetch(apiURL(path), { ...init, headers });
 }
 
 export async function fetchStreams(): Promise<Stream[]> {
@@ -326,7 +330,8 @@ export function libraryFileURL(category: string, name: string, opts?: { download
   if (API_KEY) params.set("api_key", API_KEY);
   if (opts?.download) params.set("download", "1");
   const q = params.toString();
-  return `${BASE}${path}${q ? `?${q}` : ""}`;
+  const url = apiURL(path);
+  return q ? `${url}?${q}` : url;
 }
 
 export async function deleteLibraryFile(category: string, name: string): Promise<void> {
@@ -358,7 +363,7 @@ export async function moveLibraryFile(
 }
 
 export async function fetchAudioLevels(id: number): Promise<AudioLevels> {
-  const res = await fetch(`${BASE}/audio/${id}`);
+  const res = await fetch(apiURL(`/audio/${id}`));
   if (!res.ok) throw new Error(`fetchAudioLevels: ${res.status}`);
   return res.json();
 }
@@ -657,7 +662,7 @@ export async function fetchPlayoutLogs(id: number): Promise<string[]> {
 
 export async function fetchPlayoutAudioLevels(id: number): Promise<AudioLevels> {
   // Public path under /audio/ (nginx already proxies it) — same pattern as encode meters.
-  const res = await fetch(`${BASE}/audio/playout/${id}`);
+  const res = await fetch(apiURL(`/audio/playout/${id}`));
   if (!res.ok) throw new Error(`fetchPlayoutAudioLevels: ${res.status}`);
   return res.json();
 }
@@ -671,9 +676,11 @@ export async function fetchPlayoutMedia(): Promise<PlayoutMediaItem[]> {
 export async function uploadPlayoutMedia(file: File): Promise<PlayoutMediaItem> {
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`${BASE}/api/playout/media`, {
+  const headers = new Headers();
+  if (API_KEY) headers.set("X-API-Key", API_KEY);
+  const res = await fetch(apiURL("/api/playout/media"), {
     method: "POST",
-    headers: { "X-API-Key": API_KEY },
+    headers,
     body: form,
   });
   if (!res.ok) {
@@ -707,14 +714,8 @@ export type DashboardSnapshot = {
   tc: TcLoopInfo[];
   recordings: RecordingInfo[];
   srt: SrtInfo[];
+  workflows?: Record<string, Partial<ChannelWorkflowConfig>>;
   meters_encode: Record<string, AudioLevels>;
   meters_playout: Record<string, AudioLevels>;
 };
-
-/** One-shot dashboard state — used for fast boot before WebSocket connects. */
-export async function fetchDashboardSnapshot(): Promise<DashboardSnapshot> {
-  const res = await apiFetch("/api/dashboard");
-  if (!res.ok) throw new Error(`fetchDashboard: ${res.status}`);
-  return res.json();
-}
 

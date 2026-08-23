@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"sort"
@@ -13,6 +14,7 @@ import (
 	"github.com/roc-recording/backend/internal/srt"
 	"github.com/roc-recording/backend/internal/tcloop"
 	"github.com/roc-recording/backend/internal/tsl"
+	"github.com/roc-recording/backend/internal/workflow"
 	"github.com/roc-recording/backend/internal/ws"
 )
 
@@ -28,8 +30,25 @@ type dashboardSnapshot struct {
 	TC             []tcloop.Info                 `json:"tc"`
 	Recordings     []recording.ChannelInfo       `json:"recordings"`
 	SRT            []srt.ChannelInfo             `json:"srt"`
+	Workflows      map[string]workflow.Config    `json:"workflows"`
 	MetersEncode   map[string]meterLevels        `json:"meters_encode"`
 	MetersPlayout  map[string]meterLevels        `json:"meters_playout"`
+}
+
+func buildWorkflowsMap(wfStore *workflow.Store, mgr *capture.Manager) map[string]workflow.Config {
+	out := make(map[string]workflow.Config)
+	if wfStore != nil {
+		for id, cfg := range wfStore.All() {
+			out[strconv.Itoa(id)] = cfg
+		}
+	}
+	for _, s := range mgr.List() {
+		key := strconv.Itoa(s.ID)
+		if _, ok := out[key]; !ok {
+			out[key] = workflow.DefaultConfig()
+		}
+	}
+	return out
 }
 
 func startDashboardWS(
@@ -40,8 +59,23 @@ func startDashboardWS(
 	playMgr *playout.Manager,
 	tcMgr *tcloop.Manager,
 	tslMgr *tsl.Manager,
+	wfStore *workflow.Store,
 	hlsBaseURL string,
 ) {
+	snapshot := func() dashboardSnapshot {
+		snap := buildDashboardSnapshot(mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, wfStore, hlsBaseURL)
+		sortDashboardSnapshot(&snap)
+		return snap
+	}
+	hub.SetConnectHook(func(c *ws.Client) {
+		data, err := json.Marshal(snapshot())
+		if err != nil {
+			return
+		}
+		if !c.TrySend(data) {
+			log.Printf("[ws] initial snapshot dropped (client slow)")
+		}
+	})
 	go hub.Run()
 	go func() {
 		t := time.NewTicker(500 * time.Millisecond)
@@ -50,12 +84,10 @@ func startDashboardWS(
 			if hub.ClientCount() == 0 {
 				continue
 			}
-			snap := buildDashboardSnapshot(mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, hlsBaseURL)
-			sortDashboardSnapshot(&snap)
-			hub.BroadcastJSON(snap)
+			hub.BroadcastJSON(snapshot())
 		}
 	}()
-	log.Printf("[ws] dashboard hub started (500ms snapshots while clients connected)")
+	log.Printf("[ws] dashboard hub started (immediate snapshot on connect, 500ms updates)")
 }
 
 func buildDashboardSnapshot(
@@ -65,6 +97,7 @@ func buildDashboardSnapshot(
 	playMgr *playout.Manager,
 	tcMgr *tcloop.Manager,
 	tslMgr *tsl.Manager,
+	wfStore *workflow.Store,
 	hlsBaseURL string,
 ) dashboardSnapshot {
 	streams := mgr.List()
@@ -122,6 +155,7 @@ func buildDashboardSnapshot(
 		TC:            tcList,
 		Recordings:    recList,
 		SRT:           srtList,
+		Workflows:     buildWorkflowsMap(wfStore, mgr),
 		MetersEncode:  metersEnc,
 		MetersPlayout: metersPlay,
 	}
@@ -159,10 +193,11 @@ func registerDashboardHTTP(
 	playMgr *playout.Manager,
 	tcMgr *tcloop.Manager,
 	tslMgr *tsl.Manager,
+	wfStore *workflow.Store,
 	hlsBaseURL string,
 ) {
 	r.Get("/api/dashboard", func(w http.ResponseWriter, req *http.Request) {
-		snap := buildDashboardSnapshot(mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, hlsBaseURL)
+		snap := buildDashboardSnapshot(mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, wfStore, hlsBaseURL)
 		sortDashboardSnapshot(&snap)
 		jsonOK(w, snap)
 	})

@@ -63,7 +63,7 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 	r.Use(corsMiddleware(allowedOrigins))
 
 	hub := ws.NewHub(allowedOrigins)
-	startDashboardWS(hub, mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, hlsBaseURL)
+	startDashboardWS(hub, mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, wfStore, hlsBaseURL)
 	registerDashboardWS(r, hub, apiKey)
 	r.Mount("/hls/", hlsHandler)
 	r.Get("/audio/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -189,7 +189,7 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 		r.Use(apiKeyMiddleware(apiKey))
 
 		registerPlayoutRoutes(r, playMgr, tcMgr)
-		registerDashboardHTTP(r, mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, hlsBaseURL)
+		registerDashboardHTTP(r, mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, wfStore, hlsBaseURL)
 
 		r.Get("/api/streams", func(w http.ResponseWriter, r *http.Request) {
 			streams := mgr.List()

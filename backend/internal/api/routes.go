@@ -618,8 +618,8 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 				jsonError(w, "invalid json body", http.StatusBadRequest)
 				return
 			}
-			if body.Encode == nil && body.Decode == nil {
-				jsonError(w, "encode or decode required", http.StatusBadRequest)
+			if body.Mode == nil {
+				jsonError(w, "mode required", http.StatusBadRequest)
 				return
 			}
 			cfg, err := wfStore.Set(id, body)
@@ -627,7 +627,7 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 				jsonError(w, err.Error(), http.StatusConflict)
 				return
 			}
-			jsonOK(w, map[string]any{"id": id, "encode": cfg.Encode, "decode": cfg.Decode})
+			jsonOK(w, map[string]any{"id": id, "mode": cfg.Mode})
 		})
 
 		r.Post("/api/recordings/{id}/start", func(w http.ResponseWriter, r *http.Request) {
@@ -905,7 +905,8 @@ func toResponse(s *capture.Stream, hlsBaseURL string, tslMgr *tsl.Manager) strea
 		HLSURL:       hlsBaseURL + "/hls/" + strconv.Itoa(s.ID) + "/index.m3u8",
 	}
 	if tslMgr != nil && tslMgr.Enabled() {
-		info := tslMgr.InfoForChannel(s.ID)
+		active := status == capture.StatusRunning
+		info := tslMgr.InfoForChannel(s.ID, active)
 		resp.TSLIndex = info.Index
 		resp.TSLText = info.Text
 	}

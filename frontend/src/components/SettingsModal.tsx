@@ -10,7 +10,7 @@ import {
 } from "@/lib/api";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { useWorkflows } from "@/hooks/useWorkflows";
-import { workflowForChannel } from "@/lib/workflow";
+import { workflowMode, type ChannelWorkflowMode } from "@/lib/workflow";
 import EncodePresetsEditor from "@/components/EncodePresetsEditor";
 
 type Tab = "storage" | "presets" | "workflows";
@@ -86,11 +86,11 @@ export default function SettingsModal({
     }
   };
 
-  const patchWorkflow = async (id: number, patch: { encode?: boolean; decode?: boolean }) => {
+  const setWorkflowMode = async (id: number, mode: ChannelWorkflowMode) => {
     setWfBusy(id);
     setError(null);
     try {
-      await updateWorkflow(id, patch);
+      await updateWorkflow(id, { mode });
       await reloadWorkflows();
       window.dispatchEvent(new Event("roc-workflows-changed"));
     } catch (e) {
@@ -188,51 +188,41 @@ export default function SettingsModal({
 
         {tab === "workflows" && (
           <div className="settings-tab-panel">
-            <p className="settings-tab-intro">
-              Enable encode and decode rows per channel. Record/stream and decode playout can run
-              together. TC burn-in is started from decode settings and locks the channel pair while
-              active.
-            </p>
             <div className="workflow-list">
               {channelIds.map((id) => {
-                const cfg = workflowForChannel(workflows, id);
+                const mode = workflowMode(workflows, id);
                 const busy = wfBusy === id;
                 return (
                   <div key={id} className="workflow-row">
                     <div className="workflow-row-head">
                       <span className="input-badge">{id}</span>
-                      <span className="workflow-row-title">Channel {id}</span>
                     </div>
-                    <div className="workflow-checks">
-                      <label className="workflow-check">
+                    <div className="workflow-options">
+                      <label className={`workflow-option${mode === "pair" ? " active" : ""}`}>
                         <input
-                          type="checkbox"
-                          checked={cfg.encode}
-                          disabled={busy || (cfg.encode && !cfg.decode)}
-                          onChange={(e) => void patchWorkflow(id, { encode: e.target.checked })}
+                          type="radio"
+                          name={`workflow-${id}`}
+                          checked={mode === "pair"}
+                          disabled={busy}
+                          onChange={() => void setWorkflowMode(id, "pair")}
                         />
                         <span className="workflow-option-text">
-                          <strong>Encode</strong>
-                          <span className="workflow-option-hint">Record · Stream · capture preview</span>
+                          <strong>Encode / Decode</strong>
                         </span>
                       </label>
-                      <label className="workflow-check">
+                      <label className={`workflow-option${mode === "tc" ? " active" : ""}`}>
                         <input
-                          type="checkbox"
-                          checked={cfg.decode}
-                          disabled={busy || (cfg.decode && !cfg.encode)}
-                          onChange={(e) => void patchWorkflow(id, { decode: e.target.checked })}
+                          type="radio"
+                          name={`workflow-${id}`}
+                          checked={mode === "tc"}
+                          disabled={busy}
+                          onChange={() => void setWorkflowMode(id, "tc")}
                         />
                         <span className="workflow-option-text">
-                          <strong>Decode</strong>
-                          <span className="workflow-option-hint">Playout · TC burn-in settings</span>
+                          <strong>TC burn-in</strong>
                         </span>
                       </label>
                     </div>
-                    <p className="workflow-tc-note">
-                      TC burn-in: configure and start in decode settings (⚙). Stops normal encode and
-                      decode on this channel while running.
-                    </p>
                   </div>
                 );
               })}

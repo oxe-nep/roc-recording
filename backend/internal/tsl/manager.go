@@ -11,10 +11,6 @@ import (
 
 const defaultPort = 30947
 
-// staleAfter clears a display label if no UMD update arrives within this window.
-// Many routers stop refreshing when a source is routed away instead of sending blank text.
-const staleAfter = 3 * time.Second
-
 // ChannelMap binds encode channel IDs to TSL display indices.
 type ChannelMap map[int]int
 
@@ -25,8 +21,7 @@ type Info struct {
 }
 
 type displayState struct {
-	text    string
-	updated time.Time
+	text string
 }
 
 // Manager listens for TSL v5 UMD and stores per-display labels.
@@ -112,7 +107,6 @@ func (m *Manager) readLoop() {
 		n, _, err := m.conn.ReadFromUDP(buf)
 		if err != nil {
 			if ne, ok := err.(net.Error); ok && ne.Timeout() {
-				m.expireStale()
 				continue
 			}
 			select {
@@ -131,7 +125,6 @@ func (m *Manager) readLoop() {
 		for _, msg := range msgs {
 			m.apply(msg)
 		}
-		m.expireStale()
 	}
 }
 
@@ -143,7 +136,7 @@ func (m *Manager) apply(msg Message) {
 	if text == "" {
 		delete(m.byIndex, idx)
 	} else {
-		m.byIndex[idx] = displayState{text: text, updated: time.Now()}
+		m.byIndex[idx] = displayState{text: text}
 	}
 	m.mu.Unlock()
 
@@ -156,22 +149,9 @@ func (m *Manager) apply(msg Message) {
 	}
 }
 
-func (m *Manager) expireStale() {
-	cutoff := time.Now().Add(-staleAfter)
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for idx, st := range m.byIndex {
-		if st.text == "" || st.updated.Before(cutoff) {
-			if ch, ok := m.indexMap[idx]; ok && st.text != "" {
-				log.Printf("[tsl] ch %d index %d stale — cleared", ch, idx)
-			}
-			delete(m.byIndex, idx)
-		}
-	}
-}
-
 // InfoForChannel returns TSL state for an encode channel id.
-func (m *Manager) InfoForChannel(channelID int) Info {
+// Labels are hidden while the channel is inactive; stored text is cleared then too.
+func (m *Manager) InfoForChannel(channelID int, channelActive bool) Info {
 	if m == nil || !m.Enabled() {
 		return Info{}
 	}
@@ -179,13 +159,21 @@ func (m *Manager) InfoForChannel(channelID int) Info {
 	if mapped, ok := m.byChan[channelID]; ok && mapped > 0 {
 		idx = mapped
 	}
+	if !channelActive {
+		m.mu.Lock()
+		if prev, ok := m.byIndex[idx]; ok && prev.text != "" {
+			delete(m.byIndex, idx)
+			if ch, ok := m.indexMap[idx]; ok {
+				log.Printf("[tsl] ch %d index %d cleared (channel inactive)", ch, idx)
+			}
+		}
+		m.mu.Unlock()
+		return Info{Index: idx}
+	}
 	m.mu.RLock()
 	st, ok := m.byIndex[idx]
 	m.mu.RUnlock()
-	if !ok {
-		return Info{Index: idx}
-	}
-	if st.text == "" || time.Since(st.updated) > staleAfter {
+	if !ok || st.text == "" {
 		return Info{Index: idx}
 	}
 	return Info{

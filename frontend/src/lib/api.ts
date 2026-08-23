@@ -245,8 +245,7 @@ export async function setRecordingsPath(path: string): Promise<string> {
 }
 
 export interface ChannelWorkflowConfig {
-  encode: boolean;
-  decode: boolean;
+  mode: "pair" | "tc";
 }
 
 export async function fetchWorkflows(): Promise<Record<string, ChannelWorkflowConfig>> {
@@ -258,7 +257,7 @@ export async function fetchWorkflows(): Promise<Record<string, ChannelWorkflowCo
 export async function updateWorkflow(
   id: number,
   patch: Partial<ChannelWorkflowConfig>,
-): Promise<{ id: number; encode: boolean; decode: boolean }> {
+): Promise<{ id: number; mode: "pair" | "tc" }> {
   const res = await apiFetch(`/api/workflows/${id}`, {
     method: "PUT",
     body: JSON.stringify(patch),

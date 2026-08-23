@@ -8,23 +8,30 @@ import (
 	"sync"
 )
 
-// Config toggles which dashboard rows are shown per channel pair.
-// TC burn-in is runtime-only (tcloop) and locks encode + decode while active.
+// Mode selects which dashboard workflow a channel pair uses.
+type Mode string
+
+const (
+	ModePair Mode = "pair" // encode + decode rows
+	ModeTC   Mode = "tc"   // TC burn-in (decode row)
+)
+
+// Config is persisted per channel.
 type Config struct {
-	Encode bool `json:"encode"`
-	Decode bool `json:"decode"`
+	Mode Mode `json:"mode"`
 }
 
 func DefaultConfig() Config {
-	return Config{Encode: true, Decode: true}
+	return Config{Mode: ModePair}
 }
 
 func NormalizeConfig(c Config) Config {
-	// At least one side must stay visible.
-	if !c.Encode && !c.Decode {
-		return DefaultConfig()
+	switch c.Mode {
+	case ModeTC:
+		return Config{Mode: ModeTC}
+	default:
+		return Config{Mode: ModePair}
 	}
-	return c
 }
 
 type Store struct {
@@ -51,7 +58,7 @@ func (s *Store) Load() {
 		return
 	}
 
-	// New format: { "1": { "encode": true, "decode": true } }
+	// Current format: { "1": { "mode": "pair" | "tc" } }
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(data, &obj); err == nil {
 		next := make(map[int]Config, len(obj))
@@ -66,7 +73,7 @@ func (s *Store) Load() {
 		return
 	}
 
-	// Legacy format: { "1": "record" | "playout" | "tc" }
+	// Legacy string: { "1": "record" | "playout" | "tc" }
 	var legacy map[string]string
 	if err := json.Unmarshal(data, &legacy); err != nil {
 		return
@@ -84,8 +91,16 @@ func (s *Store) Load() {
 
 func parseConfigRaw(raw json.RawMessage) Config {
 	var cfg Config
-	if err := json.Unmarshal(raw, &cfg); err == nil {
+	if err := json.Unmarshal(raw, &cfg); err == nil && cfg.Mode != "" {
 		return NormalizeConfig(cfg)
+	}
+	// Transitional bool format: { "encode": true, "decode": true }
+	var toggles struct {
+		Encode bool `json:"encode"`
+		Decode bool `json:"decode"`
+	}
+	if err := json.Unmarshal(raw, &toggles); err == nil {
+		return migrateBoolConfig(toggles.Encode, toggles.Decode)
 	}
 	var mode string
 	if err := json.Unmarshal(raw, &mode); err == nil {
@@ -94,16 +109,17 @@ func parseConfigRaw(raw json.RawMessage) Config {
 	return DefaultConfig()
 }
 
+func migrateBoolConfig(encode, decode bool) Config {
+	_ = encode
+	_ = decode
+	return DefaultConfig()
+}
+
 func migrateLegacyMode(mode string) Config {
-	switch mode {
-	case "playout":
-		return Config{Encode: false, Decode: true}
-	case "record":
-		// Previously encode-only; default pair now shows both rows.
-		return DefaultConfig()
-	default:
-		return DefaultConfig()
+	if mode == "tc" {
+		return Config{Mode: ModeTC}
 	}
+	return DefaultConfig()
 }
 
 func (s *Store) saveLocked() error {
@@ -141,8 +157,7 @@ func (s *Store) All() map[int]Config {
 }
 
 type UpdateInput struct {
-	Encode *bool `json:"encode"`
-	Decode *bool `json:"decode"`
+	Mode *string `json:"mode"`
 }
 
 func (s *Store) Set(id int, in UpdateInput) (Config, error) {
@@ -155,13 +170,9 @@ func (s *Store) Set(id int, in UpdateInput) (Config, error) {
 	if c, ok := s.byID[id]; ok {
 		cfg = c
 	}
-	if in.Encode != nil {
-		cfg.Encode = *in.Encode
+	if in.Mode != nil {
+		cfg = NormalizeConfig(Config{Mode: Mode(*in.Mode)})
 	}
-	if in.Decode != nil {
-		cfg.Decode = *in.Decode
-	}
-	cfg = NormalizeConfig(cfg)
 	s.byID[id] = cfg
 	if err := s.saveLocked(); err != nil {
 		return cfg, err

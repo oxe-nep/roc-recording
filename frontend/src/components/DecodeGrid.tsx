@@ -18,7 +18,7 @@ import {
   type TcLoopInfo,
 } from "@/lib/api";
 import { tcBadgeText, tcIsActive, tcPreviewHasSignal, tcSourceLabel, tcSourceShort } from "@/lib/tcUi";
-import { showDecodeCard } from "@/lib/workflow";
+import { showDecodeCard, isTcWorkflow } from "@/lib/workflow";
 import { useWorkflows } from "@/hooks/useWorkflows";
 import Thumbnail from "@/components/Thumbnail";
 import AudioMonitor from "@/components/AudioMonitor";
@@ -234,6 +234,7 @@ export default function DecodeGrid() {
 
   const settingsClient = settingsId != null ? clients.find((c) => c.id === settingsId) ?? null : null;
   const visibleClients = clients.filter((c) => showDecodeCard(workflows, c.id));
+  const tcOnlySection = visibleClients.length > 0 && visibleClients.every((c) => isTcWorkflow(workflows, c.id));
 
   if (!loading && visibleClients.length === 0) {
     return null;
@@ -242,10 +243,12 @@ export default function DecodeGrid() {
   return (
     <section className="io-section">
       <div className="io-section-head">
-        <h2 className="io-section-title">Decode</h2>
-        <button type="button" className="badge" onClick={() => setMediaOpen(true)}>
-          Media
-        </button>
+        <h2 className="io-section-title">{tcOnlySection ? "TC burn-in" : "Decode"}</h2>
+        {!tcOnlySection && (
+          <button type="button" className="badge" onClick={() => setMediaOpen(true)}>
+            Media
+          </button>
+        )}
       </div>
 
       {error && (
@@ -262,7 +265,7 @@ export default function DecodeGrid() {
           <span>Loading decode channels…</span>
         </div>
       ) : visibleClients.length === 0 ? (
-        <p className="io-section-empty">No decode channels in current workflows.</p>
+        <p className="io-section-empty">No channels.</p>
       ) : (
         <div className="cards-grid">
           {visibleClients.map((c) => {
@@ -272,11 +275,12 @@ export default function DecodeGrid() {
             const hasMedia = c.status === "running";
             const isListening = !!listening[c.id];
             const isFile = c.source === "file";
-            const title = cardTitle(c);
             const tc = tcById[c.id];
             const tcOn = tcIsActive(tc);
             const tcLive = tcPreviewHasSignal(tc);
             const tcBadge = tcBadgeText(tc);
+            const tcWorkflow = isTcWorkflow(workflows, c.id);
+            const title = tcWorkflow && !tcOn ? `TC ${c.id}` : cardTitle(c);
             return (
               <div
                 key={c.id}
@@ -353,6 +357,8 @@ export default function DecodeGrid() {
                                   ? "TC · error"
                                   : "TC · starting"}
                           </span>
+                        ) : tcWorkflow ? (
+                          <span className="card-meta-item card-meta-tc">Off</span>
                         ) : (
                           <>
                             <span className="card-meta-item">{formatDisplay(c.format_code)}</span>
@@ -375,7 +381,7 @@ export default function DecodeGrid() {
                         >
                           {busy[c.id] ? "…" : "STOP TC"}
                         </button>
-                      ) : isFile ? (
+                      ) : tcWorkflow ? null : isFile ? (
                         <>
                           {!on || paused ? (
                             <button
@@ -452,7 +458,7 @@ export default function DecodeGrid() {
                         type="button"
                         className="badge settings-btn"
                         onClick={() => setSettingsId(c.id)}
-                        title="Decode settings"
+                        title={tcWorkflow ? "TC settings" : "Decode settings"}
                         aria-label="Settings"
                       >
                         ⚙

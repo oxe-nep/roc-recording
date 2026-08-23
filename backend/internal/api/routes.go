@@ -590,14 +590,14 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 
 		r.Get("/api/workflows", func(w http.ResponseWriter, r *http.Request) {
 			all := wfStore.All()
-			out := make(map[string]string, len(all))
-			for id, mode := range all {
-				out[strconv.Itoa(id)] = string(mode)
+			out := make(map[string]workflow.Config, len(all)+8)
+			for id, cfg := range all {
+				out[strconv.Itoa(id)] = cfg
 			}
 			for _, s := range mgr.List() {
 				key := strconv.Itoa(s.ID)
 				if _, ok := out[key]; !ok {
-					out[key] = string(workflow.ModeRecord)
+					out[key] = workflow.DefaultConfig()
 				}
 			}
 			jsonOK(w, out)
@@ -613,19 +613,21 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 				jsonError(w, "unknown channel", http.StatusNotFound)
 				return
 			}
-			var body struct {
-				Workflow string `json:"workflow"`
-			}
+			var body workflow.UpdateInput
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				jsonError(w, "invalid json body", http.StatusBadRequest)
 				return
 			}
-			mode, err := wfStore.Set(id, workflow.Mode(body.Workflow))
+			if body.Encode == nil && body.Decode == nil {
+				jsonError(w, "encode or decode required", http.StatusBadRequest)
+				return
+			}
+			cfg, err := wfStore.Set(id, body)
 			if err != nil {
 				jsonError(w, err.Error(), http.StatusConflict)
 				return
 			}
-			jsonOK(w, map[string]any{"id": id, "workflow": mode})
+			jsonOK(w, map[string]any{"id": id, "encode": cfg.Encode, "decode": cfg.Decode})
 		})
 
 		r.Post("/api/recordings/{id}/start", func(w http.ResponseWriter, r *http.Request) {

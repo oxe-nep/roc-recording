@@ -1925,6 +1925,33 @@ html {
   gap: 8px;
 }
 
+.workflow-checks {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+}
+
+.workflow-check {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.workflow-check input {
+  margin-top: 3px;
+}
+
+.workflow-tc-note {
+  margin: 8px 0 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
 .workflow-option {
   display: flex;
   gap: 8px;

@@ -1,54 +1,44 @@
-export type ChannelWorkflow = "record" | "tc" | "playout";
+export interface ChannelWorkflowConfig {
+  encode: boolean;
+  decode: boolean;
+}
 
-export const WORKFLOW_OPTIONS: {
-  id: ChannelWorkflow;
-  label: string;
-  hint: string;
-}[] = [
-  {
-    id: "record",
-    label: "Record / Stream",
-    hint: "Capture input · REC · SRT",
-  },
-  {
-    id: "tc",
-    label: "TC Burn-in",
-    hint: "Passthrough with timecode overlay on DeckLink output",
-  },
-  {
-    id: "playout",
-    label: "Decode playout",
-    hint: "Play SRT or file to DeckLink output",
-  },
-];
+export const DEFAULT_WORKFLOW: ChannelWorkflowConfig = { encode: true, decode: true };
 
-export function normalizeWorkflow(value?: string): ChannelWorkflow {
-  if (value === "tc" || value === "playout" || value === "record") return value;
-  return "record";
+export function normalizeWorkflowConfig(value?: Partial<ChannelWorkflowConfig> | string): ChannelWorkflowConfig {
+  if (typeof value === "string") {
+    switch (value) {
+      case "playout":
+        return { encode: false, decode: true };
+      case "record":
+        return { encode: true, decode: false };
+      default:
+        return { ...DEFAULT_WORKFLOW };
+    }
+  }
+  const encode = value?.encode !== false;
+  const decode = value?.decode !== false;
+  if (!encode && !decode) return { ...DEFAULT_WORKFLOW };
+  return { encode, decode };
 }
 
 export function workflowForChannel(
-  workflows: Record<number, ChannelWorkflow>,
+  workflows: Record<number, ChannelWorkflowConfig>,
   channelId: number,
-): ChannelWorkflow {
-  return normalizeWorkflow(workflows[channelId]);
+): ChannelWorkflowConfig {
+  return normalizeWorkflowConfig(workflows[channelId]);
 }
 
 export function showEncodeCard(
-  workflows: Record<number, ChannelWorkflow>,
+  workflows: Record<number, ChannelWorkflowConfig>,
   channelId: number,
 ): boolean {
-  return workflowForChannel(workflows, channelId) === "record";
+  return workflowForChannel(workflows, channelId).encode;
 }
 
 export function showDecodeCard(
-  workflows: Record<number, ChannelWorkflow>,
+  workflows: Record<number, ChannelWorkflowConfig>,
   channelId: number,
 ): boolean {
-  const w = workflowForChannel(workflows, channelId);
-  return w === "playout" || w === "tc";
-}
-
-export function workflowLabel(w: ChannelWorkflow): string {
-  return WORKFLOW_OPTIONS.find((o) => o.id === w)?.label ?? w;
+  return workflowForChannel(workflows, channelId).decode;
 }

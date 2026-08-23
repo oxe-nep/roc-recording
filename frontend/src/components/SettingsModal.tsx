@@ -7,11 +7,10 @@ import {
   fetchStreams,
   setRecordingsPath,
   updateWorkflow,
-  type ChannelWorkflow,
 } from "@/lib/api";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { useWorkflows } from "@/hooks/useWorkflows";
-import { WORKFLOW_OPTIONS, workflowForChannel } from "@/lib/workflow";
+import { workflowForChannel } from "@/lib/workflow";
 import EncodePresetsEditor from "@/components/EncodePresetsEditor";
 
 type Tab = "storage" | "presets" | "workflows";
@@ -87,11 +86,11 @@ export default function SettingsModal({
     }
   };
 
-  const setWorkflow = async (id: number, workflow: ChannelWorkflow) => {
+  const patchWorkflow = async (id: number, patch: { encode?: boolean; decode?: boolean }) => {
     setWfBusy(id);
     setError(null);
     try {
-      await updateWorkflow(id, workflow);
+      await updateWorkflow(id, patch);
       await reloadWorkflows();
       window.dispatchEvent(new Event("roc-workflows-changed"));
     } catch (e) {
@@ -190,12 +189,13 @@ export default function SettingsModal({
         {tab === "workflows" && (
           <div className="settings-tab-panel">
             <p className="settings-tab-intro">
-              Choose what each channel pair focuses on. Only the relevant card row is shown on the
-              dashboard.
+              Enable encode and decode rows per channel. Record/stream and decode playout can run
+              together. TC burn-in is started from decode settings and locks the channel pair while
+              active.
             </p>
             <div className="workflow-list">
               {channelIds.map((id) => {
-                const current = workflowForChannel(workflows, id);
+                const cfg = workflowForChannel(workflows, id);
                 const busy = wfBusy === id;
                 return (
                   <div key={id} className="workflow-row">
@@ -203,27 +203,36 @@ export default function SettingsModal({
                       <span className="input-badge">{id}</span>
                       <span className="workflow-row-title">Channel {id}</span>
                     </div>
-                    <div className="workflow-options">
-                      {WORKFLOW_OPTIONS.map((opt) => (
-                        <label
-                          key={opt.id}
-                          className={`workflow-option${current === opt.id ? " active" : ""}`}
-                        >
-                          <input
-                            type="radio"
-                            name={`workflow-${id}`}
-                            value={opt.id}
-                            checked={current === opt.id}
-                            disabled={busy}
-                            onChange={() => void setWorkflow(id, opt.id)}
-                          />
-                          <span className="workflow-option-text">
-                            <strong>{opt.label}</strong>
-                            <span className="workflow-option-hint">{opt.hint}</span>
-                          </span>
-                        </label>
-                      ))}
+                    <div className="workflow-checks">
+                      <label className="workflow-check">
+                        <input
+                          type="checkbox"
+                          checked={cfg.encode}
+                          disabled={busy || (cfg.encode && !cfg.decode)}
+                          onChange={(e) => void patchWorkflow(id, { encode: e.target.checked })}
+                        />
+                        <span className="workflow-option-text">
+                          <strong>Encode</strong>
+                          <span className="workflow-option-hint">Record · Stream · capture preview</span>
+                        </span>
+                      </label>
+                      <label className="workflow-check">
+                        <input
+                          type="checkbox"
+                          checked={cfg.decode}
+                          disabled={busy || (cfg.decode && !cfg.encode)}
+                          onChange={(e) => void patchWorkflow(id, { decode: e.target.checked })}
+                        />
+                        <span className="workflow-option-text">
+                          <strong>Decode</strong>
+                          <span className="workflow-option-hint">Playout · TC burn-in settings</span>
+                        </span>
+                      </label>
                     </div>
+                    <p className="workflow-tc-note">
+                      TC burn-in: configure and start in decode settings (⚙). Stops normal encode and
+                      decode on this channel while running.
+                    </p>
                   </div>
                 );
               })}

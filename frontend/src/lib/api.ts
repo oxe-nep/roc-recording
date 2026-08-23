@@ -244,9 +244,12 @@ export async function setRecordingsPath(path: string): Promise<string> {
   return body.path as string;
 }
 
-export type ChannelWorkflow = "record" | "tc" | "playout";
+export interface ChannelWorkflowConfig {
+  encode: boolean;
+  decode: boolean;
+}
 
-export async function fetchWorkflows(): Promise<Record<string, ChannelWorkflow>> {
+export async function fetchWorkflows(): Promise<Record<string, ChannelWorkflowConfig>> {
   const res = await apiFetch("/api/workflows");
   if (!res.ok) throw new Error(`fetchWorkflows: ${res.status}`);
   return res.json();
@@ -254,11 +257,11 @@ export async function fetchWorkflows(): Promise<Record<string, ChannelWorkflow>>
 
 export async function updateWorkflow(
   id: number,
-  workflow: ChannelWorkflow,
-): Promise<{ id: number; workflow: ChannelWorkflow }> {
+  patch: Partial<ChannelWorkflowConfig>,
+): Promise<{ id: number; encode: boolean; decode: boolean }> {
   const res = await apiFetch(`/api/workflows/${id}`, {
     method: "PUT",
-    body: JSON.stringify({ workflow }),
+    body: JSON.stringify(patch),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

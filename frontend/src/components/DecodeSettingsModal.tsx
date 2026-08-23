@@ -65,7 +65,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
   const [logsOpen, setLogsOpen] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const [tcEnabled, setTcEnabled] = useState(false);
-  const [tcStatus, setTcStatus] = useState<"off" | "running" | "error">("off");
+  const [tcStatus, setTcStatus] = useState<"off" | "running" | "restarting" | "error">("off");
   const [tcSource, setTcSource] = useState<TcLoopSource>("tod");
   const [tcUdpPort, setTcUdpPort] = useState(0);
   const [tcFontSize, setTcFontSize] = useState(48);

@@ -67,6 +67,7 @@ type Info struct {
 	Opacity  float64  `json:"opacity"`
 	Position Position `json:"position"`
 	Error    string   `json:"error,omitempty"`
+	Timecode string   `json:"timecode,omitempty"`
 }
 
 type UpdateInput struct {
@@ -79,6 +80,7 @@ type UpdateInput struct {
 }
 
 const releaseWait = 10 * time.Second
+const decklinkSettle = 3 * time.Second
 
 // CaptureBridge provides encode-side input and activity checks.
 type CaptureBridge interface {
@@ -234,7 +236,10 @@ func (m *Manager) AudioLevels(id int) (l, r float64, ok bool) {
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	if st.status != StatusRunning {
+	if st.status != StatusRunning && st.status != StatusRestarting {
+		return 0, 0, false
+	}
+	if st.cmd == nil {
 		return 0, 0, false
 	}
 	return st.AudioL, st.AudioR, true
@@ -292,6 +297,7 @@ func (m *Manager) Get(id int) (Info, error) {
 		Opacity:  st.settings.Opacity,
 		Position: st.settings.Position,
 		Error:    st.lastErr,
+		Timecode: currentTimecode(id, st.status),
 	}, nil
 }
 
@@ -300,6 +306,18 @@ func effectiveUDPPort(id int, s Settings) int {
 		return s.UDPPort
 	}
 	return defaultUDPPort(id)
+}
+
+func currentTimecode(id int, status Status) string {
+	if status != StatusRunning {
+		return ""
+	}
+	path := filepath.Join(os.TempDir(), fmt.Sprintf("roc-tcloop-%d-tc.txt", id))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 func (m *Manager) Update(id int, in UpdateInput) (Info, error) {
@@ -341,6 +359,10 @@ func (m *Manager) Update(id int, in UpdateInput) (Info, error) {
 
 	if cfg.Enabled {
 		_ = m.Stop(id)
+		if !m.waitStopped(id, releaseWait) {
+			log.Printf("[tcloop] channel %d: previous TC process did not exit in time", id)
+		}
+		time.Sleep(decklinkSettle)
 		if err := m.Start(id); err != nil {
 			st.mu.Lock()
 			st.settings.Enabled = false
@@ -352,7 +374,10 @@ func (m *Manager) Update(id int, in UpdateInput) (Info, error) {
 		}
 	} else {
 		_ = m.Stop(id)
-		waitUntil(func() bool { return !m.IsRunning(id) }, releaseWait)
+		if !m.waitStopped(id, releaseWait) {
+			log.Printf("[tcloop] channel %d: TC process did not exit in time", id)
+		}
+		time.Sleep(decklinkSettle)
 		m.restartCapture(id)
 	}
 	return m.Get(id)
@@ -377,7 +402,7 @@ func (m *Manager) Start(id int) error {
 	st.settings = normalizeSettings(st.settings)
 	cfg := st.settings
 	st.stopCh = make(chan struct{})
-	st.status = StatusRunning
+	st.status = StatusRestarting
 	st.lastErr = ""
 	stopCh := st.stopCh
 	st.mu.Unlock()
@@ -401,8 +426,21 @@ func waitUntil(ok func() bool, timeout time.Duration) bool {
 	return ok()
 }
 
+func (m *Manager) waitStopped(id int, timeout time.Duration) bool {
+	return waitUntil(func() bool {
+		st := m.get(id)
+		if st == nil {
+			return true
+		}
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		return st.status == StatusOff && st.cmd == nil
+	}, timeout)
+}
+
 // releaseInput stops encode/decode on the channel so DeckLink can be opened for TC Burn-in.
 func (m *Manager) releaseInput(id int) error {
+	released := false
 	if m.capture != nil && m.capture.IsActive(id) {
 		log.Printf("[tcloop] stopping encode on channel %d for TC Burn-in", id)
 		if err := m.capture.Stop(id); err != nil && !strings.Contains(err.Error(), "not running") {
@@ -411,6 +449,7 @@ func (m *Manager) releaseInput(id int) error {
 		if !waitUntil(func() bool { return !m.capture.IsActive(id) }, releaseWait) {
 			return fmt.Errorf("encode on channel %d did not stop in time", id)
 		}
+		released = true
 	}
 	if m.playout != nil && m.playout.IsActive(id) {
 		log.Printf("[tcloop] stopping decode playout on channel %d for TC Burn-in", id)
@@ -420,6 +459,10 @@ func (m *Manager) releaseInput(id int) error {
 		if !waitUntil(func() bool { return !m.playout.IsActive(id) }, releaseWait) {
 			return fmt.Errorf("decode playout on channel %d did not stop in time", id)
 		}
+		released = true
+	}
+	if released {
+		time.Sleep(decklinkSettle)
 	}
 	return nil
 }
@@ -490,10 +533,9 @@ func (m *Manager) StartEnabled() {
 
 func (m *Manager) runLoop(id int, st *channelState, stopCh <-chan struct{}, cfg Settings) {
 	const (
-		restartDelay   = 5 * time.Second
+		restartDelay   = 2 * time.Second
 		stableAfter    = 10 * time.Second
-		decklinkSettle = 2 * time.Second
-		maxBackoff     = 60 * time.Second
+		maxBackoff     = 30 * time.Second
 	)
 	consecutiveFails := 0
 
@@ -543,7 +585,7 @@ func (m *Manager) runLoop(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		}
 
 		st.mu.Lock()
-		st.status = StatusRunning
+		st.status = StatusRestarting
 		st.lastErr = ""
 		st.mu.Unlock()
 
@@ -775,6 +817,9 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		st.mu.Unlock()
 		return err
 	}
+	st.mu.Lock()
+	st.status = StatusRunning
+	st.mu.Unlock()
 	errLines := make(chan []string, 1)
 	go func() { errLines <- collectStderr(stderr, st) }()
 

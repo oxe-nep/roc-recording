@@ -194,7 +194,7 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 			})
 			resp := make([]streamResponse, 0, len(streams))
 			for _, s := range streams {
-				resp = append(resp, toResponse(s, hlsBaseURL, tslMgr))
+				resp = append(resp, toResponse(s, hlsBaseURL, tslMgr, tcMgr))
 			}
 			jsonOK(w, resp)
 		})
@@ -386,7 +386,7 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 				jsonError(w, "channel not found", http.StatusNotFound)
 				return
 			}
-			jsonOK(w, toResponse(s, hlsBaseURL, tslMgr))
+			jsonOK(w, toResponse(s, hlsBaseURL, tslMgr, tcMgr))
 		})
 
 		// Recording endpoints
@@ -909,7 +909,7 @@ func apiKeyMiddleware(key string) func(http.Handler) http.Handler {
 	}
 }
 
-func toResponse(s *capture.Stream, hlsBaseURL string, tslMgr *tsl.Manager) streamResponse {
+func toResponse(s *capture.Stream, hlsBaseURL string, tslMgr *tsl.Manager, tcMgr *tcloop.Manager) streamResponse {
 	status, errStr, format, preset := s.Snapshot()
 	resp := streamResponse{
 		ID:           s.ID,
@@ -922,6 +922,9 @@ func toResponse(s *capture.Stream, hlsBaseURL string, tslMgr *tsl.Manager) strea
 	}
 	if tslMgr != nil && tslMgr.Enabled() {
 		active := status == capture.StatusRunning
+		if tcMgr != nil && tcMgr.IsRunning(s.ID) {
+			active = true
+		}
 		info := tslMgr.InfoForChannel(s.ID, active)
 		resp.TSLIndex = info.Index
 		resp.TSLText = info.Text

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  fetchPlayoutAudioLevels,
+  fetchAudioLevels,
   fetchPlayoutClients,
   fetchStreams,
   fetchTcLoop,
@@ -55,10 +55,15 @@ function SegmentedMeter({ db, label }: { db?: number; label: string }) {
 }
 
 function statusMeta(tc?: TcLoopInfo, live?: boolean): string {
+  const code = tc?.timecode?.trim();
+  if (code && code !== "--:--:--") {
+    if (live) return code;
+    if (tcIsActive(tc)) return code;
+  }
   if (live) return `Live · ${tcSourceShort(tc?.source)}`;
-  if (tc?.status === "restarting") return "Reconnecting";
+  if (tc?.status === "restarting") return "Starting…";
   if (tc?.status === "error") return "Error";
-  if (tcIsActive(tc)) return "Starting";
+  if (tcIsActive(tc)) return "Starting…";
   return "Off";
 }
 
@@ -118,15 +123,15 @@ export default function TcGrid() {
       const updates: Record<number, AudioLevels> = {};
       for (const id of channelIds) {
         const tc = tcByIdRef.current[id];
-        if (!tcPreviewHasSignal(tc)) {
+        if (!tcIsActive(tc)) {
           updates[id] = silence;
         }
       }
-      const active = channelIds.filter((id) => tcPreviewHasSignal(tcByIdRef.current[id]));
+      const active = channelIds.filter((id) => tcIsActive(tcByIdRef.current[id]));
       await Promise.all(
         active.map(async (id) => {
           try {
-            updates[id] = await fetchPlayoutAudioLevels(id);
+            updates[id] = await fetchAudioLevels(id);
           } catch {
             updates[id] = silence;
           }
@@ -197,9 +202,9 @@ export default function TcGrid() {
                 >
                   <AudioMonitor
                     id={s.id}
-                    active={tcLive}
+                    active={tcLive || tcOn}
                     listening={isListening}
-                    playlistPath={`/hls/playout/${s.id}/audio.m3u8`}
+                    playlistPath={`/hls/${s.id}/audio.m3u8`}
                   />
                   <div className="card-stage">
                     <div className="card-thumb">
@@ -208,7 +213,7 @@ export default function TcGrid() {
                         active={tcLive || hasSignal}
                         path={tcLive ? `/hls/playout/${s.id}/thumb.jpg` : undefined}
                       />
-                      {tslText && (hasSignal || tcLive) && (
+                      {tslText && (hasSignal || tcOn) && (
                         <div className="thumb-tsl-overlay">
                           <div className="tsl-badge" title={`TSL ${s.tsl_index ?? s.id}`}>
                             {tslText}
@@ -257,7 +262,7 @@ export default function TcGrid() {
                             {busy[s.id] ? "…" : "STOP"}
                           </button>
                         ) : null}
-                        {tcLive && (
+                        {(tcLive || tcOn) && (
                           <button
                             type="button"
                             className={`badge listen-btn ${isListening ? "active" : ""}`}

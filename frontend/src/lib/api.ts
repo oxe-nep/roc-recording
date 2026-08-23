@@ -571,6 +571,7 @@ export interface TcLoopInfo {
   opacity: number;
   position: TcLoopPosition;
   error?: string;
+  timecode?: string;
 }
 
 export type TcLoopUpdateInput = {

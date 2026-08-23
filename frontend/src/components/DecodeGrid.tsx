@@ -347,9 +347,11 @@ export default function DecodeGrid() {
                           <span className="card-meta-item card-meta-tc">
                             {tcLive
                               ? `TC · ${tcSourceShort(tc?.source)}`
-                              : tc?.status === "error"
-                                ? "TC · error"
-                                : "TC · starting"}
+                              : tc?.status === "restarting"
+                                ? "TC · reconnecting"
+                                : tc?.status === "error"
+                                  ? "TC · error"
+                                  : "TC · starting"}
                           </span>
                         ) : (
                           <>

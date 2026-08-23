@@ -20,9 +20,10 @@ import (
 type Status string
 
 const (
-	StatusOff     Status = "off"
-	StatusRunning Status = "running"
-	StatusError   Status = "error"
+	StatusOff         Status = "off"
+	StatusRunning     Status = "running"
+	StatusRestarting  Status = "restarting"
+	StatusError       Status = "error"
 )
 
 type Position string
@@ -264,7 +265,7 @@ func (m *Manager) IsRunning(id int) bool {
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	return st.status == StatusRunning
+	return st.status == StatusRunning || st.status == StatusRestarting
 }
 
 func (m *Manager) get(id int) *channelState {
@@ -488,7 +489,14 @@ func (m *Manager) StartEnabled() {
 }
 
 func (m *Manager) runLoop(id int, st *channelState, stopCh <-chan struct{}, cfg Settings) {
-	const restartDelay = 5 * time.Second
+	const (
+		restartDelay   = 5 * time.Second
+		stableAfter    = 10 * time.Second
+		decklinkSettle = 2 * time.Second
+		maxBackoff     = 60 * time.Second
+	)
+	consecutiveFails := 0
+
 	defer func() {
 		st.mu.Lock()
 		if st.cmd != nil && st.cmd.Process != nil {
@@ -520,10 +528,26 @@ func (m *Manager) runLoop(id int, st *channelState, stopCh <-chan struct{}, cfg 
 			return
 		}
 
+		if consecutiveFails > 0 {
+			if err := m.releaseInput(id); err != nil {
+				log.Printf("[tcloop %d] release before retry: %v", id, err)
+			}
+			select {
+			case <-stopCh:
+				st.mu.Lock()
+				st.status = StatusOff
+				st.mu.Unlock()
+				return
+			case <-time.After(decklinkSettle):
+			}
+		}
+
 		st.mu.Lock()
 		st.status = StatusRunning
+		st.lastErr = ""
 		st.mu.Unlock()
 
+		start := time.Now()
 		err := m.runOnce(id, st, stopCh, cfg)
 		select {
 		case <-stopCh:
@@ -533,26 +557,48 @@ func (m *Manager) runLoop(id int, st *channelState, stopCh <-chan struct{}, cfg 
 			return
 		default:
 		}
+
 		st.mu.Lock()
 		if !st.settings.Enabled {
 			st.status = StatusOff
 			st.mu.Unlock()
 			return
 		}
+
+		uptime := time.Since(start)
+		if err == nil || uptime >= stableAfter {
+			consecutiveFails = 0
+		} else {
+			consecutiveFails++
+		}
+
 		delay := restartDelay
 		if err != nil {
 			st.lastErr = err.Error()
-			st.status = StatusError
 			if isFilterConfigError(err.Error()) {
-				// Bad filtergraph will never self-heal — back off hard so we do not thrash DeckLink.
 				delay = 30 * time.Second
+				st.status = StatusError
+			} else if consecutiveFails >= 12 {
+				st.status = StatusError
+				delay = maxBackoff
+			} else {
+				st.status = StatusRestarting
+				exp := restartDelay * time.Duration(1<<min(consecutiveFails-1, 4))
+				if exp > delay {
+					delay = exp
+				}
+				if delay > maxBackoff {
+					delay = maxBackoff
+				}
 			}
-			log.Printf("[tcloop %d] ffmpeg exited: %v – retry in %s", id, err, delay)
+			log.Printf("[tcloop %d] ffmpeg exited after %s: %v (fail #%d) – retry in %s",
+				id, uptime.Round(time.Millisecond), err, consecutiveFails, delay)
 		} else {
 			st.lastErr = ""
-			log.Printf("[tcloop %d] ffmpeg exited – retry in %s", id, delay)
+			log.Printf("[tcloop %d] ffmpeg exited after %s – retry in %s", id, uptime.Round(time.Millisecond), delay)
 		}
 		st.mu.Unlock()
+
 		select {
 		case <-stopCh:
 			st.mu.Lock()
@@ -605,6 +651,8 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 	playoutAudioSeg := filepath.Join(playoutOutDir, "audio_%03d.ts")
 
 	textPath := filepath.Join(os.TempDir(), fmt.Sprintf("roc-tcloop-%d-tc.txt", id))
+	metaPath := filepath.Join(os.TempDir(), fmt.Sprintf("roc-tcloop-%d-astats.meta", id))
+	_ = os.Remove(metaPath)
 	clockStop := make(chan struct{})
 	if err := startClockFile(textPath, cfg.Source, id, cfg.UDPPort, clockStop); err != nil {
 		return err
@@ -612,9 +660,11 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 	defer func() {
 		close(clockStop)
 		_ = os.Remove(textPath)
+		_ = os.Remove(metaPath)
 	}()
 
 	draw := buildDrawtext(cfg, textPath)
+	metaEsc := escapeFilterPath(metaPath)
 	var vbase string
 	if interlaced {
 		vbase = fmt.Sprintf(
@@ -633,11 +683,11 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 			"[0:a]aformat=channel_layouts=stereo,asplit=4[adeck][ameter][ahlse][ahlsd];"+
 				"[adeck]asetnsamples=n=%d:p=0[aout];"+
 				"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none,"+
-				"ametadata=print,anullsink",
-			samplesPerFrame,
+				"ametadata=print:file=%s,anullsink",
+			samplesPerFrame, metaEsc,
 		)
 
-	args := []string{"-hide_banner", "-loglevel", "info", "-fflags", "+genpts+discardcorrupt", "-y"}
+	args := []string{"-hide_banner", "-loglevel", "warning", "-fflags", "+genpts+discardcorrupt", "-y"}
 	args = append(args, inputArgs...)
 	args = append(args,
 		"-filter_complex", filter,
@@ -716,6 +766,9 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 	}
 	log.Printf("[tcloop %d] starting TC burn-in (%s) → decklink %q format=%s (primary=%q alt=%q tryAlt=%v)",
 		id, srcLabel, openDevice, formatCode, openPrimary, openAlt, tryAlt)
+	astatsStop := make(chan struct{})
+	go tailAstatsMeta(metaPath, st, astatsStop)
+	defer close(astatsStop)
 	if err := cmd.Start(); err != nil {
 		st.mu.Lock()
 		st.cmd = nil
@@ -857,15 +910,51 @@ func isDeckLinkOpenFailure(lines []string) bool {
 }
 
 func isTCLoopNoise(line string) bool {
-	if strings.Contains(line, "Parsed_ametadata") || strings.Contains(line, "lavfi.astats") {
+	if strings.Contains(line, "Parsed_ametadata") ||
+		strings.Contains(line, "lavfi.astats") ||
+		strings.Contains(line, "[hls @") {
 		return true
 	}
-	// HLS segment rotation is very chatty at info level.
 	if strings.Contains(line, "Opening '") &&
-		(strings.Contains(line, ".ts'") || strings.Contains(line, ".m3u8")) {
+		(strings.Contains(line, ".ts") || strings.Contains(line, ".m3u8")) {
 		return true
 	}
 	return false
+}
+
+func tailAstatsMeta(path string, st *channelState, stop <-chan struct{}) {
+	ticker := time.NewTicker(80 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			b, err := os.ReadFile(path)
+			if err != nil || len(b) == 0 {
+				continue
+			}
+			start := 0
+			if len(b) > 8192 {
+				start = len(b) - 8192
+			}
+			for _, line := range strings.Split(string(b[start:]), "\n") {
+				line = strings.TrimSpace(line)
+				if mm := reAstatsPeak.FindStringSubmatch(line); len(mm) == 3 {
+					ch, _ := strconv.Atoi(mm[1])
+					val := parsePeakDB(mm[2])
+					st.mu.Lock()
+					switch ch {
+					case 1:
+						st.AudioL = val
+					case 2:
+						st.AudioR = val
+					}
+					st.mu.Unlock()
+				}
+			}
+		}
+	}
 }
 
 func collectStderr(r io.Reader, st *channelState) []string {

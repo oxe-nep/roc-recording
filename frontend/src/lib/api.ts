@@ -562,7 +562,7 @@ export type TcLoopSource = "tod" | "external";
 export interface TcLoopInfo {
   id: number;
   enabled: boolean;
-  status: "off" | "running" | "error";
+  status: "off" | "running" | "restarting" | "error";
   source: TcLoopSource;
   udp_port: number;
   fontsize: number;

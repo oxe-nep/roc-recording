@@ -22,6 +22,7 @@ export function tcSourceLabel(
 
 export function tcStatusLabel(status?: TcLoopInfo["status"], enabled?: boolean): string {
   if (status === "running") return "Active";
+  if (status === "restarting") return "Reconnecting";
   if (status === "error") return "Error";
   if (enabled) return "Starting";
   return "Off";
@@ -29,22 +30,24 @@ export function tcStatusLabel(status?: TcLoopInfo["status"], enabled?: boolean):
 
 export function tcStatusPillClass(status?: TcLoopInfo["status"], enabled?: boolean): string {
   if (status === "running") return "tc-status-pill running";
+  if (status === "restarting") return "tc-status-pill starting";
   if (status === "error") return "tc-status-pill error";
   if (enabled) return "tc-status-pill starting";
   return "tc-status-pill off";
 }
 
 export function tcBadgeText(tc?: TcLoopInfo): string {
-  if (!tc || (!tc.enabled && tc.status !== "running")) return "";
+  if (!tc || (!tc.enabled && tc.status !== "running" && tc.status !== "restarting")) return "";
   const src = tcSourceShort(tc.source);
   if (tc.status === "running") return `TC · ${src} · burn-in`;
+  if (tc.status === "restarting") return `TC · ${src} · reconnecting…`;
   if (tc.status === "error") return `TC · ${src} · error`;
   if (tc.enabled) return `TC · ${src} · starting…`;
   return "";
 }
 
 export function tcIsActive(tc?: TcLoopInfo): boolean {
-  return !!tc?.enabled || tc?.status === "running";
+  return !!tc?.enabled || tc?.status === "running" || tc?.status === "restarting";
 }
 
 export function tcPreviewHasSignal(tc?: TcLoopInfo): boolean {

@@ -140,6 +140,21 @@ func registerDashboardWS(r chiRouter, hub *ws.Hub, apiKey string) {
 	})
 }
 
+func registerDashboardHTTP(
+	r chiRouter,
+	mgr *capture.Manager,
+	recMgr *recording.Manager,
+	srtMgr *srt.Manager,
+	playMgr *playout.Manager,
+	tcMgr *tcloop.Manager,
+	tslMgr *tsl.Manager,
+	hlsBaseURL string,
+) {
+	r.Get("/api/dashboard", func(w http.ResponseWriter, req *http.Request) {
+		jsonOK(w, buildDashboardSnapshot(mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, hlsBaseURL))
+	})
+}
+
 // chiRouter is the subset of chi.Router we need (avoids import cycle noise in helpers).
 type chiRouter interface {
 	Get(pattern string, handlerFn http.HandlerFunc)

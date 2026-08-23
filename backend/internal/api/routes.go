@@ -65,8 +65,6 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 	hub := ws.NewHub(allowedOrigins)
 	startDashboardWS(hub, mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, hlsBaseURL)
 	registerDashboardWS(r, hub, apiKey)
-
-	// HLS, thumbnails and audio meters – no API key required
 	r.Mount("/hls/", hlsHandler)
 	r.Get("/audio/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.Atoi(chi.URLParam(r, "id"))
@@ -191,6 +189,7 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 		r.Use(apiKeyMiddleware(apiKey))
 
 		registerPlayoutRoutes(r, playMgr, tcMgr)
+		registerDashboardHTTP(r, mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, hlsBaseURL)
 
 		r.Get("/api/streams", func(w http.ResponseWriter, r *http.Request) {
 			streams := mgr.List()
@@ -859,7 +858,7 @@ func shouldSkipRequestLog(r *http.Request) bool {
 		strings.HasPrefix(path, "/hls/"),
 		path == "/ws":
 		return true
-	case path == "/api/streams", path == "/api/recordings", path == "/api/srt", path == "/api/system", path == "/api/encode/presets",
+	case path == "/api/streams", path == "/api/recordings", path == "/api/srt", path == "/api/system", path == "/api/dashboard", path == "/api/encode/presets",
 		path == "/api/encode/options", path == "/api/workflows",
 		path == "/api/library/categories", path == "/api/library/files",
 		path == "/api/playout", path == "/api/playout/devices", path == "/api/playout/media":

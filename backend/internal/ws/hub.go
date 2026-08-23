@@ -77,8 +77,8 @@ func (h *Hub) Run() {
 				select {
 				case c.send <- msg:
 				default:
-					close(c.send)
 					delete(h.clients, c)
+					close(c.send)
 				}
 			}
 			h.mu.Unlock()

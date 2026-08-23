@@ -10,28 +10,21 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type {
-  AudioLevels,
-  PlayoutClient,
-  RecordingInfo,
-  SrtInfo,
-  Stream,
-  TcLoopInfo,
+import {
+  fetchDashboardSnapshot,
+  type AudioLevels,
+  type DashboardSnapshot,
+  type PlayoutClient,
+  type RecordingInfo,
+  type SrtInfo,
+  type Stream,
+  type TcLoopInfo,
 } from "@/lib/api";
+import { mediaBase } from "@/lib/mediaBase";
 
-const BASE = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8080";
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY ?? "";
 
-export type DashboardSnapshot = {
-  type: "snapshot";
-  streams: Stream[];
-  playout: PlayoutClient[];
-  tc: TcLoopInfo[];
-  recordings: RecordingInfo[];
-  srt: SrtInfo[];
-  meters_encode: Record<string, AudioLevels>;
-  meters_playout: Record<string, AudioLevels>;
-};
+export type { DashboardSnapshot };
 
 type DashboardState = {
   connected: boolean;
@@ -60,16 +53,8 @@ const EMPTY: DashboardState = {
 const DashboardContext = createContext<DashboardState>(EMPTY);
 
 function wsURL(): string {
-  const base = BASE.trim();
-  let http: string;
-  if (!base) {
-    http = typeof window !== "undefined" ? window.location.origin : "http://localhost:8080";
-  } else {
-    http = base;
-  }
-  const u = new URL(http);
+  const u = new URL("/ws", mediaBase());
   u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
-  u.pathname = "/ws";
   u.search = "";
   if (API_KEY) u.searchParams.set("api_key", API_KEY);
   return u.toString();
@@ -85,7 +70,7 @@ function mapMeters(raw?: Record<string, AudioLevels>): Record<number, AudioLevel
   return out;
 }
 
-function applySnapshot(msg: DashboardSnapshot): DashboardState {
+function snapshotToState(msg: DashboardSnapshot, connected: boolean): DashboardState {
   const rec: Record<number, RecordingInfo> = {};
   for (const r of msg.recordings ?? []) rec[r.id] = r;
   const srt: Record<number, SrtInfo> = {};
@@ -93,7 +78,7 @@ function applySnapshot(msg: DashboardSnapshot): DashboardState {
   const tc: Record<number, TcLoopInfo> = {};
   for (const t of msg.tc ?? []) tc[t.id] = t;
   return {
-    connected: true,
+    connected,
     loading: false,
     streams: msg.streams ?? [],
     playout: msg.playout ?? [],
@@ -109,54 +94,106 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<DashboardState>(EMPTY);
   const retryRef = useRef(0);
   const wsRef = useRef<WebSocket | null>(null);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const intentionalCloseRef = useRef(false);
+  const mountedRef = useRef(false);
+
+  const clearRetryTimer = useCallback(() => {
+    if (retryTimerRef.current != null) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+  }, []);
+
+  const applySnapshot = useCallback((msg: DashboardSnapshot, connected: boolean) => {
+    if (!mountedRef.current) return;
+    setState(snapshotToState(msg, connected));
+  }, []);
 
   const connect = useCallback(() => {
-    if (typeof window === "undefined") return;
-    try {
-      wsRef.current?.close();
-    } catch {
-      /* ignore */
+    if (!mountedRef.current || typeof window === "undefined") return;
+
+    clearRetryTimer();
+    intentionalCloseRef.current = false;
+
+    const existing = wsRef.current;
+    if (existing && (existing.readyState === WebSocket.OPEN || existing.readyState === WebSocket.CONNECTING)) {
+      return;
     }
+
+    if (existing) {
+      intentionalCloseRef.current = true;
+      try {
+        existing.close();
+      } catch {
+        /* ignore */
+      }
+      wsRef.current = null;
+      intentionalCloseRef.current = false;
+    }
+
     const sock = new WebSocket(wsURL());
     wsRef.current = sock;
 
     sock.onopen = () => {
+      if (!mountedRef.current || wsRef.current !== sock) return;
       retryRef.current = 0;
       setState((prev) => ({ ...prev, connected: true }));
     };
 
     sock.onmessage = (ev) => {
+      if (!mountedRef.current || wsRef.current !== sock) return;
       try {
         const msg = JSON.parse(String(ev.data)) as DashboardSnapshot;
         if (msg?.type !== "snapshot") return;
-        setState(applySnapshot(msg));
+        applySnapshot(msg, true);
       } catch {
         /* ignore bad frames */
       }
     };
 
     sock.onclose = () => {
+      if (!mountedRef.current || wsRef.current !== sock) return;
+      wsRef.current = null;
+      if (intentionalCloseRef.current) return;
+
       setState((prev) => ({ ...prev, connected: false }));
       const attempt = retryRef.current++;
       const delay = Math.min(10_000, 500 * 2 ** Math.min(attempt, 4));
-      window.setTimeout(connect, delay);
+      retryTimerRef.current = setTimeout(() => {
+        retryTimerRef.current = null;
+        connect();
+      }, delay);
     };
 
     sock.onerror = () => {
       sock.close();
     };
-  }, []);
+  }, [applySnapshot, clearRetryTimer]);
 
   useEffect(() => {
+    mountedRef.current = true;
+
+    void fetchDashboardSnapshot()
+      .then((msg) => applySnapshot(msg, false))
+      .catch(() => {
+        /* WS reconnect will retry */
+      });
+
     connect();
+
     return () => {
+      mountedRef.current = false;
+      clearRetryTimer();
+      intentionalCloseRef.current = true;
       try {
         wsRef.current?.close();
       } catch {
         /* ignore */
       }
+      wsRef.current = null;
     };
-  }, [connect]);
+  }, [connect, applySnapshot, clearRetryTimer]);
 
   const value = useMemo(() => state, [state]);
   return <DashboardContext.Provider value={value}>{children}</DashboardContext.Provider>;

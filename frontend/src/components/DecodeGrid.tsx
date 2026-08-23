@@ -14,8 +14,7 @@ import {
 import { showDecodeCard } from "@/lib/workflow";
 import { useWorkflows } from "@/hooks/useWorkflows";
 import { useDashboard } from "@/hooks/useDashboard";
-import Thumbnail from "@/components/Thumbnail";
-import AudioMonitor from "@/components/AudioMonitor";
+import HlsPreview from "@/components/HlsPreview";
 import DecodeSettingsModal from "@/components/DecodeSettingsModal";
 import MediaLibraryModal from "@/components/MediaLibraryModal";
 
@@ -187,15 +186,13 @@ export default function DecodeGrid() {
             const title = cardTitle(c);
             return (
               <div key={c.id} className={`card-panel ${c.status}`}>
-                <AudioMonitor
-                  id={c.id}
-                  active={playing}
-                  listening={isListening}
-                  playlistPath={`/hls/playout/${c.id}/audio.m3u8`}
-                />
                 <div className="card-stage">
                   <div className="card-thumb">
-                    <Thumbnail id={c.id} active={on} path={`/hls/playout/${c.id}/thumb.jpg`} />
+                    <HlsPreview
+                      active={on}
+                      listening={isListening}
+                      playlistPath={`/hls/playout/${c.id}/preview.m3u8`}
+                    />
                     {on && (
                       <div className="thumb-badges">
                         <div className={`stream-badge${hasMedia || c.sending ? "" : " waiting"}`}>
@@ -299,12 +296,12 @@ export default function DecodeGrid() {
                           {busy[c.id] ? "…" : "STOP"}
                         </button>
                       ) : null}
-                      {playing && (
+                      {on && (
                         <button
                           type="button"
                           className={`badge listen-btn ${isListening ? "active" : ""}`}
                           onClick={() => setListening((prev) => ({ ...prev, [c.id]: !prev[c.id] }))}
-                          title={isListening ? "Stop monitor" : "Monitor"}
+                          title={isListening ? "Mute preview" : "Unmute preview"}
                         >
                           {isListening ? "🔊" : "🔈"}
                         </button>

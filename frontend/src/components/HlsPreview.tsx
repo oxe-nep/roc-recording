@@ -2,8 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import Hls from "hls.js";
-
-const BASE = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8080";
+import { mediaURL } from "@/lib/mediaBase";
 
 type Props = {
   active: boolean;
@@ -34,7 +33,7 @@ export default function HlsPreview({ active, listening, playlistPath }: Props) {
       return;
     }
 
-    const src = `${BASE}${playlistPath}`;
+    const src = mediaURL(playlistPath);
 
     if (Hls.isSupported()) {
       const hls = new Hls({

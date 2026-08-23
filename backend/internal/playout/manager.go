@@ -18,6 +18,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	hlsout "github.com/roc-recording/backend/internal/hls"
 )
 
 type Status string
@@ -1059,9 +1061,8 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
-	thumbPath := filepath.Join(outDir, "thumb.jpg")
-	audioPlaylist := filepath.Join(outDir, "audio.m3u8")
-	audioSeg := filepath.Join(outDir, "audio_%03d.ts")
+	hlsout.RemovePreviewArtifacts(outDir)
+	previewPlaylist, previewSeg := hlsout.PreviewPaths(outDir)
 
 	c.mu.Lock()
 	wantDeckLink := c.DeckLinkOut || c.Fixed
@@ -1275,29 +1276,14 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			prevAudio = "[1:a]"
 		}
 		prevFilter :=
-			"[0:v]fps=1,scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,format=yuv420p[vthumb];" +
-				fmt.Sprintf("%sasplit=2[ahls][ameter];", prevAudio) +
+			"[0:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,fps=10,format=yuv420p[vprev];" +
+				fmt.Sprintf("%sasplit=2[aprev][ameter];", prevAudio) +
 				"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
 				"ametadata=print,anullsink"
 		previewArgs = append(previewArgs,
 			"-filter_complex", prevFilter,
-			"-map", "[vthumb]",
-			"-q:v", "4",
-			"-update", "1",
-			"-f", "image2",
-			thumbPath,
-			"-map", "[ahls]",
-			"-c:a", "aac",
-			"-b:a", "128k",
-			"-ar", "48000",
-			"-ac", "2",
-			"-f", "hls",
-			"-hls_time", "1",
-			"-hls_list_size", "4",
-			"-hls_flags", "delete_segments+independent_segments+omit_endlist",
-			"-hls_segment_filename", audioSeg,
-			audioPlaylist,
 		)
+		previewArgs = hlsout.AppendAVPreviewOutputs(previewArgs, "[vprev]", "[aprev]", previewPlaylist, previewSeg)
 
 		return m.runFileDeckLinkAndPreview(c, stopCh, openDevice, formatCode, w, h, fps, fmtInfo.Interlaced, loop, dlArgs, previewArgs)
 	}
@@ -1305,9 +1291,9 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	var filter string
 	if useDeckLink {
 		filter = vchain + ";" +
-			"[vt]fps=1,scale=640:360,format=yuv420p[vthumb];" +
+			"[vt]scale=640:360,fps=10,format=yuv420p[vprev];" +
 			fmt.Sprintf(
-				"%saresample=48000:async=1:first_pts=0,aformat=channel_layouts=stereo,asetnsamples=n=%d:p=0,asplit=3[aout][ahls][ameter];",
+				"%saresample=48000:async=1:first_pts=0,aformat=channel_layouts=stereo,asetnsamples=n=%d:p=0,asplit=3[aout][aprev][ameter];",
 				audioSrc, samplesPerFrame,
 			) +
 			"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
@@ -1333,48 +1319,18 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		args = append(args,
 			"-preroll", "0.5",
 			"-f", "decklink", openDevice,
-			"-map", "[vthumb]",
-			"-q:v", "4",
-			"-update", "1",
-			"-f", "image2",
-			thumbPath,
-			"-map", "[ahls]",
-			"-c:a", "aac",
-			"-b:a", "128k",
-			"-ar", "48000",
-			"-ac", "2",
-			"-f", "hls",
-			"-hls_time", "1",
-			"-hls_list_size", "4",
-			"-hls_flags", "delete_segments+independent_segments+omit_endlist",
-			"-hls_segment_filename", audioSeg,
-			audioPlaylist,
 		)
+		args = hlsout.AppendAVPreviewOutputs(args, "[vprev]", "[aprev]", previewPlaylist, previewSeg)
 	} else {
 		filter =
-			"[0:v]fps=1,scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,format=yuv420p[vthumb];" +
-				fmt.Sprintf("%sasplit=2[ahls][ameter];", audioSrc) +
+			"[0:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,fps=10,format=yuv420p[vprev];" +
+				fmt.Sprintf("%sasplit=2[aprev][ameter];", audioSrc) +
 				"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
 				"ametadata=print,anullsink"
 		args = append(args,
 			"-filter_complex", filter,
-			"-map", "[vthumb]",
-			"-q:v", "4",
-			"-update", "1",
-			"-f", "image2",
-			thumbPath,
-			"-map", "[ahls]",
-			"-c:a", "aac",
-			"-b:a", "128k",
-			"-ar", "48000",
-			"-ac", "2",
-			"-f", "hls",
-			"-hls_time", "1",
-			"-hls_list_size", "4",
-			"-hls_flags", "delete_segments+independent_segments+omit_endlist",
-			"-hls_segment_filename", audioSeg,
-			audioPlaylist,
 		)
+		args = hlsout.AppendAVPreviewOutputs(args, "[vprev]", "[aprev]", previewPlaylist, previewSeg)
 	}
 
 	cmd := exec.Command(m.ffmpegBin, args...)

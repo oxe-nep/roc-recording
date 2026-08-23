@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	hlsout "github.com/roc-recording/backend/internal/hls"
 )
 
 type Status string
@@ -542,7 +544,7 @@ func (m *Manager) runLoop(s *Stream) {
 		select {
 		case <-s.stopCh:
 			m.killStream(s)
-			m.removeThumb(s.ID)
+			m.removePreview(s.ID)
 			s.mu.Lock()
 			s.Status = StatusStopped
 			s.Format = ""
@@ -568,7 +570,7 @@ func (m *Manager) runLoop(s *Stream) {
 			s.AudioL = audioSilence
 			s.AudioR = audioSilence
 			s.mu.Unlock()
-			m.removeThumb(s.ID)
+			m.removePreview(s.ID)
 			s.appendLog("channel stopped")
 			return
 		default:
@@ -582,7 +584,7 @@ func (m *Manager) runLoop(s *Stream) {
 		s.AudioR = audioSilence
 		s.Status = StatusWaiting
 		s.mu.Unlock()
-		m.removeThumb(s.ID)
+		m.removePreview(s.ID)
 
 		if err == nil {
 			consecutiveFails = 0
@@ -592,7 +594,7 @@ func (m *Manager) runLoop(s *Stream) {
 				s.mu.Lock()
 				s.Status = StatusStopped
 				s.mu.Unlock()
-				m.removeThumb(s.ID)
+				m.removePreview(s.ID)
 				s.appendLog("channel stopped")
 				return
 			case <-time.After(500 * time.Millisecond):
@@ -622,7 +624,7 @@ func (m *Manager) runLoop(s *Stream) {
 			s.mu.Lock()
 			s.Status = StatusStopped
 			s.mu.Unlock()
-			m.removeThumb(s.ID)
+			m.removePreview(s.ID)
 			s.appendLog("channel stopped")
 			return
 		case <-time.After(delay):
@@ -631,20 +633,17 @@ func (m *Manager) runLoop(s *Stream) {
 }
 
 // runFFmpeg starts one FFmpeg per DeckLink channel with multiple outputs (fan-out):
-// 1) JPEG thumbnail for grid preview
+// 1) Low-latency HLS A/V preview for card UI
 // 2) Master H.264/AAC MPEG-TS UDP feed — recording remuxes this with -c copy
-// 3) HLS audio-only stream for browser monitoring
 // Audio levels are parsed from astats metadata on a shared stereo branch in filter_complex.
 func (m *Manager) runFFmpeg(s *Stream) error {
 	outDir := filepath.Join(m.hlsDir, fmt.Sprintf("%d", s.ID))
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return fmt.Errorf("create output directory: %w", err)
 	}
-	m.removeAudioHLS(s.ID)
+	m.removePreview(s.ID)
 
-	thumbPath := filepath.Join(outDir, "thumb.jpg")
-	audioPlaylist := filepath.Join(outDir, "audio.m3u8")
-	audioSegmentPattern := filepath.Join(outDir, "audio_%03d.ts")
+	previewPlaylist, previewSeg := hlsout.PreviewPaths(outDir)
 	inputArgs := sanitizeInputArgs(shellSplit(s.ffmpegInput))
 	s.mu.Lock()
 	presetID := s.EncodePreset
@@ -652,14 +651,10 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	enc := m.profileFor(presetID)
 	gop := strconv.Itoa(enc.VideoGOP)
 
-	// One decode for all audio consumers: recording, meters and browser monitor.
-	// astats on the shared stereo stream avoids inconsistent per-output audio decodes.
-	filterGraph := "[0:v]yadif=mode=0:deint=interlaced,split=2[vrec][vthumb];" +
-		"[vthumb]scale=640:360,format=yuv420p[vthumbout];" +
+	filterGraph := "[0:v]yadif=mode=0:deint=interlaced,split=2[vrec][vprevsrc];" +
+		"[vprevsrc]scale=640:360,fps=10,format=yuv420p[vprev];" +
 		"[vrec]format=yuv420p[vrecout];" +
-		"[0:a]pan=stereo|c0=c0|c1=c1,asplit=3[arec][ameter][ahls];" +
-		// Only measure Peak_level so ametadata=print cannot emit RMS that overwrites meters.
-		// Do not set key= on ametadata — only one key is accepted and would drop L or R.
+		"[0:a]pan=stereo|c0=c0|c1=c1,asplit=3[arec][ameter][aprev];" +
 		"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
 		"ametadata=print,anullsink"
 
@@ -667,26 +662,10 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	args = append(args, inputArgs...)
 	args = append(args,
 		"-filter_complex", filterGraph,
-		// Output #1: thumbnail JPEG (updated every second)
-		"-map", "[vthumbout]",
-		"-r", "1",
-		"-q:v", "4",
-		"-update", "1",
-		"-f", "image2",
-		thumbPath,
-		// Output #2: HLS audio-only for browser monitoring
-		"-map", "[ahls]",
-		"-c:a", "aac",
-		"-b:a", enc.AudioBitrate,
-		"-ar", "48000",
-		"-ac", "2",
-		"-f", "hls",
-		"-hls_time", "1",
-		"-hls_list_size", "4",
-		"-hls_flags", "delete_segments+independent_segments+omit_endlist",
-		"-hls_segment_filename", audioSegmentPattern,
-		audioPlaylist,
-		// Output #3: master encode feed (REC remuxes with -c copy)
+	)
+	args = hlsout.AppendAVPreviewOutputs(args, "[vprev]", "[aprev]", previewPlaylist, previewSeg)
+	args = append(args,
+		// Master encode feed (REC remuxes with -c copy)
 		"-map", "[vrecout]",
 		"-map", "[arec]",
 		"-c:v", enc.VideoCodec,
@@ -695,8 +674,6 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"-bufsize", enc.VideoBufsize,
 		"-preset", enc.VideoPreset,
 		"-g", gop,
-		// Avoid libx264-only / encoder-private flags here — this FFmpeg build
-		// rejects unknown options with "Error splitting the argument list".
 		"-c:a", "aac",
 		"-b:a", enc.AudioBitrate,
 		"-ar", "48000",
@@ -787,7 +764,7 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 				s.AudioL = audioSilence
 				s.AudioR = audioSilence
 				s.mu.Unlock()
-				m.removeThumb(s.ID)
+				m.removePreview(s.ID)
 				if cmd.Process != nil {
 					_ = cmd.Process.Kill()
 				}
@@ -862,21 +839,7 @@ func (m *Manager) killStream(s *Stream) {
 	}
 }
 
-func (m *Manager) removeThumb(id int) {
-	thumbPath := filepath.Join(m.hlsDir, fmt.Sprintf("%d", id), "thumb.jpg")
-	_ = os.Remove(thumbPath)
-}
-
-func (m *Manager) removeAudioHLS(id int) {
+func (m *Manager) removePreview(id int) {
 	dir := filepath.Join(m.hlsDir, fmt.Sprintf("%d", id))
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	for _, e := range entries {
-		name := e.Name()
-		if strings.HasPrefix(name, "audio") {
-			_ = os.Remove(filepath.Join(dir, name))
-		}
-	}
+	hlsout.RemovePreviewArtifacts(dir)
 }

@@ -700,4 +700,21 @@ export async function deletePlayoutMedia(id: string): Promise<void> {
   }
 }
 
+export type DashboardSnapshot = {
+  type: "snapshot";
+  streams: Stream[];
+  playout: PlayoutClient[];
+  tc: TcLoopInfo[];
+  recordings: RecordingInfo[];
+  srt: SrtInfo[];
+  meters_encode: Record<string, AudioLevels>;
+  meters_playout: Record<string, AudioLevels>;
+};
+
+/** One-shot dashboard state — used for fast boot before WebSocket connects. */
+export async function fetchDashboardSnapshot(): Promise<DashboardSnapshot> {
+  const res = await apiFetch("/api/dashboard");
+  if (!res.ok) throw new Error(`fetchDashboard: ${res.status}`);
+  return res.json();
+}
 

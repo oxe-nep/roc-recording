@@ -15,8 +15,7 @@ import {
 import { showEncodeCard } from "@/lib/workflow";
 import { useWorkflows } from "@/hooks/useWorkflows";
 import { useDashboard } from "@/hooks/useDashboard";
-import Thumbnail from "@/components/Thumbnail";
-import AudioMonitor from "@/components/AudioMonitor";
+import HlsPreview from "@/components/HlsPreview";
 import ChannelSettingsModal from "@/components/ChannelSettingsModal";
 
 function formatElapsed(sec?: number): string {
@@ -157,14 +156,6 @@ export default function StreamGrid() {
   const settingsStream = settingsId != null ? streams.find((s) => s.id === settingsId) ?? null : null;
   const visibleStreams = streams.filter((s) => showEncodeCard(workflows, s.id));
 
-  if (loading && streams.length === 0) {
-    return <div className="loading"><span>Connecting to backend…</span></div>;
-  }
-
-  if (visibleStreams.length === 0) {
-    return null;
-  }
-
   return (
     <>
       {error && (
@@ -181,6 +172,11 @@ export default function StreamGrid() {
           <h2 className="io-section-title">Encode</h2>
         </div>
 
+      {loading && visibleStreams.length === 0 ? (
+        <div className="loading">
+          <span>Connecting to backend…</span>
+        </div>
+      ) : visibleStreams.length === 0 ? null : (
       <div className="cards-grid">
         {visibleStreams.map((s) => {
           const rec = recordings[s.id];
@@ -195,10 +191,13 @@ export default function StreamGrid() {
           const tslText = s.tsl_text?.trim();
           return (
             <div key={s.id} className={`card-panel ${s.status}`}>
-              <AudioMonitor id={s.id} active={hasSignal} listening={isListening} />
               <div className="card-stage">
                 <div className="card-thumb">
-                  <Thumbnail id={s.id} active={captureOn} />
+                  <HlsPreview
+                    active={captureOn}
+                    listening={isListening}
+                    playlistPath={`/hls/${s.id}/preview.m3u8`}
+                  />
                   {tslText && hasSignal && (
                     <div className="thumb-tsl-overlay">
                       <div className="tsl-badge" title={`TSL ${s.tsl_index ?? s.id}`}>
@@ -319,11 +318,11 @@ export default function StreamGrid() {
                           {srtBusy[s.id] ? "…" : "STREAM"}
                         </button>
                     </>
-                    {hasSignal && (
+                    {captureOn && (
                       <button
                         className={`badge listen-btn ${isListening ? "active" : ""}`}
                         onClick={() => toggleListen(s.id)}
-                        title={isListening ? "Stop audio monitor" : "Monitor input audio"}
+                        title={isListening ? "Mute preview" : "Unmute preview"}
                       >
                         {isListening ? "🔊" : "🔈"}
                       </button>
@@ -344,6 +343,7 @@ export default function StreamGrid() {
           );
         })}
       </div>
+      )}
       </section>
 
       <ChannelSettingsModal

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchPlayoutAudioLevels,
   fetchPlayoutClients,
+  fetchTcLoop,
   isPlayoutOn,
   isPlayoutPaused,
   pausePlayout,
@@ -13,6 +14,7 @@ import {
   updatePlayoutClient,
   type AudioLevels,
   type PlayoutClient,
+  type TcLoopInfo,
 } from "@/lib/api";
 import Thumbnail from "@/components/Thumbnail";
 import AudioMonitor from "@/components/AudioMonitor";
@@ -124,6 +126,7 @@ export default function DecodeGrid() {
   const [listening, setListening] = useState<Record<number, boolean>>({});
   const [settingsId, setSettingsId] = useState<number | null>(null);
   const [mediaOpen, setMediaOpen] = useState(false);
+  const [tcById, setTcById] = useState<Record<number, TcLoopInfo>>({});
   const clientsRef = useRef<PlayoutClient[]>([]);
   clientsRef.current = clients;
 
@@ -132,6 +135,20 @@ export default function DecodeGrid() {
       const data = await fetchPlayoutClients();
       setClients(data);
       setError(null);
+      const tcEntries = await Promise.all(
+        data.map(async (c) => {
+          try {
+            return [c.id, await fetchTcLoop(c.id)] as const;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      const next: Record<number, TcLoopInfo> = {};
+      for (const e of tcEntries) {
+        if (e) next[e[0]] = e[1];
+      }
+      setTcById(next);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -239,6 +256,8 @@ export default function DecodeGrid() {
             const isListening = !!listening[c.id];
             const isFile = c.source === "file";
             const title = cardTitle(c);
+            const tc = tcById[c.id];
+            const tcOn = !!tc?.enabled || tc?.status === "running";
             return (
               <div key={c.id} className={`card-panel ${c.status}`}>
                 <AudioMonitor
@@ -250,18 +269,25 @@ export default function DecodeGrid() {
                 <div className="card-stage">
                   <div className="card-thumb">
                     <Thumbnail id={c.id} active={on} path={`/hls/playout/${c.id}/thumb.jpg`} />
-                    {on && (
+                    {(on || tcOn) && (
                       <div className="thumb-badges">
-                        <div className={`stream-badge${hasMedia || c.sending ? "" : " waiting"}`}>
-                          {paused
-                            ? "DECODE · paused"
-                            : hasMedia || c.sending
-                              ? isFile
-                                ? "DECODE · playing"
-                                : `DECODE · ${formatBitrate(c.bitrate_kbps) === "--" ? "live" : formatBitrate(c.bitrate_kbps)}`
-                              : waitingLabel(c)}
-                        </div>
-                        {isFile && (c.duration_sec ?? 0) > 0 && (
+                        {tcOn && (
+                          <div className="stream-badge" title="TC Burn-in (time of day)">
+                            TC · {tc?.status === "running" ? "burn-in" : tc?.status || "on"}
+                          </div>
+                        )}
+                        {on && (
+                          <div className={`stream-badge${hasMedia || c.sending ? "" : " waiting"}`}>
+                            {paused
+                              ? "DECODE · paused"
+                              : hasMedia || c.sending
+                                ? isFile
+                                  ? "DECODE · playing"
+                                  : `DECODE · ${formatBitrate(c.bitrate_kbps) === "--" ? "live" : formatBitrate(c.bitrate_kbps)}`
+                                : waitingLabel(c)}
+                          </div>
+                        )}
+                        {isFile && on && (c.duration_sec ?? 0) > 0 && (
                           <div className="stream-badge waiting" title="Elapsed / remaining">
                             {formatClock(c.elapsed_sec)} / −{formatClock(c.remain_sec)}
                           </div>
@@ -299,14 +325,14 @@ export default function DecodeGrid() {
                             <button
                               type="button"
                               className="stream-btn idle"
-                              disabled={busy[c.id] || (!c.file_id && !paused)}
+                              disabled={busy[c.id] || (!c.file_id && !paused) || tcOn}
                               onClick={() =>
                                 withBusy(c.id, async () => {
                                   if (paused) await resumePlayout(c.id);
                                   else await startPlayout(c.id);
                                 })
                               }
-                              title={paused ? "Resume" : "Play"}
+                              title={tcOn ? "Disable TC Burn-in first" : paused ? "Resume" : "Play"}
                             >
                               {busy[c.id] ? "…" : "PLAY"}
                             </button>
@@ -350,8 +376,8 @@ export default function DecodeGrid() {
                               else await startPlayout(c.id);
                             })
                           }
-                          disabled={busy[c.id]}
-                          title={on ? "Stop" : "Start"}
+                          disabled={busy[c.id] || (tcOn && !on)}
+                          title={tcOn && !on ? "Disable TC Burn-in first" : on ? "Stop" : "Start"}
                         >
                           {busy[c.id] ? "…" : on ? "STOP" : "START"}
                         </button>

@@ -123,6 +123,7 @@ type Manager struct {
 	assignmentsPath string
 	presetsPath     string
 	codecCache      codecCache
+	startGuard      func(id int) error
 }
 
 func NewManager(hlsDir, ffmpegBin string, presets map[string]NamedPreset, defaultPreset, assignmentsPath, presetsPath string) *Manager {
@@ -143,6 +144,7 @@ func NewManager(hlsDir, ffmpegBin string, presets map[string]NamedPreset, defaul
 		defaultPreset:   defaultPreset,
 		assignmentsPath: assignmentsPath,
 		presetsPath:     presetsPath,
+		startGuard:      nil,
 	}
 }
 
@@ -326,9 +328,15 @@ func (m *Manager) restart(id int) error {
 func (m *Manager) Start(id int) error {
 	m.mu.RLock()
 	s, ok := m.streams[id]
+	guard := m.startGuard
 	m.mu.RUnlock()
 	if !ok {
 		return fmt.Errorf("channel %d not found", id)
+	}
+	if guard != nil {
+		if err := guard(id); err != nil {
+			return err
+		}
 	}
 
 	s.mu.Lock()
@@ -349,6 +357,13 @@ func (m *Manager) Start(id int) error {
 	s.appendLog("channel start requested – waiting for signal")
 	go m.runLoop(s)
 	return nil
+}
+
+// SetStartGuard blocks Start when fn returns an error (e.g. TC Burn-in exclusive).
+func (m *Manager) SetStartGuard(fn func(id int) error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.startGuard = fn
 }
 
 func (m *Manager) Stop(id int) error {
@@ -448,6 +463,38 @@ func (m *Manager) StatusByID(id int) (Status, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.Status, true
+}
+
+// ChannelExists reports whether an encode channel id is registered.
+func (m *Manager) ChannelExists(id int) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.streams[id]
+	return ok
+}
+
+// IsActive reports whether capture is waiting or running.
+func (m *Manager) IsActive(id int) bool {
+	st, ok := m.StatusByID(id)
+	return ok && isActiveStatus(st)
+}
+
+// InputArgs returns sanitized DeckLink capture args for channel id (for TC Burn-in).
+func (m *Manager) InputArgs(id int) ([]string, error) {
+	m.mu.RLock()
+	s, ok := m.streams[id]
+	m.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("channel %d not found", id)
+	}
+	s.mu.Lock()
+	raw := s.ffmpegInput
+	s.mu.Unlock()
+	args := sanitizeInputArgs(shellSplit(raw))
+	if len(args) == 0 {
+		return nil, fmt.Errorf("channel %d has no ffmpeg_input", id)
+	}
+	return args, nil
 }
 
 func (m *Manager) runLoop(s *Stream) {

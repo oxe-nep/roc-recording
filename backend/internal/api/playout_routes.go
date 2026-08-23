@@ -8,9 +8,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/roc-recording/backend/internal/playout"
+	"github.com/roc-recording/backend/internal/tcloop"
 )
 
-func registerPlayoutRoutes(r chi.Router, playMgr *playout.Manager) {
+func registerPlayoutRoutes(r chi.Router, playMgr *playout.Manager, tcMgr *tcloop.Manager) {
 	r.Get("/api/playout/devices", func(w http.ResponseWriter, r *http.Request) {
 		refresh := r.URL.Query().Get("refresh") == "1" || r.URL.Query().Get("refresh") == "true"
 		devs, err := playMgr.Devices(refresh)
@@ -208,5 +209,46 @@ func registerPlayoutRoutes(r chi.Router, playMgr *playout.Manager) {
 			return
 		}
 		jsonOK(w, map[string]float64{"l": l, "r": r2})
+	})
+
+	r.Get("/api/playout/{id}/tc-loop", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.Atoi(chi.URLParam(r, "id"))
+		if err != nil {
+			jsonError(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		if tcMgr == nil {
+			jsonError(w, "TC Burn-in not available", http.StatusNotFound)
+			return
+		}
+		info, err := tcMgr.Get(id)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		jsonOK(w, info)
+	})
+
+	r.Put("/api/playout/{id}/tc-loop", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.Atoi(chi.URLParam(r, "id"))
+		if err != nil {
+			jsonError(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		if tcMgr == nil {
+			jsonError(w, "TC Burn-in not available", http.StatusNotFound)
+			return
+		}
+		var body tcloop.UpdateInput
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			jsonError(w, "invalid json body", http.StatusBadRequest)
+			return
+		}
+		info, err := tcMgr.Update(id, body)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusConflict)
+			return
+		}
+		jsonOK(w, info)
 	})
 }

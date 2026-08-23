@@ -22,6 +22,7 @@ import (
 	"github.com/roc-recording/backend/internal/recording"
 	"github.com/roc-recording/backend/internal/srt"
 	"github.com/roc-recording/backend/internal/sysmetrics"
+	"github.com/roc-recording/backend/internal/tcloop"
 )
 
 func main() {
@@ -93,12 +94,36 @@ func main() {
 	playMgr.WarmProbe()
 	playMgr.EnsureDefaultChannels()
 
+	tcMgr := tcloop.NewManager(
+		cfg.FFmpegBin,
+		tcloop.SettingsPath(filepath.Dir(cfgPath)),
+		mgr,
+		playMgr,
+	)
+	tcMgr.Load()
 	for _, ch := range cfg.Channels {
+		tcMgr.EnsureChannel(ch.ID)
+	}
+	guard := func(id int) error {
+		if tcMgr.IsEnabled(id) || tcMgr.IsRunning(id) {
+			return fmt.Errorf("TC Burn-in is exclusive on channel %d — disable it first", id)
+		}
+		return nil
+	}
+	mgr.SetStartGuard(guard)
+	playMgr.SetStartGuard(guard)
+
+	for _, ch := range cfg.Channels {
+		if tcMgr.IsEnabled(ch.ID) {
+			log.Printf("Skipping encode auto-start for channel %d (TC Burn-in enabled)", ch.ID)
+			continue
+		}
 		if err := mgr.Start(ch.ID); err != nil {
 			log.Printf("Failed to auto-start channel %d: %v", ch.ID, err)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
+	tcMgr.StartEnabled()
 
 	recMgr := recording.NewManager(
 		cfg.RecordingsDir,
@@ -128,7 +153,7 @@ func main() {
 
 	hlsH := hlshandler.NewHandler(cfg.HLSDir, cfg.AllowedOrigins)
 	metrics := sysmetrics.NewCollector(recMgr.RecordingDir())
-	router := api.NewRouter(mgr, recMgr, srtMgr, playMgr, hlsH, cfg.APIKey, cfg.AllowedOrigins, hlsBase, metrics)
+	router := api.NewRouter(mgr, recMgr, srtMgr, playMgr, tcMgr, hlsH, cfg.APIKey, cfg.AllowedOrigins, hlsBase, metrics)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
@@ -148,6 +173,7 @@ func main() {
 	<-quit
 
 	log.Println("Shutting down...")
+	tcMgr.StopAll()
 	playMgr.StopAll()
 	srtMgr.StopAll()
 	_ = recMgr.StopAll()

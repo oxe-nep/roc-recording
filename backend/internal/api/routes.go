@@ -19,6 +19,7 @@ import (
 	"github.com/roc-recording/backend/internal/recording"
 	"github.com/roc-recording/backend/internal/srt"
 	"github.com/roc-recording/backend/internal/sysmetrics"
+	"github.com/roc-recording/backend/internal/tcloop"
 )
 
 type streamResponse struct {
@@ -50,7 +51,7 @@ type recordingFileResponse struct {
 	URL     string    `json:"url"`
 }
 
-func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Manager, playMgr *playout.Manager, hlsHandler *hlshandler.Handler, apiKey, allowedOrigins, hlsBaseURL string, metrics *sysmetrics.Collector) http.Handler {
+func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Manager, playMgr *playout.Manager, tcMgr *tcloop.Manager, hlsHandler *hlshandler.Handler, apiKey, allowedOrigins, hlsBaseURL string, metrics *sysmetrics.Collector) http.Handler {
 	r := chi.NewRouter()
 	r.Use(quietRequestLogger())
 	r.Use(middleware.Recoverer)
@@ -142,7 +143,7 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 	r.Group(func(r chi.Router) {
 		r.Use(apiKeyMiddleware(apiKey))
 
-		registerPlayoutRoutes(r, playMgr)
+		registerPlayoutRoutes(r, playMgr, tcMgr)
 
 		r.Get("/api/streams", func(w http.ResponseWriter, r *http.Request) {
 			streams := mgr.List()
@@ -762,6 +763,8 @@ func shouldSkipRequestLog(r *http.Request) bool {
 	case strings.HasPrefix(path, "/api/playout/") && strings.HasSuffix(path, "/logs"):
 		return true
 	case strings.HasPrefix(path, "/api/playout/") && strings.HasSuffix(path, "/audio"):
+		return true
+	case strings.HasPrefix(path, "/api/playout/") && strings.HasSuffix(path, "/tc-loop"):
 		return true
 	case strings.HasPrefix(path, "/api/playout/") && !strings.Contains(path[len("/api/playout/"):], "/"):
 		// GET /api/playout/{id}

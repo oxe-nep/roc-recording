@@ -135,6 +135,7 @@ type Manager struct {
 	devCache       deviceCache
 	media          *MediaStore
 	libraryResolve LibraryResolver
+	startGuard     func(id int) error
 }
 
 type persistedFile struct {
@@ -565,6 +566,49 @@ func (m *Manager) StatusByID(id int) (Status, bool) {
 	return c.Status, true
 }
 
+// ChannelExists reports whether a decode client id is registered.
+func (m *Manager) ChannelExists(id int) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	_, ok := m.clients[id]
+	return ok
+}
+
+// IsActive reports whether decode playout is not stopped.
+func (m *Manager) IsActive(id int) bool {
+	st, ok := m.StatusByID(id)
+	return ok && st != StatusStopped
+}
+
+// Sink returns the configured DeckLink device and format for decode id.
+func (m *Manager) Sink(id int) (device, formatCode string, err error) {
+	c, err := m.get(id)
+	if err != nil {
+		return "", "", err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return strings.TrimSpace(c.Device), strings.TrimSpace(c.FormatCode), nil
+}
+
+// OutputTiming resolves width/height/fps/interlace for a format_code.
+func (m *Manager) OutputTiming(formatCode string) (w, h int, fps float64, interlaced bool, err error) {
+	devs, _ := m.Devices(false)
+	probed, ok := LookupFormat(formatCode, devs)
+	w, h, fps, interlaced = resolveOutputTiming(formatCode, probed, ok)
+	if w <= 0 || h <= 0 || fps <= 0 {
+		return 0, 0, 0, false, fmt.Errorf("invalid output timing for format %q", formatCode)
+	}
+	return w, h, fps, interlaced, nil
+}
+
+// SetStartGuard blocks Start when fn returns an error (e.g. TC Burn-in exclusive).
+func (m *Manager) SetStartGuard(fn func(id int) error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.startGuard = fn
+}
+
 func (m *Manager) ThumbPath(id int) string {
 	return filepath.Join(m.outDir(id), "thumb.jpg")
 }
@@ -720,6 +764,22 @@ func (m *Manager) Start(id int) (ClientInfo, error) {
 		c.Device = device
 		c.DeckLinkOut = true
 	}
+	if c.Status != StatusStopped {
+		c.mu.Unlock()
+		return ClientInfo{}, fmt.Errorf("decode client %d already active", id)
+	}
+	c.mu.Unlock()
+
+	m.mu.RLock()
+	guard := m.startGuard
+	m.mu.RUnlock()
+	if guard != nil {
+		if err := guard(id); err != nil {
+			return ClientInfo{}, err
+		}
+	}
+
+	c.mu.Lock()
 	if c.Status != StatusStopped {
 		c.mu.Unlock()
 		return ClientInfo{}, fmt.Errorf("decode client %d already active", id)

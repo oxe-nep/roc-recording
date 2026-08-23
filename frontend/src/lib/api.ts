@@ -531,6 +531,46 @@ export async function updatePlayoutClient(id: number, body: PlayoutUpdateInput):
   return res.json();
 }
 
+export type TcLoopPosition = "bottom_right" | "bottom_left" | "top_right" | "top_left" | "center";
+
+export interface TcLoopInfo {
+  id: number;
+  enabled: boolean;
+  status: "off" | "running" | "error";
+  fontsize: number;
+  opacity: number;
+  position: TcLoopPosition;
+  error?: string;
+}
+
+export type TcLoopUpdateInput = {
+  enabled?: boolean;
+  fontsize?: number;
+  opacity?: number;
+  position?: TcLoopPosition;
+};
+
+export async function fetchTcLoop(id: number): Promise<TcLoopInfo> {
+  const res = await apiFetch(`/api/playout/${id}/tc-loop`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `fetchTcLoop: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function updateTcLoop(id: number, body: TcLoopUpdateInput): Promise<TcLoopInfo> {
+  const res = await apiFetch(`/api/playout/${id}/tc-loop`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `updateTcLoop: ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function deletePlayoutClient(id: number): Promise<void> {
   const res = await apiFetch(`/api/playout/${id}`, { method: "DELETE" });
   if (!res.ok) {

@@ -24,3 +24,24 @@ func TestEscapeFilterPath(t *testing.T) {
 		t.Fatalf("expected escaped colon, got %q", got)
 	}
 }
+
+func TestSummarizeFFmpegErrShortOutput(t *testing.T) {
+	// One informational line (no "error"/"failed" keywords) must not panic.
+	lines := []string{"[aist#0:0/pcm_s16le] Guessed Channel Layout: stereo"}
+	got := summarizeFFmpegErr(lines)
+	if got != lines[0] {
+		t.Fatalf("expected single line summary, got %q", got)
+	}
+}
+
+func TestSummarizeFFmpegErrTail(t *testing.T) {
+	lines := []string{"line1", "line2", "line3", "line4", "error: boom"}
+	got := summarizeFFmpegErr(lines)
+	if got != "error: boom" {
+		t.Fatalf("expected error line, got %q", got)
+	}
+	got = summarizeFFmpegErr([]string{"only"})
+	if got != "only" {
+		t.Fatalf("expected fallback to sole line, got %q", got)
+	}
+}

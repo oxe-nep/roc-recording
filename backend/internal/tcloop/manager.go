@@ -1052,12 +1052,22 @@ func summarizeFFmpegErr(lines []string) string {
 		}
 	}
 	if len(picks) == 0 && len(lines) > 0 {
-		picks = lines[len(lines)-3:]
+		picks = tailStrings(lines, 3)
 	}
 	if len(picks) > 3 {
-		picks = picks[len(picks)-3:]
+		picks = tailStrings(picks, 3)
 	}
 	return strings.Join(picks, " | ")
+}
+
+func tailStrings(lines []string, n int) []string {
+	if n <= 0 || len(lines) == 0 {
+		return nil
+	}
+	if len(lines) <= n {
+		return lines
+	}
+	return lines[len(lines)-n:]
 }
 
 func isAllDigits(s string) bool {

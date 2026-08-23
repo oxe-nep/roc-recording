@@ -193,6 +193,7 @@ export default function DecodeGrid() {
                       active={on}
                       listening={isListening}
                       playlistPath={`/hls/playout/${c.id}/preview.m3u8`}
+                      sessionKey={`${c.id}-${c.status}-${c.source ?? "srt"}-${c.sending ? "live" : "idle"}`}
                     />
                     {on && (
                       <div className="thumb-badges">

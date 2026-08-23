@@ -1220,7 +1220,8 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			c.appendLog("file has no audio – using silent track")
 		}
 	} else {
-		args = append(args, "-hwaccel", "cuda", "-f", "mpegts", "-i", srtURL)
+		// SRT arrives as MPEG-TS; CUDA hwaccel here often fails and kills preview + DeckLink.
+		args = append(args, "-f", "mpegts", "-i", srtURL)
 	}
 
 	// File → DeckLink: keep a single DeckLink output (proven path). Preview runs separately
@@ -1453,70 +1454,55 @@ func (m *Manager) runFileDeckLinkAndPreview(
 		c.mu.Unlock()
 		return err
 	}
+
+	var prevDone chan error
 	if err := prevCmd.Start(); err != nil {
-		killProc(dlCmd)
-		c.mu.Lock()
-		c.cmd = nil
-		c.previewCmd = nil
-		c.mu.Unlock()
-		return fmt.Errorf("preview start: %w", err)
+		c.appendLog(fmt.Sprintf("preview ffmpeg failed to start: %v (DeckLink continues)", err))
+		prevCmd = nil
+	} else {
+		go m.watchStderr(c, prevStderr)
+		prevDone = make(chan error, 1)
+		go func() { prevDone <- prevCmd.Wait() }()
 	}
 
 	go m.watchStderr(c, dlStderr)
-	go m.watchStderr(c, prevStderr)
 	go m.watchProgress(c, dlStdout)
 	go m.watchFileEnd(c, stopCh)
 
 	dlDone := make(chan error, 1)
-	prevDone := make(chan error, 1)
 	go func() { dlDone <- dlCmd.Wait() }()
-	go func() { prevDone <- prevCmd.Wait() }()
 
-	select {
-	case <-stopCh:
-		killProc(dlCmd)
-		killProc(prevCmd)
-		<-dlDone
-		<-prevDone
-		c.mu.Lock()
-		c.cmd = nil
-		c.previewCmd = nil
-		c.mu.Unlock()
-		return nil
-	case err := <-dlDone:
-		killProc(prevCmd)
-		select {
-		case <-prevDone:
-		case <-time.After(2 * time.Second):
-			killProc(prevCmd)
-		}
-		c.mu.Lock()
-		c.cmd = nil
-		c.previewCmd = nil
-		c.Sending = false
-		c.BitrateKbps = 0
-		if c.Status != StatusPaused {
-			c.Status = StatusWaiting
-		}
-		c.mu.Unlock()
-		return err
-	case <-prevDone:
-		// Preview exit is non-fatal while DeckLink still runs.
-		c.mu.Lock()
-		c.previewCmd = nil
-		c.mu.Unlock()
-		c.appendLog("preview ffmpeg exited – DeckLink continues")
+	for {
 		select {
 		case <-stopCh:
 			killProc(dlCmd)
+			if prevCmd != nil {
+				killProc(prevCmd)
+			}
 			<-dlDone
+			if prevDone != nil {
+				select {
+				case <-prevDone:
+				case <-time.After(2 * time.Second):
+				}
+			}
 			c.mu.Lock()
 			c.cmd = nil
+			c.previewCmd = nil
 			c.mu.Unlock()
 			return nil
 		case err := <-dlDone:
+			if prevCmd != nil {
+				killProc(prevCmd)
+				select {
+				case <-prevDone:
+				case <-time.After(2 * time.Second):
+					killProc(prevCmd)
+				}
+			}
 			c.mu.Lock()
 			c.cmd = nil
+			c.previewCmd = nil
 			c.Sending = false
 			c.BitrateKbps = 0
 			if c.Status != StatusPaused {
@@ -1524,6 +1510,17 @@ func (m *Manager) runFileDeckLinkAndPreview(
 			}
 			c.mu.Unlock()
 			return err
+		case err := <-prevDone:
+			if err != nil {
+				c.appendLog(fmt.Sprintf("preview ffmpeg exited: %v – DeckLink continues", err))
+			} else {
+				c.appendLog("preview ffmpeg exited – DeckLink continues")
+			}
+			c.mu.Lock()
+			c.previewCmd = nil
+			c.mu.Unlock()
+			prevDone = nil
+			prevCmd = nil
 		}
 	}
 }

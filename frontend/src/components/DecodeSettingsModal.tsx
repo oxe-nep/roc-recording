@@ -54,6 +54,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
   const [logsOpen, setLogsOpen] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const logBoxRef = useRef<HTMLPreElement>(null);
+  const hydratedRef = useRef<number | null>(null);
 
   useBodyScrollLock(open);
 
@@ -63,7 +64,14 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
   const deviceLabel = client?.device_label || deviceName;
 
   useEffect(() => {
-    if (!open || !client || channelId == null) return;
+    if (!open || !client || channelId == null) {
+      if (!open) hydratedRef.current = null;
+      return;
+    }
+    // Dashboard WS updates client every 500ms — only hydrate form once per open/channel.
+    if (hydratedRef.current === channelId) return;
+    hydratedRef.current = channelId;
+
     setName(client.name || `Decode ${channelId}`);
     setFormatCode(client.format_code || "");
     setSource(client.source === "file" ? "file" : "srt");

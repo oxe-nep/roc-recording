@@ -162,8 +162,8 @@ export default function StreamGrid() {
       {error && (
         <div className="error-message">
           {error}
-          <button type="button" className="error-dismiss" onClick={() => setError(null)}>
-            Dismiss
+          <button type="button" className="error-dismiss" onClick={() => setError(null)} aria-label="Dismiss">
+            ×
           </button>
         </div>
       )}
@@ -175,7 +175,7 @@ export default function StreamGrid() {
 
       {loading && visibleStreams.length === 0 ? (
         <div className="loading">
-          <span>Connecting to backend…</span>
+          <span>…</span>
         </div>
       ) : visibleStreams.length === 0 ? null : (
       <div className="cards-grid">
@@ -214,25 +214,22 @@ export default function StreamGrid() {
                         </div>
                       )}
                       {isRecording && !isEncoding && (
-                        <div className="rec-badge starting">REC · STARTING…</div>
+                        <div className="rec-badge starting">REC …</div>
                       )}
                       {srtOn && (
                         <div
                           className={`stream-badge${srtById[s.id]?.sending ? "" : " waiting"}`}
-                          title={srtById[s.id]?.publish_url || "SRT streaming"}
+                          title={srtById[s.id]?.publish_url || "SRT"}
                         >
                           {srtById[s.id]?.sending
-                            ? `STREAM · ${formatBitrate(srtById[s.id]?.bitrate_kbps)}`
-                            : "STREAM · waiting for client"}
+                            ? `SRT · ${formatBitrate(srtById[s.id]?.bitrate_kbps)}`
+                            : "SRT …"}
                         </div>
                       )}
                     </div>
                   )}
                 </div>
-                <div
-                  className="audio-meter"
-                  title="Sample peak (dBFS). Green ≤ -18 · Yellow ≤ -9 · Red above -9. Alignment tone ≈ -18."
-                >
+                <div className="audio-meter" title="Audio levels">
                   <SegmentedMeter label="L" db={audio[s.id]?.l} />
                   <SegmentedMeter label="R" db={audio[s.id]?.r} />
                 </div>
@@ -241,45 +238,45 @@ export default function StreamGrid() {
               <div className="card-footer">
                 <div className="card-top">
                   <div className="card-identity">
-                    <div className="card-title">
-                      <span
-                        className={`input-badge ${s.status}`}
-                        title={s.name || `Input ${s.id}`}
-                      >
-                        {s.id}
-                      </span>
+                    <span
+                      className={`card-channel-num ${s.status}`}
+                      title={s.name || `Input ${s.id}`}
+                    >
+                      {s.id}
+                    </span>
+                    <div className="card-identity-text">
                       <span className="card-name" title={rec?.name || `ch${s.id}`}>
                         {rec?.name || `ch${s.id}`}
                       </span>
-                    </div>
-                    <div
-                      className="card-meta"
-                      title={[
-                        s.format || (s.status === "waiting" ? "Waiting for signal" : null),
-                        cat === "_unsorted" ? "Unsorted" : cat,
-                        activePreset?.label || s.encode_preset || null,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    >
-                      {s.format ? (
-                        <>
-                          <span className="card-meta-item card-meta-format">{s.format}</span>
-                          <span className="card-meta-sep">·</span>
-                        </>
-                      ) : s.status === "waiting" ? (
-                        <>
-                          <span className="card-meta-item card-meta-waiting">Waiting for signal</span>
-                          <span className="card-meta-sep">·</span>
-                        </>
-                      ) : null}
-                      <span className="card-meta-item">
-                        {cat === "_unsorted" ? "Unsorted" : cat}
-                      </span>
-                      <span className="card-meta-sep">·</span>
-                      <span className="card-meta-item">
-                        {activePreset?.label || s.encode_preset || "—"}
-                      </span>
+                      <div
+                        className="card-meta"
+                        title={[
+                          s.format || (s.status === "waiting" ? "No signal" : null),
+                          cat === "_unsorted" ? "Unsorted" : cat,
+                          activePreset?.label || s.encode_preset || null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      >
+                        {s.format ? (
+                          <>
+                            <span className="card-meta-item card-meta-format">{s.format}</span>
+                            <span className="card-meta-sep">·</span>
+                          </>
+                        ) : s.status === "waiting" ? (
+                          <>
+                            <span className="card-meta-item card-meta-waiting">No signal</span>
+                            <span className="card-meta-sep">·</span>
+                          </>
+                        ) : null}
+                        <span className="card-meta-item">
+                          {cat === "_unsorted" ? "Unsorted" : cat}
+                        </span>
+                        <span className="card-meta-sep">·</span>
+                        <span className="card-meta-item">
+                          {activePreset?.label || s.encode_preset || "—"}
+                        </span>
+                      </div>
                     </div>
                   </div>
                   <div className="card-actions">
@@ -292,11 +289,9 @@ export default function StreamGrid() {
                           title={
                             isRecording
                               ? "Stop recording"
-                              : s.status === "waiting"
-                                ? "Waiting for input signal"
-                                : !hasSignal
-                                  ? "Start channel before recording"
-                                  : "Start recording"
+                              : !hasSignal
+                                ? "No signal"
+                                : "Start recording"
                           }
                         >
                           {recBusy[s.id] ? "…" : "REC"}
@@ -308,12 +303,10 @@ export default function StreamGrid() {
                           disabled={srtBusy[s.id] || (!hasSignal && !srtOn)}
                           title={
                             srtOn
-                              ? srtById[s.id]?.publish_url || "Stop SRT stream"
-                              : s.status === "waiting"
-                                ? "Waiting for input signal"
-                                : !hasSignal
-                                  ? "Start channel before streaming"
-                                  : "Start SRT stream (configure in settings)"
+                              ? srtById[s.id]?.publish_url || "Stop SRT"
+                              : !hasSignal
+                                ? "No signal"
+                                : "Start SRT"
                           }
                         >
                           {srtBusy[s.id] ? "…" : "STREAM"}

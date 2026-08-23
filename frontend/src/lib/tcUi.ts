@@ -10,7 +10,7 @@ export function tcSourceShort(source?: TcLoopSource): string {
 
 /** Compact source label for card status (before timecode). */
 export function tcSourceStatusLabel(source?: TcLoopSource): string {
-  return source === "external" ? "UDP TC" : "Time of day";
+  return source === "external" ? "UDP" : "TOD";
 }
 
 /** Card footer status: source prefix + timecode / state. */
@@ -22,10 +22,10 @@ export function tcCardStatusMeta(tc?: TcLoopInfo, live?: boolean): string {
   if (live && hasCode) return `${src} · ${code}`;
   if (hasCode && tcIsActive(tc)) return `${src} · ${code}`;
 
-  if (live) return `${src} · Live`;
-  if (tc?.status === "restarting") return `${src} · Starting…`;
-  if (tc?.status === "error") return `${src} · Error`;
-  if (tcIsActive(tc)) return `${src} · Starting…`;
+  if (live) return `${src} · live`;
+  if (tc?.status === "restarting") return `${src} · …`;
+  if (tc?.status === "error") return `${src} · err`;
+  if (tcIsActive(tc)) return `${src} · …`;
   return "Off";
 }
 
@@ -36,16 +36,16 @@ export function tcSourceLabel(
 ): string {
   if (source === "external") {
     const port = udpPort && udpPort > 0 ? udpPort : defaultTcUdpPort(channelId ?? 0);
-    return `External · UDP :${port}`;
+    return `UDP :${port}`;
   }
-  return "Time of day (host clock)";
+  return "Time of day";
 }
 
 export function tcStatusLabel(status?: TcLoopInfo["status"], enabled?: boolean): string {
-  if (status === "running") return "Active";
-  if (status === "restarting") return "Reconnecting";
-  if (status === "error") return "Error";
-  if (enabled) return "Starting";
+  if (status === "running") return "On";
+  if (status === "restarting") return "…";
+  if (status === "error") return "Err";
+  if (enabled) return "…";
   return "Off";
 }
 
@@ -60,10 +60,10 @@ export function tcStatusPillClass(status?: TcLoopInfo["status"], enabled?: boole
 export function tcBadgeText(tc?: TcLoopInfo): string {
   if (!tc || (!tc.enabled && tc.status !== "running" && tc.status !== "restarting")) return "";
   const src = tcSourceShort(tc.source);
-  if (tc.status === "running") return `TC · ${src} · burn-in`;
-  if (tc.status === "restarting") return `TC · ${src} · reconnecting…`;
-  if (tc.status === "error") return `TC · ${src} · error`;
-  if (tc.enabled) return `TC · ${src} · starting…`;
+  if (tc.status === "running") return `TC · ${src}`;
+  if (tc.status === "restarting") return `TC · ${src} · …`;
+  if (tc.status === "error") return `TC · ${src} · err`;
+  if (tc.enabled) return `TC · ${src} · …`;
   return "";
 }
 

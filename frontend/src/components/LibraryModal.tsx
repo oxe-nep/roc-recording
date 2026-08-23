@@ -9,7 +9,6 @@ import {
   fetchLibraryCategories,
   fetchLibraryFiles,
   fetchPlayoutMedia,
-  fetchRecordingsPath,
   libraryFileURL,
   moveLibraryFile,
   renameLibraryCategory,
@@ -47,7 +46,6 @@ export default function LibraryModal({ open, onClose, pickMode, onPick }: Props)
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
   const [newCat, setNewCat] = useState("");
-  const [storagePath, setStoragePath] = useState("");
   const [playerURL, setPlayerURL] = useState<string | null>(null);
   const [playingKey, setPlayingKey] = useState<string | null>(null);
   const uploadInputRef = useRef<HTMLInputElement>(null);
@@ -58,16 +56,14 @@ export default function LibraryModal({ open, onClose, pickMode, onPick }: Props)
 
   const load = useCallback(async () => {
     try {
-      const [cats, list, path, media] = await Promise.all([
+      const [cats, list, media] = await Promise.all([
         fetchLibraryCategories(),
         fetchLibraryFiles(selectedCat && selectedCat !== UPLOADS_SECTION ? selectedCat : undefined),
-        fetchRecordingsPath(),
         fetchPlayoutMedia(),
       ]);
       setCategories(cats);
       setFiles(list);
       setUploads(media);
-      setStoragePath(path);
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -228,7 +224,7 @@ export default function LibraryModal({ open, onClose, pickMode, onPick }: Props)
     }
   };
 
-  const modalTitle = pickMode ? "Select recording" : "Media Library";
+  const modalTitle = pickMode ? "Pick file" : "Media Library";
 
   return (
     <div className="modal-backdrop library-backdrop" onClick={() => !uploadBusy && onClose()} role="presentation">
@@ -260,26 +256,14 @@ export default function LibraryModal({ open, onClose, pickMode, onPick }: Props)
                 </button>
               </>
             )}
-            <button type="button" className="badge files-btn" onClick={load} disabled={loading || uploadBusy}>
-              {loading ? "…" : "Refresh"}
+            <button type="button" className="badge files-btn" onClick={load} disabled={loading || uploadBusy} title="Refresh">
+              {loading ? "…" : "↻"}
             </button>
             <button type="button" className="modal-close" onClick={onClose} aria-label="Close" disabled={uploadBusy}>
               ×
             </button>
           </div>
         </div>
-
-        {!pickMode && !showingUploads && storagePath && (
-          <p className="library-path-note" title={storagePath}>
-            Recordings storage: {storagePath}
-          </p>
-        )}
-
-        {!pickMode && showingUploads && (
-          <p className="library-path-note">
-            External files for decode File mode. Supported: mp4, mov, mkv, mxf, ts.
-          </p>
-        )}
 
         {error && <div className="error-message">{error}</div>}
 
@@ -291,7 +275,7 @@ export default function LibraryModal({ open, onClose, pickMode, onPick }: Props)
               className={`library-cat ${selectedCat === "" ? "active" : ""}`}
               onClick={() => setSelectedCat("")}
             >
-              All recordings
+              All
             </button>
             {categories.map((c) => (
               <div key={c.name} className="library-cat-row">
@@ -345,13 +329,13 @@ export default function LibraryModal({ open, onClose, pickMode, onPick }: Props)
           <div className="recordings-list">
             {showingUploads ? (
               uploads.length === 0 ? (
-                <div className="files-empty">No uploaded files yet.</div>
+                <div className="files-empty">—</div>
               ) : (
                 uploads.map((it) => (
                   <div key={it.id} className="recording-row">
                     <div className="recording-meta">
                       <div className="recording-name">{it.name}</div>
-                      <div className="recording-sub">Upload · {formatUploadSize(it.size)}</div>
+                      <div className="recording-sub">{formatUploadSize(it.size)}</div>
                     </div>
                     <div className="recording-actions">
                       <button
@@ -367,7 +351,7 @@ export default function LibraryModal({ open, onClose, pickMode, onPick }: Props)
                 ))
               )
             ) : files.length === 0 ? (
-              <div className="files-empty">No recordings found.</div>
+              <div className="files-empty">—</div>
             ) : (
               files.map((f) => {
                 const key = fileKey(f);
@@ -391,7 +375,7 @@ export default function LibraryModal({ open, onClose, pickMode, onPick }: Props)
                             onClose();
                           }}
                         >
-                          Select
+                          Pick
                         </button>
                       ) : (
                         <>
@@ -442,7 +426,7 @@ export default function LibraryModal({ open, onClose, pickMode, onPick }: Props)
               {playerURL ? (
                 <video className="recordings-player" controls autoPlay src={playerURL} />
               ) : (
-                <div className="files-empty">Select a file to play.</div>
+                <div className="files-empty files-empty-muted" aria-hidden />
               )}
             </div>
           )}

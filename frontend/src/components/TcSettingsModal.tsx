@@ -126,7 +126,7 @@ export default function TcSettingsModal({ open, channelId, onClose, onSaved }: P
         <div className="modal-header">
           <h2>
             <span className="input-badge decode">{channelId}</span>
-            <span>TC burn-in</span>
+            <span>TC</span>
           </h2>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Close" disabled={busy}>
             ×
@@ -153,8 +153,8 @@ export default function TcSettingsModal({ open, channelId, onClose, onSaved }: P
                       onChange={(e) => setTcSource(e.target.value as TcLoopSource)}
                       disabled={busy}
                     >
-                      <option value="tod">Time of day</option>
-                      <option value="external">External (UDP)</option>
+                      <option value="tod">TOD</option>
+                      <option value="external">UDP</option>
                     </select>
                   </label>
                   {tcSource === "external" && (
@@ -242,9 +242,6 @@ export default function TcSettingsModal({ open, channelId, onClose, onSaved }: P
                 {busy ? "…" : "Start"}
               </button>
             )}
-            <button type="button" className="badge" onClick={onClose} disabled={busy}>
-              Close
-            </button>
           </div>
         </div>
       </div>

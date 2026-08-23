@@ -29,12 +29,12 @@ export default function Thumbnail({ id, active, path }: ThumbnailProps) {
   }, [id, active, basePath]);
 
   if (!active) {
-    return <span className="no-signal">No signal</span>;
+    return <span className="no-signal" aria-hidden />;
   }
 
   return (
     <>
-      {hasError && <span className="no-signal">No signal</span>}
+      {hasError && <span className="no-signal" aria-hidden />}
       <img
         className={hasError ? "thumb-hidden" : undefined}
         src={src}

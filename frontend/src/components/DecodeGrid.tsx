@@ -107,12 +107,6 @@ function cardMeta(c: PlayoutClient): string {
   return bits.join(" · ");
 }
 
-function waitingLabel(c: PlayoutClient): string {
-  if (c.source === "file") return "File…";
-  if (c.mode === "caller") return "Connecting…";
-  return "Waiting";
-}
-
 export default function DecodeGrid() {
   const { loading, playout: clients, metersPlayout: audio } = useDashboard();
   const [error, setError] = useState<string | null>(null);
@@ -158,25 +152,21 @@ export default function DecodeGrid() {
       {error && (
         <div className="error-message">
           {error}
-          <button type="button" className="error-dismiss" onClick={() => setError(null)}>
-            Dismiss
+          <button type="button" className="error-dismiss" onClick={() => setError(null)} aria-label="Dismiss">
+            ×
           </button>
         </div>
       )}
 
       {loading && clients.length === 0 ? (
         <div className="loading">
-          <span>Loading…</span>
+          <span>…</span>
         </div>
-      ) : visibleClients.length === 0 ? (
-        <p className="io-section-empty">No channels.</p>
       ) : (
         <div className="cards-grid">
           {visibleClients.map((c) => {
             const on = isPlayoutOn(c.status);
             const paused = isPlayoutPaused(c.status);
-            const playing = on && !paused;
-            const hasMedia = c.status === "running";
             const isListening = !!listening[c.id];
             const isFile = c.source === "file";
             const title = cardTitle(c);
@@ -190,24 +180,11 @@ export default function DecodeGrid() {
                       playlistPath={`/hls/playout/${c.id}/preview.m3u8`}
                       sessionKey={`${c.id}-${c.status}-${c.source ?? "srt"}-${c.sending ? "live" : "idle"}`}
                     />
-                    {on && (
+                    {on && isFile && (c.duration_sec ?? 0) > 0 && (
                       <div className="thumb-badges">
-                        <div className={`stream-badge${hasMedia || c.sending ? "" : " waiting"}`}>
-                          {paused
-                            ? "Paused"
-                            : hasMedia || c.sending
-                              ? isFile
-                                ? "Playing"
-                                : formatBitrate(c.bitrate_kbps) === "--"
-                                  ? "Live"
-                                  : formatBitrate(c.bitrate_kbps)
-                              : waitingLabel(c)}
+                        <div className="stream-badge waiting" title="Elapsed / remaining">
+                          {formatClock(c.elapsed_sec)} / −{formatClock(c.remain_sec)}
                         </div>
-                        {isFile && (c.duration_sec ?? 0) > 0 && (
-                          <div className="stream-badge waiting" title="Elapsed / remaining">
-                            {formatClock(c.elapsed_sec)} / −{formatClock(c.remain_sec)}
-                          </div>
-                        )}
                       </div>
                     )}
                   </div>
@@ -220,18 +197,18 @@ export default function DecodeGrid() {
                 <div className="card-footer">
                   <div className="card-top">
                     <div className="card-identity">
-                      <div className="card-title">
-                        <span className={`input-badge ${c.status}`} title={`Output ${c.id}`}>
-                          {c.id}
-                        </span>
+                      <span className={`card-channel-num ${c.status}`} title={`Output ${c.id}`}>
+                        {c.id}
+                      </span>
+                      <div className="card-identity-text">
                         <span className="card-name" title={title}>
                           {title}
                         </span>
-                      </div>
-                      <div className="card-meta" title={cardMeta(c)}>
-                        <span className="card-meta-item">{formatDisplay(c.format_code)}</span>
-                        <span className="card-meta-sep">·</span>
-                        <span className="card-meta-item">{(c.source || "srt").toUpperCase()}</span>
+                        <div className="card-meta" title={cardMeta(c)}>
+                          <span className="card-meta-item">{formatDisplay(c.format_code)}</span>
+                          <span className="card-meta-sep">·</span>
+                          <span className="card-meta-item">{(c.source || "srt").toUpperCase()}</span>
+                        </div>
                       </div>
                     </div>
                     <div className="card-actions">

@@ -33,22 +33,29 @@ export default function Home() {
       <header className="compact-header">
         <div className="header-brand">
           <img src="/nep-logo.svg" alt="NEP" className="nep-logo" />
+          <h1 className="header-product-title">ROC Recording</h1>
+        </div>
+        <div className="header-actions">
+          <SystemStatus />
           <button
             type="button"
-            className="header-library-link header-link-btn"
+            className="header-icon-btn"
             onClick={() => setLibraryOpen(true)}
+            title="Media Library"
+            aria-label="Media Library"
           >
-            Media Library
+            <i className="fa-solid fa-folder-open" aria-hidden />
           </button>
           <button
             type="button"
-            className="header-library-link header-link-btn"
+            className="header-icon-btn"
             onClick={() => setSettingsOpen(true)}
+            title="Settings"
+            aria-label="Settings"
           >
-            Settings
+            <i className="fa-solid fa-gear" aria-hidden />
           </button>
         </div>
-        <SystemStatus />
       </header>
       <StreamGrid />
       <DecodeGrid />

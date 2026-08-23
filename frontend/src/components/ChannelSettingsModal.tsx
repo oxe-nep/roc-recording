@@ -145,11 +145,9 @@ export default function ChannelSettingsModal({
 
   if (!open || !stream) return null;
 
-  const activePreset = presets.find((p) => p.id === preset);
-
   const apply = async () => {
     if (isRecording) {
-      setError("Stop recording before changing name, category, or encode");
+      setError("Stop recording first");
       return;
     }
     setBusy(true);
@@ -273,23 +271,18 @@ export default function ChannelSettingsModal({
         {error && <div className="error-message">{error}</div>}
 
         {isRecording && (
-          <div className="channel-settings-lock">
-            Recording is active — name, category and encode are locked. SRT can still be controlled.
-          </div>
+          <div className="channel-settings-lock">Recording — settings locked.</div>
         )}
 
         <div className="channel-settings-form">
           <label className="presets-field">
-            <span>Recording name</span>
+            <span>Name</span>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               disabled={busy || isRecording}
               placeholder={`ch${stream.id}`}
             />
-            <span className="channel-settings-hint">
-              Files: {(name || `ch${stream.id}`).replace(/\s+/g, "_")}_YYYY-MM-DD_HH-MM-SS.mp4
-            </span>
           </label>
 
           <label className="presets-field">
@@ -305,13 +298,10 @@ export default function ChannelSettingsModal({
                 </option>
               ))}
             </select>
-            <span className="channel-settings-hint">
-              Stored under recordings/{category || "_unsorted"}/
-            </span>
           </label>
 
           <label className="presets-field">
-            <span>Encode preset</span>
+            <span>Preset</span>
             <select
               value={preset}
               onChange={(e) => setPreset(e.target.value)}
@@ -323,47 +313,28 @@ export default function ChannelSettingsModal({
                 </option>
               ))}
             </select>
-            <span className="channel-settings-hint">
-              {activePreset
-                ? `${activePreset.video_codec} · ${activePreset.video_bitrate} video · ${activePreset.audio_bitrate} audio`
-                : "Choose a preset"}
-              {captureOn && !isRecording ? " — Apply restarts capture so encode takes effect" : ""}
-            </span>
           </label>
         </div>
 
         <div className="channel-settings-actions">
-          <button type="button" className="badge" onClick={onClose} disabled={busy || srtBusy}>
-            Cancel
-          </button>
           <button
             type="button"
             className="global-rec-btn"
             onClick={apply}
             disabled={busy || isRecording}
-            title={
-              isRecording
-                ? "Stop recording first"
-                : captureOn
-                  ? "Save and restart capture so the encode preset applies now"
-                  : "Save channel settings"
-            }
+            title={isRecording ? "Stop recording first" : captureOn ? "Restarts capture" : undefined}
           >
-            {busy ? "…" : captureOn ? "Apply (restart)" : "Apply"}
+            {busy ? "…" : "Apply"}
           </button>
         </div>
 
         <div className="channel-settings-srt">
           <div className="channel-settings-srt-head">
-            <h3>SRT stream</h3>
+            <h3>SRT</h3>
             <span className={`srt-pill ${srtStreaming ? "on" : ""}`}>
               {srtStreaming ? "ON AIR" : "OFF"}
             </span>
           </div>
-          <p className="channel-settings-hint">
-            Remuxes the channel master feed (−c copy). Requires FFmpeg built with libsrt. Default
-            listener ports: 9100 + channel id.
-          </p>
 
           <div className="channel-settings-form">
             <label className="presets-field">
@@ -373,14 +344,14 @@ export default function ChannelSettingsModal({
                 onChange={(e) => setSrtMode(e.target.value as "listener" | "caller")}
                 disabled={srtBusy || srtStreaming}
               >
-                <option value="listener">Listener (clients connect to us)</option>
-                <option value="caller">Caller (we push to a target)</option>
+                <option value="listener">Listener</option>
+                <option value="caller">Caller</option>
               </select>
             </label>
 
             {srtMode === "listener" ? (
               <label className="presets-field">
-                <span>Listen port</span>
+                <span>Port</span>
                 <input
                   type="number"
                   min={1}
@@ -403,7 +374,7 @@ export default function ChannelSettingsModal({
             )}
 
             <label className="presets-field">
-              <span>Latency (ms)</span>
+              <span>Latency</span>
               <input
                 type="number"
                 min={20}
@@ -427,9 +398,6 @@ export default function ChannelSettingsModal({
                 placeholder={srt?.has_passphrase ? "••••••••" : "optional"}
                 autoComplete="new-password"
               />
-              <span className="channel-settings-hint">
-                Leave blank and save to clear. Not shown again after save.
-              </span>
             </label>
           </div>
 
@@ -454,36 +422,29 @@ export default function ChannelSettingsModal({
               disabled={srtBusy || srtStreaming}
               title={srtStreaming ? "Stop SRT before changing settings" : "Save SRT settings"}
             >
-              {srtBusy && !srtStreaming ? "…" : "Save SRT"}
+              {srtBusy ? "…" : "Save"}
             </button>
             <button
               type="button"
               className={`global-rec-btn ${srtStreaming ? "recording" : ""}`}
               onClick={toggleSrt}
               disabled={srtBusy || (!isRunning && !srtStreaming)}
-              title={
-                !isRunning && !srtStreaming
-                  ? "Start channel before SRT"
-                  : srtStreaming
-                    ? "Stop SRT"
-                    : "Start SRT"
-              }
+              title={!isRunning && !srtStreaming ? "Start channel first" : undefined}
             >
-              {srtBusy ? "…" : srtStreaming ? "Stop SRT" : "Start SRT"}
+              {srtBusy ? "…" : srtStreaming ? "Stop" : "Start"}
             </button>
           </div>
         </div>
 
         <div className="channel-settings-logs">
           <div className="channel-settings-logs-head">
-            <h3>Channel logs</h3>
+            <h3>Logs</h3>
             <button
               type="button"
               className="badge"
               onClick={() => setLogsOpen((v) => !v)}
-              title={logsOpen ? "Hide channel logs" : "Show recent capture / FFmpeg lines"}
             >
-              {logsOpen ? "Hide" : "Show"}
+              {logsOpen ? "−" : "+"}
             </button>
           </div>
           {logsOpen && (

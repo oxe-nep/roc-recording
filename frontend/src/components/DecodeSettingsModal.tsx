@@ -265,7 +265,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
 
           {error && <div className="error-message">{error}</div>}
 
-          {active && <div className="channel-settings-lock">Stop decode first.</div>}
+          {active && <div className="channel-settings-lock">Stop first.</div>}
 
           <div className="channel-settings-form">
             <label className="presets-field">
@@ -287,7 +287,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                   disabled={busy || active || formats.length === 0}
                   style={{ flex: 1 }}
                 >
-                  <option value="">{formats.length ? "Select format…" : "No formats probed"}</option>
+                  <option value="">{formats.length ? "Format…" : "—"}</option>
                   {formats.map((f) => (
                     <option key={f.code} value={f.code}>
                       {f.label}
@@ -298,10 +298,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                   Re-probe
                 </button>
               </div>
-              {formats.length === 0 && (
-                <span className="channel-settings-hint">No modes probed. Try Re-probe.</span>
-              )}
-              {probeLog && formats.length === 0 && (
+              {formats.length === 0 && probeLog && (
                 <pre className="channel-settings-logbox" style={{ marginTop: 8, maxHeight: 120 }}>
                   {probeLog}
                 </pre>
@@ -323,8 +320,8 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
             {source === "file" ? (
               <>
                 <label className="presets-field">
-                  <span>Media file</span>
-                  <input value={fileLabel || "No file selected"} disabled readOnly />
+                  <span>File</span>
+                  <input value={fileLabel || "—"} disabled readOnly />
                   <div className="channel-settings-actions" style={{ marginTop: 8 }}>
                     <button
                       type="button"
@@ -332,7 +329,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                       disabled={busy || active}
                       onClick={() => setLibraryOpen(true)}
                     >
-                      Browse library…
+                      Browse
                     </button>
                     {media.length > 0 && (
                       <select
@@ -344,7 +341,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                           setFileLabel(displayFileLabel(id, undefined, media));
                         }}
                       >
-                        <option value="">Or uploaded…</option>
+                        <option value="">Uploads…</option>
                         {media.map((m) => (
                           <option key={m.id} value={m.id}>
                             {m.name}
@@ -441,9 +438,6 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
             >
               {busy ? "…" : active ? "STOP" : source === "file" ? "PLAY" : "START"}
             </button>
-            <button type="button" className="badge" onClick={onClose} disabled={busy}>
-              Cancel
-            </button>
             <button type="button" className="global-rec-btn" onClick={apply} disabled={busy || active}>
               {busy ? "…" : "Save"}
             </button>
@@ -453,7 +447,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
             <div className="channel-settings-logs-head">
               <h3>Logs</h3>
               <button type="button" className="badge" onClick={() => setLogsOpen((v) => !v)}>
-                {logsOpen ? "Hide" : "Show"}
+                {logsOpen ? "−" : "+"}
               </button>
             </div>
             {logsOpen && (

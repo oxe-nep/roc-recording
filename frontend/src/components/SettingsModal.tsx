@@ -103,7 +103,7 @@ export default function SettingsModal({
       [
         { id: "workflows" as const, label: "Workflows" },
         { id: "storage" as const, label: "Storage" },
-        { id: "presets" as const, label: "Encode presets" },
+        { id: "presets" as const, label: "Presets" },
       ] satisfies { id: Tab; label: string }[],
     [],
   );
@@ -149,12 +149,9 @@ export default function SettingsModal({
 
         {tab === "storage" && (
           <div className="settings-tab-panel">
-            <p className="settings-tab-intro">
-              Absolute path on the capture host where recording category folders are created.
-            </p>
             <div className="library-path-bar settings-path-bar">
               <label className="library-path-label" htmlFor="settings-recordings-path">
-                Recordings path
+                Path
               </label>
               <input
                 id="settings-recordings-path"
@@ -205,7 +202,7 @@ export default function SettingsModal({
                           onChange={() => void setWorkflowMode(id, "pair")}
                         />
                         <span className="workflow-option-text">
-                          <strong>Encode / Decode</strong>
+                          <strong>I/O</strong>
                         </span>
                       </label>
                       <label className={`workflow-option${mode === "tc" ? " active" : ""}`}>
@@ -217,7 +214,7 @@ export default function SettingsModal({
                           onChange={() => void setWorkflowMode(id, "tc")}
                         />
                         <span className="workflow-option-text">
-                          <strong>TC burn-in</strong>
+                          <strong>TC</strong>
                         </span>
                       </label>
                     </div>

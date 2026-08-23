@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "roc-recording",
+  title: "ROC Recording",
   description: "Blackmagic DeckLink preview",
   icons: {
     icon: "https://cdn.prod.website-files.com/5bc9fe82c6c2f54b071f0033/5bc9fe82c6c2f5193f1f01c5_Untitled-4.png",

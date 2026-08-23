@@ -89,21 +89,21 @@ export default function TcGrid() {
   return (
     <section className="io-section io-section-tc">
       <div className="io-section-head">
-        <h2 className="io-section-title">TC burn-in</h2>
+        <h2 className="io-section-title">TC</h2>
       </div>
 
       {error && (
         <div className="error-message">
           {error}
-          <button type="button" className="error-dismiss" onClick={() => setError(null)}>
-            Dismiss
+          <button type="button" className="error-dismiss" onClick={() => setError(null)} aria-label="Dismiss">
+            ×
           </button>
         </div>
       )}
 
       {loading && channelIds.length === 0 ? (
         <div className="loading">
-          <span>Loading…</span>
+          <span>…</span>
         </div>
       ) : (
         <div className="cards-grid">
@@ -143,15 +143,15 @@ export default function TcGrid() {
                   <div className="card-footer">
                     <div className="card-top">
                       <div className="card-identity">
-                        <div className="card-title">
-                          <span className={`input-badge ${s.status}`}>{s.id}</span>
-                          <span className="card-name">Channel {s.id}</span>
-                        </div>
-                        <div
-                          className="card-meta"
-                          title={tcOn ? tcSourceLabel(tc?.source, tc?.udp_port, s.id) : undefined}
-                        >
-                          <span className="card-meta-item card-meta-tc">{tcCardStatusMeta(tc, tcLive)}</span>
+                        <span className={`card-channel-num ${s.status}`}>{s.id}</span>
+                        <div className="card-identity-text">
+                          <span className="card-name">TC</span>
+                          <div
+                            className="card-meta"
+                            title={tcOn ? tcSourceLabel(tc?.source, tc?.udp_port, s.id) : undefined}
+                          >
+                            <span className="card-meta-item card-meta-tc">{tcCardStatusMeta(tc, tcLive)}</span>
+                          </div>
                         </div>
                       </div>
                       <div className="card-actions">

@@ -100,7 +100,7 @@ export default function HlsPreview({ active, listening, playlistPath, sessionKey
 
   return (
     <>
-      {!active && <span className="no-signal">No signal</span>}
+      {!active && <span className="no-signal" aria-hidden />}
       <video
         ref={videoRef}
         className={`hls-preview${active ? "" : " hls-preview-off"}`}

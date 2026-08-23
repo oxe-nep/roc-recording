@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -12,6 +13,7 @@ type ChannelConfig struct {
 	Name         string `yaml:"name"`
 	FFmpegInput  string `yaml:"ffmpeg_input"`
 	EncodePreset string `yaml:"encode_preset"` // optional; falls back to default_encode_preset
+	TSLIndex     int    `yaml:"tsl_index"`     // optional TSL v5 display index; default = id
 }
 
 // EncodePresetDef is one named master-encode profile (always-on UDP feed).
@@ -48,6 +50,7 @@ type Config struct {
 	DefaultEncodePreset string                     `yaml:"default_encode_preset"`
 	Encode              EncodeConfig               `yaml:"encode"` // deprecated
 	Channels            []ChannelConfig            `yaml:"channels"`
+	TSLPort             int                        `yaml:"tsl_port"` // UDP listen; 0 disables, default 30947
 }
 
 func Load(path string) (*Config, error) {
@@ -87,6 +90,11 @@ func Load(path string) (*Config, error) {
 	}
 	if v := os.Getenv("FFMPEG_BIN"); v != "" {
 		cfg.FFmpegBin = v
+	}
+	if v := os.Getenv("TSL_PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil {
+			cfg.TSLPort = p
+		}
 	}
 
 	if len(cfg.Channels) == 0 {

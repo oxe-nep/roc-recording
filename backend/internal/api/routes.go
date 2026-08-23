@@ -20,6 +20,7 @@ import (
 	"github.com/roc-recording/backend/internal/srt"
 	"github.com/roc-recording/backend/internal/sysmetrics"
 	"github.com/roc-recording/backend/internal/tcloop"
+	"github.com/roc-recording/backend/internal/tsl"
 )
 
 type streamResponse struct {
@@ -30,6 +31,9 @@ type streamResponse struct {
 	Format       string `json:"format,omitempty"`
 	EncodePreset string `json:"encode_preset"`
 	HLSURL       string `json:"hls_url"`
+	TSLIndex     int    `json:"tsl_index,omitempty"`
+	TSLText      string `json:"tsl_text,omitempty"`
+	TSLOnAir     bool   `json:"tsl_on_air,omitempty"`
 }
 
 type encodePresetResponse struct {
@@ -51,7 +55,7 @@ type recordingFileResponse struct {
 	URL     string    `json:"url"`
 }
 
-func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Manager, playMgr *playout.Manager, tcMgr *tcloop.Manager, hlsHandler *hlshandler.Handler, apiKey, allowedOrigins, hlsBaseURL string, metrics *sysmetrics.Collector) http.Handler {
+func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Manager, playMgr *playout.Manager, tcMgr *tcloop.Manager, tslMgr *tsl.Manager, hlsHandler *hlshandler.Handler, apiKey, allowedOrigins, hlsBaseURL string, metrics *sysmetrics.Collector) http.Handler {
 	r := chi.NewRouter()
 	r.Use(quietRequestLogger())
 	r.Use(middleware.Recoverer)
@@ -190,7 +194,7 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 			})
 			resp := make([]streamResponse, 0, len(streams))
 			for _, s := range streams {
-				resp = append(resp, toResponse(s, hlsBaseURL))
+				resp = append(resp, toResponse(s, hlsBaseURL, tslMgr))
 			}
 			jsonOK(w, resp)
 		})
@@ -382,7 +386,7 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 				jsonError(w, "channel not found", http.StatusNotFound)
 				return
 			}
-			jsonOK(w, toResponse(s, hlsBaseURL))
+			jsonOK(w, toResponse(s, hlsBaseURL, tslMgr))
 		})
 
 		// Recording endpoints
@@ -847,9 +851,9 @@ func apiKeyMiddleware(key string) func(http.Handler) http.Handler {
 	}
 }
 
-func toResponse(s *capture.Stream, hlsBaseURL string) streamResponse {
+func toResponse(s *capture.Stream, hlsBaseURL string, tslMgr *tsl.Manager) streamResponse {
 	status, errStr, format, preset := s.Snapshot()
-	return streamResponse{
+	resp := streamResponse{
 		ID:           s.ID,
 		Name:         s.Name,
 		Status:       string(status),
@@ -858,6 +862,13 @@ func toResponse(s *capture.Stream, hlsBaseURL string) streamResponse {
 		EncodePreset: preset,
 		HLSURL:       hlsBaseURL + "/hls/" + strconv.Itoa(s.ID) + "/index.m3u8",
 	}
+	if tslMgr != nil && tslMgr.Enabled() {
+		info := tslMgr.InfoForChannel(s.ID)
+		resp.TSLIndex = info.Index
+		resp.TSLText = info.Text
+		resp.TSLOnAir = info.OnAir
+	}
+	return resp
 }
 
 func presetToResponse(p capture.NamedPreset) encodePresetResponse {

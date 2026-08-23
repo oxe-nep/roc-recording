@@ -23,6 +23,7 @@ import (
 	"github.com/roc-recording/backend/internal/srt"
 	"github.com/roc-recording/backend/internal/sysmetrics"
 	"github.com/roc-recording/backend/internal/tcloop"
+	"github.com/roc-recording/backend/internal/tsl"
 )
 
 // tcPlayoutBridge adapts playout.Manager for tcloop.PlayoutBridge.
@@ -162,9 +163,22 @@ func main() {
 	}
 	srtMgr.LoadSettings()
 
+	tslIndexByID := make(map[int]int, len(cfg.Channels))
+	channelIDs := make([]int, 0, len(cfg.Channels))
+	for _, ch := range cfg.Channels {
+		channelIDs = append(channelIDs, ch.ID)
+		if ch.TSLIndex > 0 {
+			tslIndexByID[ch.ID] = ch.TSLIndex
+		}
+	}
+	tslMgr := tsl.NewManager(cfg.TSLPort, tsl.BuildChannelMap(channelIDs, tslIndexByID))
+	if err := tslMgr.Start(); err != nil {
+		log.Printf("TSL listener disabled: %v", err)
+	}
+
 	hlsH := hlshandler.NewHandler(cfg.HLSDir, cfg.AllowedOrigins)
 	metrics := sysmetrics.NewCollector(recMgr.RecordingDir())
-	router := api.NewRouter(mgr, recMgr, srtMgr, playMgr, tcMgr, hlsH, cfg.APIKey, cfg.AllowedOrigins, hlsBase, metrics)
+	router := api.NewRouter(mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, hlsH, cfg.APIKey, cfg.AllowedOrigins, hlsBase, metrics)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
@@ -184,6 +198,7 @@ func main() {
 	<-quit
 
 	log.Println("Shutting down...")
+	tslMgr.Stop()
 	tcMgr.StopAll()
 	playMgr.StopAll()
 	srtMgr.StopAll()

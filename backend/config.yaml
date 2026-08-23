@@ -38,6 +38,9 @@ encode_presets:
     video_gop: 50
     audio_bitrate: "256k"
 
+	// TSL v5 UMD — source labels on encode inputs (set tsl_port: 0 to disable).
+	tsl_port: 30947
+
 channels:
   - id: 1
     name: "Channel 1"

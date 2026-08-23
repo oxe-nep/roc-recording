@@ -60,17 +60,22 @@ type UpdateInput struct {
 	Position *Position `json:"position"`
 }
 
+const releaseWait = 10 * time.Second
+
 // CaptureBridge provides encode-side input and activity checks.
 type CaptureBridge interface {
 	ChannelExists(id int) bool
 	IsActive(id int) bool
 	InputArgs(id int) ([]string, error)
+	Stop(id int) error
+	Start(id int) error
 }
 
 // PlayoutBridge provides decode sink config and activity checks.
 type PlayoutBridge interface {
 	ChannelExists(id int) bool
 	IsActive(id int) bool
+	Stop(id int) error
 	Sink(id int) (device, formatCode string, err error)
 	ResolveOpenDevice(device string) string
 	OutputTiming(formatCode string) (w, h int, fps float64, interlaced bool, err error)
@@ -275,6 +280,8 @@ func (m *Manager) Update(id int, in UpdateInput) (Info, error) {
 		}
 	} else {
 		_ = m.Stop(id)
+		waitUntil(func() bool { return !m.IsRunning(id) }, releaseWait)
+		m.restartCapture(id)
 	}
 	return m.Get(id)
 }
@@ -285,11 +292,8 @@ func (m *Manager) Start(id int) error {
 	if st == nil {
 		return fmt.Errorf("channel %d not found", id)
 	}
-	if m.capture.IsActive(id) {
-		return fmt.Errorf("stop encode on channel %d before enabling TC Burn-in", id)
-	}
-	if m.playout.IsActive(id) {
-		return fmt.Errorf("stop decode playout on channel %d before enabling TC Burn-in", id)
+	if err := m.releaseInput(id); err != nil {
+		return err
 	}
 
 	st.mu.Lock()
@@ -312,6 +316,51 @@ func (m *Manager) Start(id int) error {
 
 	go m.runLoop(id, st, stopCh, cfg)
 	return nil
+}
+
+func waitUntil(ok func() bool, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if ok() {
+			return true
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return ok()
+}
+
+// releaseInput stops encode/decode on the channel so DeckLink can be opened for TC Burn-in.
+func (m *Manager) releaseInput(id int) error {
+	if m.capture != nil && m.capture.IsActive(id) {
+		log.Printf("[tcloop] stopping encode on channel %d for TC Burn-in", id)
+		if err := m.capture.Stop(id); err != nil && !strings.Contains(err.Error(), "not running") {
+			return fmt.Errorf("stop encode on channel %d: %w", id, err)
+		}
+		if !waitUntil(func() bool { return !m.capture.IsActive(id) }, releaseWait) {
+			return fmt.Errorf("encode on channel %d did not stop in time", id)
+		}
+	}
+	if m.playout != nil && m.playout.IsActive(id) {
+		log.Printf("[tcloop] stopping decode playout on channel %d for TC Burn-in", id)
+		if err := m.playout.Stop(id); err != nil {
+			return fmt.Errorf("stop decode playout on channel %d: %w", id, err)
+		}
+		if !waitUntil(func() bool { return !m.playout.IsActive(id) }, releaseWait) {
+			return fmt.Errorf("decode playout on channel %d did not stop in time", id)
+		}
+	}
+	return nil
+}
+
+func (m *Manager) restartCapture(id int) {
+	if m.capture == nil {
+		return
+	}
+	if err := m.capture.Start(id); err != nil {
+		log.Printf("[tcloop] channel %d encode restart after TC Burn-in off: %v", id, err)
+		return
+	}
+	log.Printf("[tcloop] channel %d encode restarted after TC Burn-in off", id)
 }
 
 func (m *Manager) Stop(id int) error {

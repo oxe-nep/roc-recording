@@ -215,10 +215,6 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
 
   const applyTc = async () => {
     if (channelId == null) return;
-    if (active && !tcOn) {
-      setError("Stop decode playout before enabling TC Burn-in");
-      return;
-    }
     setBusy(true);
     setError(null);
     try {
@@ -483,8 +479,8 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
               </span>
             </div>
             <p className="channel-settings-hint">
-              Low-latency loop: encode input {client.id} → time-of-day burn-in → this output. Cannot run
-              with encode or SRT/file playout on the same channel.
+              Low-latency loop: encode input {client.id} → time-of-day burn-in → this output. Applying
+              stops encode and decode on this channel automatically; encode restarts when TC is turned off.
             </p>
             <div className="channel-settings-form">
               <label className="presets-field" style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
@@ -492,7 +488,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                   type="checkbox"
                   checked={tcEnabled}
                   onChange={(e) => setTcEnabled(e.target.checked)}
-                  disabled={busy || active}
+                  disabled={busy}
                 />
                 <span>Enable TC Burn-in (time of day)</span>
               </label>
@@ -535,7 +531,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
               </label>
             </div>
             <div className="channel-settings-actions">
-              <button type="button" className="global-rec-btn" onClick={applyTc} disabled={busy || active}>
+              <button type="button" className="global-rec-btn" onClick={applyTc} disabled={busy}>
                 {busy ? "…" : "Apply TC Burn-in"}
               </button>
             </div>

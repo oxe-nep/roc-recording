@@ -25,6 +25,16 @@ import (
 	"github.com/roc-recording/backend/internal/tcloop"
 )
 
+// tcPlayoutBridge adapts playout.Manager for tcloop.PlayoutBridge.
+type tcPlayoutBridge struct {
+	*playout.Manager
+}
+
+func (b tcPlayoutBridge) Stop(id int) error {
+	_, err := b.Manager.Stop(id)
+	return err
+}
+
 func main() {
 	cfgPath := "config.yaml"
 	if len(os.Args) > 1 {
@@ -98,7 +108,7 @@ func main() {
 		cfg.FFmpegBin,
 		tcloop.SettingsPath(filepath.Dir(cfgPath)),
 		mgr,
-		playMgr,
+		tcPlayoutBridge{playMgr},
 	)
 	tcMgr.Load()
 	for _, ch := range cfg.Channels {

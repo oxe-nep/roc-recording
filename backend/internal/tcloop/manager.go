@@ -572,7 +572,7 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 	st.cmd = cmd
 	st.mu.Unlock()
 
-	log.Printf("[tcloop %d] starting TOD burn-in → decklink %q format=%s (alt=%q tryAlt=%v)", id, openDevice, formatCode, openAlt, tryAlt)
+	log.Printf("[tcloop %d] starting TOD burn-in → decklink %q format=%s (primary=%q alt=%q tryAlt=%v)", id, openDevice, formatCode, openPrimary, openAlt, tryAlt)
 	if err := cmd.Start(); err != nil {
 		st.mu.Lock()
 		st.cmd = nil
@@ -600,7 +600,7 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		lines := <-errLines
 		st.mu.Lock()
 		st.cmd = nil
-		if err != nil && openAlt != "" && openAlt != openPrimary {
+		if err != nil && openAlt != "" && openAlt != openPrimary && isDeckLinkOpenFailure(lines) {
 			next := openAlt
 			if tryAlt {
 				next = openPrimary
@@ -646,9 +646,10 @@ func buildDrawtext(cfg Settings) string {
 	if boxA < 0.2 {
 		boxA = 0.2
 	}
-	// Time of day from host clock. Prefer fontconfig family; escape : for filtergraph.
+	// expansion=strftime avoids %{...} braces that fight filtergraph ':' parsing.
+	// Filtergraph needs \: for literal colons in the strftime pattern.
 	return fmt.Sprintf(
-		"drawtext=font=Sans:fontsize=%d:fontcolor=white@%.2f:box=1:boxcolor=black@%.2f:boxborderw=10:x=%s:y=%s:text=%%{localtime\\:%%T}",
+		"drawtext=font=Sans:fontsize=%d:fontcolor=white@%.2f:box=1:boxcolor=black@%.2f:boxborderw=10:x=%s:y=%s:expansion=strftime:text=%%H\\:%%M\\:%%S",
 		cfg.FontSize, cfg.Opacity, boxA, x, y,
 	)
 }
@@ -667,6 +668,26 @@ func positionXY(pos Position) (x, y string) {
 	default: // bottom_right
 		return fmt.Sprintf("w-tw-%d", margin), fmt.Sprintf("h-th-%d", margin)
 	}
+}
+
+func isDeckLinkOpenFailure(lines []string) bool {
+	for _, line := range lines {
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "error parsing") || strings.Contains(lower, "no option name") {
+			return false
+		}
+	}
+	for _, line := range lines {
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "decklink") ||
+			strings.Contains(lower, "no such device") ||
+			strings.Contains(lower, "device or resource busy") ||
+			strings.Contains(lower, "could not write header") ||
+			strings.Contains(lower, "error opening") {
+			return true
+		}
+	}
+	return false
 }
 
 func collectStderr(r io.Reader) []string {

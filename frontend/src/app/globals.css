@@ -324,29 +324,30 @@ html {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: 8px;
+  bottom: 10px;
   display: flex;
   justify-content: center;
   pointer-events: none;
   z-index: 2;
-  padding: 0 10px;
+  padding: 0 8px;
 }
 
 .tsl-badge {
-  max-width: calc(100% - 20px);
+  max-width: calc(100% - 16px);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  background: rgba(12, 14, 18, 0.82);
-  font-size: 0.64rem;
+  background: rgba(12, 14, 18, 0.88);
+  font-size: 0.82rem;
   font-weight: 600;
   letter-spacing: 0.02em;
-  padding: 3px 10px;
-  border-radius: 4px;
+  padding: 5px 14px;
+  border-radius: 5px;
   font-variant-numeric: tabular-nums;
-  color: #d8e0ea;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #e8eef4;
+  border: 1px solid rgba(255, 255, 255, 0.18);
   text-align: center;
+  line-height: 1.2;
 }
 
 .compact-header h1 {

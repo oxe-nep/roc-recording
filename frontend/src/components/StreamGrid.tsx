@@ -23,7 +23,7 @@ import {
   type TcLoopInfo,
   isCaptureOn,
 } from "@/lib/api";
-import { tcBadgeText, tcIsActive, tcPreviewHasSignal, tcSourceLabel } from "@/lib/tcUi";
+import { tcBadgeText, tcIsActive, tcPreviewHasSignal, tcSourceLabel, tcSourceShort } from "@/lib/tcUi";
 import Thumbnail from "@/components/Thumbnail";
 import AudioMonitor from "@/components/AudioMonitor";
 import ChannelSettingsModal from "@/components/ChannelSettingsModal";
@@ -316,14 +316,14 @@ export default function StreamGrid() {
                       </div>
                     </div>
                   )}
-                  {(isRecording || srtOn || tcOn) && (
+                  {(isRecording || srtOn || (tcOn && !tcLive)) && (
                     <div className="thumb-badges">
-                      {tcBadge && (
+                      {tcBadge && !tcLive && (
                         <div
-                          className={`tc-badge${tc?.status === "error" ? " error" : tcLive ? "" : " starting"}`}
+                          className={`tc-badge${tc?.status === "error" ? " error" : " starting"}`}
                           title={tcSourceLabel(tc?.source, tc?.udp_port, s.id)}
                         >
-                          {tcBadge}
+                          {tc?.status === "error" ? "TC · error" : "TC · starting…"}
                         </div>
                       )}
                       {isEncoding && (
@@ -401,7 +401,13 @@ export default function StreamGrid() {
                       {tcOn && (
                         <>
                           <span className="card-meta-sep">·</span>
-                          <span className="card-meta-item card-meta-tc">TC burn-in</span>
+                          <span className="card-meta-item card-meta-tc">
+                            {tcLive
+                              ? `TC · ${tcSourceShort(tc?.source)}`
+                              : tc?.status === "error"
+                                ? "TC · error"
+                                : "TC · starting"}
+                          </span>
                         </>
                       )}
                     </div>

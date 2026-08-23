@@ -16,7 +16,7 @@ import {
   type PlayoutClient,
   type TcLoopInfo,
 } from "@/lib/api";
-import { tcBadgeText, tcIsActive, tcPreviewHasSignal, tcSourceLabel } from "@/lib/tcUi";
+import { tcBadgeText, tcIsActive, tcPreviewHasSignal, tcSourceLabel, tcSourceShort } from "@/lib/tcUi";
 import Thumbnail from "@/components/Thumbnail";
 import AudioMonitor from "@/components/AudioMonitor";
 import DecodeSettingsModal from "@/components/DecodeSettingsModal";
@@ -282,14 +282,14 @@ export default function DecodeGrid() {
                 <div className="card-stage">
                   <div className="card-thumb">
                     <Thumbnail id={c.id} active={on || tcLive} path={`/hls/playout/${c.id}/thumb.jpg`} />
-                    {(on || tcOn) && (
+                    {(on || (tcOn && !tcLive)) && (
                       <div className="thumb-badges">
-                        {tcBadge && (
+                        {tcBadge && !tcLive && (
                           <div
-                            className={`tc-badge${tc?.status === "error" ? " error" : tcLive ? "" : " starting"}`}
+                            className={`tc-badge${tc?.status === "error" ? " error" : " starting"}`}
                             title={tcSourceLabel(tc?.source, tc?.udp_port, c.id)}
                           >
-                            {tcBadge}
+                            {tc?.status === "error" ? "TC · error" : "TC · starting…"}
                           </div>
                         )}
                         {on && (
@@ -335,7 +335,13 @@ export default function DecodeGrid() {
                         {tcOn && (
                           <>
                             <span className="card-meta-sep">·</span>
-                            <span className="card-meta-item card-meta-tc">TC burn-in</span>
+                            <span className="card-meta-item card-meta-tc">
+                              {tcLive
+                                ? `TC · ${tcSourceShort(tc?.source)}`
+                                : tc?.status === "error"
+                                  ? "TC · error"
+                                  : "TC · starting"}
+                            </span>
                           </>
                         )}
                       </div>

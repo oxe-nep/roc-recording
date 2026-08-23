@@ -622,16 +622,25 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 				jsonError(w, "mode required", http.StatusBadRequest)
 				return
 			}
+			prev := wfStore.Get(id)
 			cfg, err := wfStore.Set(id, body)
 			if err != nil {
 				jsonError(w, err.Error(), http.StatusConflict)
 				return
 			}
-			if cfg.Mode == workflow.ModePair && tcMgr != nil &&
-				(tcMgr.IsEnabled(id) || tcMgr.IsRunning(id)) {
-				disabled := false
-				if _, err := tcMgr.Update(id, tcloop.UpdateInput{Enabled: &disabled}); err != nil {
-					log.Printf("[workflow] channel %d: stop TC on pair mode: %v", id, err)
+			if tcMgr != nil {
+				if cfg.Mode == workflow.ModePair && (tcMgr.IsEnabled(id) || tcMgr.IsRunning(id)) {
+					disabled := false
+					if _, err := tcMgr.Update(id, tcloop.UpdateInput{Enabled: &disabled}); err != nil {
+						log.Printf("[workflow] channel %d: stop TC on pair mode: %v", id, err)
+					}
+				}
+				if cfg.Mode == workflow.ModeTC && prev.Mode != workflow.ModeTC {
+					tcMgr.EnsureChannel(id)
+					enabled := true
+					if _, err := tcMgr.Update(id, tcloop.UpdateInput{Enabled: &enabled}); err != nil {
+						log.Printf("[workflow] channel %d: auto-start TC: %v", id, err)
+					}
 				}
 			}
 			jsonOK(w, map[string]any{"id": id, "mode": cfg.Mode})

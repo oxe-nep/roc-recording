@@ -256,16 +256,7 @@ export default function TcGrid() {
                           >
                             {busy[s.id] ? "…" : "STOP"}
                           </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="global-rec-btn tc-apply-on"
-                            disabled={busy[s.id]}
-                            onClick={() => setSettingsId(s.id)}
-                          >
-                            Start
-                          </button>
-                        )}
+                        ) : null}
                         {tcLive && (
                           <button
                             type="button"

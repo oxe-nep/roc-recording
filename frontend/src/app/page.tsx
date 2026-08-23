@@ -50,8 +50,8 @@ export default function Home() {
         <SystemStatus />
       </header>
       <StreamGrid />
-      <TcGrid />
       <DecodeGrid />
+      <TcGrid />
       <SettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}

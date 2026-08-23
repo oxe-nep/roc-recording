@@ -33,7 +33,6 @@ type streamResponse struct {
 	HLSURL       string `json:"hls_url"`
 	TSLIndex     int    `json:"tsl_index,omitempty"`
 	TSLText      string `json:"tsl_text,omitempty"`
-	TSLOnAir     bool   `json:"tsl_on_air,omitempty"`
 }
 
 type encodePresetResponse struct {
@@ -866,7 +865,6 @@ func toResponse(s *capture.Stream, hlsBaseURL string, tslMgr *tsl.Manager) strea
 		info := tslMgr.InfoForChannel(s.ID)
 		resp.TSLIndex = info.Index
 		resp.TSLText = info.Text
-		resp.TSLOnAir = info.OnAir
 	}
 	return resp
 }

@@ -300,7 +300,6 @@ export default function StreamGrid() {
           const tcLive = tcPreviewHasSignal(tc);
           const tcBadge = tcBadgeText(tc);
           const tslText = s.tsl_text?.trim();
-          const tslOnAir = !!s.tsl_on_air;
           return (
             <div
               key={s.id}
@@ -312,10 +311,7 @@ export default function StreamGrid() {
                   <Thumbnail id={s.id} active={captureOn || tcLive} />
                   {tslText && (
                     <div className="thumb-tsl-overlay">
-                      <div
-                        className={`tsl-badge${tslOnAir ? " on-air" : ""}`}
-                        title={`TSL ${s.tsl_index ?? s.id}${tslOnAir ? " · on air" : ""}`}
-                      >
+                      <div className="tsl-badge" title={`TSL ${s.tsl_index ?? s.id}`}>
                         {tslText}
                       </div>
                     </div>

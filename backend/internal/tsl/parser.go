@@ -11,9 +11,8 @@ const maximumPacketSize = 2048
 
 // Message is one TSL v5 display update.
 type Message struct {
-	Index     uint16
-	Text      string
-	LeftTally bool // router "on-air" / LH tally
+	Index uint16
+	Text  string
 }
 
 // ParsePacket decodes a TSL UMD v5 UDP payload.
@@ -43,7 +42,7 @@ func ParsePacket(buf []byte) ([]Message, error) {
 		if msg == nil || next <= ptr {
 			break
 		}
-		if strings.TrimSpace(msg.Text) != "" || msg.LeftTally {
+		if strings.TrimSpace(msg.Text) != "" {
 			out = append(out, *msg)
 		}
 		ptr = next
@@ -56,11 +55,9 @@ func parseDisplayMessage(buffer []byte, start int, unicodeStrings bool) (*Messag
 		return nil, 0
 	}
 	controlFlags := binary.LittleEndian.Uint16(buffer[start+2 : start+4])
-	left := (uint8(controlFlags) >> 4) & 3
 
 	msg := &Message{
-		Index:     binary.LittleEndian.Uint16(buffer[start : start+2]),
-		LeftTally: left == 1 || left == 2,
+		Index: binary.LittleEndian.Uint16(buffer[start : start+2]),
 	}
 
 	if controlFlags&0x8000 != 0 {

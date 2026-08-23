@@ -15,7 +15,6 @@ export interface Stream {
   hls_url: string;
   tsl_index?: number;
   tsl_text?: string;
-  tsl_on_air?: boolean;
 }
 
 export function isCaptureOn(status: Stream["status"]): boolean {

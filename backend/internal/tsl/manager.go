@@ -16,15 +16,12 @@ type ChannelMap map[int]int
 
 // Info is the API view of TSL state for one encode channel.
 type Info struct {
-	Index  int    `json:"tsl_index"`
-	Text   string `json:"tsl_text,omitempty"`
-	OnAir  bool   `json:"tsl_on_air"`
-	Active bool   `json:"tsl_active"`
+	Index int    `json:"tsl_index"`
+	Text  string `json:"tsl_text,omitempty"`
 }
 
 type displayState struct {
 	text    string
-	onAir   bool
 	updated time.Time
 }
 
@@ -134,24 +131,17 @@ func (m *Manager) readLoop() {
 
 func (m *Manager) apply(msg Message) {
 	idx := int(msg.Index)
-	m.mu.Lock()
-	prev := m.byIndex[idx]
-	text := msg.Text
+	text := strings.TrimSpace(msg.Text)
 	if text == "" {
-		text = prev.text
-	}
-	onAir := msg.LeftTally
-	if text == "" && !onAir {
-		m.mu.Unlock()
 		return
 	}
-	m.byIndex[idx] = displayState{text: text, onAir: onAir, updated: time.Now()}
+	m.mu.Lock()
+	prev := m.byIndex[idx].text
+	m.byIndex[idx] = displayState{text: text, updated: time.Now()}
 	m.mu.Unlock()
 
-	if ch, ok := m.indexMap[idx]; ok {
-		if text != prev.text || onAir != prev.onAir {
-			log.Printf("[tsl] ch %d index %d on_air=%v text=%q", ch, idx, onAir, text)
-		}
+	if ch, ok := m.indexMap[idx]; ok && text != prev {
+		log.Printf("[tsl] ch %d index %d text=%q", ch, idx, text)
 	}
 }
 
@@ -170,16 +160,13 @@ func (m *Manager) InfoForChannel(channelID int) Info {
 	if !ok {
 		return Info{Index: idx}
 	}
-	text := strings.TrimSpace(st.text)
 	return Info{
-		Index:  idx,
-		Text:   text,
-		OnAir:  st.onAir,
-		Active: text != "" || st.onAir,
+		Index: idx,
+		Text:  strings.TrimSpace(st.text),
 	}
 }
 
-// BuildChannelMapFromConfig builds tsl index mapping; 0 tsl_index means use channel id.
+// BuildChannelMap builds tsl index mapping; 0 tsl_index means use channel id.
 func BuildChannelMap(channelIDs []int, tslIndexByID map[int]int) ChannelMap {
 	out := make(ChannelMap, len(channelIDs))
 	for _, id := range channelIDs {

@@ -1,27 +1,20 @@
 "use client";
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState } from "react";
 import {
-  fetchStreams,
-  fetchRecordings,
-  fetchAudioLevels,
   fetchEncodePresets,
   fetchLibraryCategories,
-  fetchSrtAll,
   startRecording,
   stopRecording,
   startSrt,
   stopSrt,
-  type Stream,
-  type AudioLevels,
-  type RecordingInfo,
   type EncodePreset,
   type LibraryCategory,
-  type SrtInfo,
   isCaptureOn,
 } from "@/lib/api";
 import { showEncodeCard } from "@/lib/workflow";
 import { useWorkflows } from "@/hooks/useWorkflows";
+import { useDashboard } from "@/hooks/useDashboard";
 import Thumbnail from "@/components/Thumbnail";
 import AudioMonitor from "@/components/AudioMonitor";
 import ChannelSettingsModal from "@/components/ChannelSettingsModal";
@@ -86,47 +79,21 @@ function SegmentedMeter({ db, label }: { db?: number; label: string }) {
 }
 
 export default function StreamGrid() {
-  const [streams, setStreams] = useState<Stream[]>([]);
+  const {
+    loading,
+    streams,
+    recordings,
+    srtById,
+    metersEncode: audio,
+  } = useDashboard();
   const [presets, setPresets] = useState<EncodePreset[]>([]);
   const [categories, setCategories] = useState<LibraryCategory[]>([]);
-  const [recordings, setRecordings] = useState<Record<number, RecordingInfo>>({});
-  const [srtById, setSrtById] = useState<Record<number, SrtInfo>>({});
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [recBusy, setRecBusy] = useState<Record<number, boolean>>({});
   const [srtBusy, setSrtBusy] = useState<Record<number, boolean>>({});
-  const [audio, setAudio] = useState<Record<number, AudioLevels>>({});
   const [listening, setListening] = useState<Record<number, boolean>>({});
   const [settingsId, setSettingsId] = useState<number | null>(null);
   const { workflows } = useWorkflows();
-  const streamsRef = useRef<Stream[]>([]);
-  streamsRef.current = streams;
-
-  const load = useCallback(async () => {
-    try {
-      const [streamData, recData, cats, srtData] = await Promise.all([
-        fetchStreams(),
-        fetchRecordings(),
-        fetchLibraryCategories().catch(() => null),
-        fetchSrtAll().catch(() => null),
-      ]);
-      setStreams(streamData);
-      const recMap: Record<number, RecordingInfo> = {};
-      for (const r of recData) recMap[r.id] = r;
-      setRecordings(recMap);
-      if (cats) setCategories(cats);
-      if (srtData) {
-        const srtMap: Record<number, SrtInfo> = {};
-        for (const s of srtData) srtMap[s.id] = s;
-        setSrtById(srtMap);
-      }
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
 
   useEffect(() => {
     const refreshPresets = () => {
@@ -145,50 +112,9 @@ export default function StreamGrid() {
     refreshCategories();
     window.addEventListener("roc-presets-changed", refreshPresets);
     window.addEventListener("roc-library-changed", refreshCategories);
-    load();
-    const interval = setInterval(load, 1000);
     return () => {
-      clearInterval(interval);
       window.removeEventListener("roc-presets-changed", refreshPresets);
       window.removeEventListener("roc-library-changed", refreshCategories);
-    };
-  }, [load]);
-
-  useEffect(() => {
-    let alive = true;
-    const silence: AudioLevels = { l: -90, r: -90 };
-    const pollAudio = async () => {
-      const all = streamsRef.current;
-      const updates: Record<number, AudioLevels> = {};
-      for (const s of all) {
-        if (!isCaptureOn(s.status)) {
-          updates[s.id] = silence;
-        }
-      }
-      const active = all.filter((s) => isCaptureOn(s.status));
-      if (active.length === 0) {
-        if (Object.keys(updates).length > 0 && alive) {
-          setAudio((prev) => ({ ...prev, ...updates }));
-        }
-        return;
-      }
-      await Promise.all(
-        active.map(async (s) => {
-          try {
-            updates[s.id] = await fetchAudioLevels(s.id);
-          } catch {
-            updates[s.id] = silence;
-          }
-        }),
-      );
-      if (!alive || Object.keys(updates).length === 0) return;
-      setAudio((prev) => ({ ...prev, ...updates }));
-    };
-    const interval = setInterval(pollAudio, 500);
-    pollAudio();
-    return () => {
-      alive = false;
-      clearInterval(interval);
     };
   }, []);
 
@@ -197,7 +123,8 @@ export default function StreamGrid() {
     try {
       if (recordings[id]?.status === "recording") await stopRecording(id);
       else await startRecording(id);
-      await load();
+    } catch (e) {
+      setError(String(e));
     } finally {
       setRecBusy((b) => ({ ...b, [id]: false }));
     }
@@ -208,7 +135,6 @@ export default function StreamGrid() {
     try {
       if (srtById[id]?.status === "streaming") await stopSrt(id);
       else await startSrt(id);
-      await load();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -427,7 +353,7 @@ export default function StreamGrid() {
         presets={presets}
         categories={categories}
         onClose={() => setSettingsId(null)}
-        onSaved={load}
+        onSaved={() => {}}
       />
     </>
   );

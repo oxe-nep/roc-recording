@@ -462,11 +462,16 @@ html {
   overflow: hidden;
 }
 
-.card-thumb img {
+.card-thumb img,
+.card-thumb video.hls-preview {
   width: 100%;
   height: 100%;
   object-fit: contain;
   display: block;
+}
+
+.card-thumb video.hls-preview {
+  background: #000;
 }
 
 .card-thumb img.thumb-hidden {

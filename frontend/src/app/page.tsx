@@ -7,6 +7,7 @@ import DecodeGrid from "@/components/DecodeGrid";
 import SystemStatus from "@/components/SystemStatus";
 import LibraryModal from "@/components/LibraryModal";
 import SettingsModal from "@/components/SettingsModal";
+import { DashboardProvider } from "@/hooks/useDashboard";
 
 export default function Home() {
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -28,7 +29,7 @@ export default function Home() {
   }, []);
 
   return (
-    <>
+    <DashboardProvider>
       <header className="compact-header">
         <div className="header-brand">
           <img src="/nep-logo.svg" alt="NEP" className="nep-logo" />
@@ -64,6 +65,6 @@ export default function Home() {
           window.dispatchEvent(new Event("roc-library-changed"));
         }}
       />
-    </>
+    </DashboardProvider>
   );
 }

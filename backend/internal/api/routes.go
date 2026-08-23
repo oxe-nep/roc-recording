@@ -22,6 +22,7 @@ import (
 	"github.com/roc-recording/backend/internal/tcloop"
 	"github.com/roc-recording/backend/internal/tsl"
 	"github.com/roc-recording/backend/internal/workflow"
+	"github.com/roc-recording/backend/internal/ws"
 )
 
 type streamResponse struct {
@@ -60,6 +61,10 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 	r.Use(quietRequestLogger())
 	r.Use(middleware.Recoverer)
 	r.Use(corsMiddleware(allowedOrigins))
+
+	hub := ws.NewHub(allowedOrigins)
+	startDashboardWS(hub, mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, hlsBaseURL)
+	registerDashboardWS(r, hub, apiKey)
 
 	// HLS, thumbnails and audio meters – no API key required
 	r.Mount("/hls/", hlsHandler)
@@ -851,7 +856,8 @@ func shouldSkipRequestLog(r *http.Request) bool {
 	switch {
 	case strings.HasPrefix(path, "/thumb/"),
 		strings.HasPrefix(path, "/audio/"),
-		strings.HasPrefix(path, "/hls/"):
+		strings.HasPrefix(path, "/hls/"),
+		path == "/ws":
 		return true
 	case path == "/api/streams", path == "/api/recordings", path == "/api/srt", path == "/api/system", path == "/api/encode/presets",
 		path == "/api/encode/options", path == "/api/workflows",
@@ -883,7 +889,7 @@ func corsMiddleware(allowedOrigins string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key, Upgrade, Connection")
 			if r.Method == http.MethodOptions {
 				w.WriteHeader(http.StatusNoContent)
 				return

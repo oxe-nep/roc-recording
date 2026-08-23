@@ -302,6 +302,19 @@ func (m *Manager) Get(id int) (Info, error) {
 	}, nil
 }
 
+// List returns TC state for the given channel ids (missing channels are ensured as off).
+func (m *Manager) List(ids []int) []Info {
+	out := make([]Info, 0, len(ids))
+	for _, id := range ids {
+		info, err := m.Get(id)
+		if err != nil {
+			continue
+		}
+		out = append(out, info)
+	}
+	return out
+}
+
 func effectiveUDPPort(id int, s Settings) int {
 	if s.UDPPort > 0 {
 		return s.UDPPort
@@ -682,12 +695,11 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		samplesPerFrame = 1920
 	}
 
-	// Preview is output-only (TC section cards). Skip encode-side thumb/HLS.
+	// Preview is a single low-latency HLS (A/V) for the TC card — no JPEG / audio-only split.
 	playoutOutDir := filepath.Join(m.hlsDir, "playout", strconv.Itoa(id))
 	_ = os.MkdirAll(playoutOutDir, 0o755)
-	playoutThumb := filepath.Join(playoutOutDir, "thumb.jpg")
-	playoutAudioPlaylist := filepath.Join(playoutOutDir, "audio.m3u8")
-	playoutAudioSeg := filepath.Join(playoutOutDir, "audio_%03d.ts")
+	previewPlaylist := filepath.Join(playoutOutDir, "preview.m3u8")
+	previewSeg := filepath.Join(playoutOutDir, "preview_%03d.ts")
 
 	textPath := filepath.Join(os.TempDir(), fmt.Sprintf("roc-tcloop-%d-tc.txt", id))
 	metaPath := filepath.Join(os.TempDir(), fmt.Sprintf("roc-tcloop-%d-astats.meta", id))
@@ -716,10 +728,10 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 			w, h, w, h, fps, draw,
 		)
 	}
-	filter := vbase + ",split=2[vdl][vthumbsrc];" +
-		"[vthumbsrc]scale=640:360,format=yuv420p[vthumb];" +
+	filter := vbase + ",split=2[vdl][vprevsrc];" +
+		"[vprevsrc]scale=640:360,fps=10,format=yuv420p[vprev];" +
 		fmt.Sprintf(
-			"[0:a]aformat=channel_layouts=stereo,asplit=3[adeck][ameter][ahls];"+
+			"[0:a]aformat=channel_layouts=stereo,asplit=3[adeck][ameter][aprev];"+
 				"[adeck]asetnsamples=n=%d:p=0[aout];"+
 				"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none,"+
 				"ametadata=print:file=%s,anullsink",
@@ -748,25 +760,31 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		args = append(args, "-format_code", strings.TrimSpace(formatCode))
 	}
 	args = append(args, "-preroll", "0.5", "-f", "decklink", openDevice,
-		// Output #2: output preview thumbnail
-		"-map", "[vthumb]",
-		"-r", "1",
-		"-q:v", "4",
-		"-update", "1",
-		"-f", "image2",
-		playoutThumb,
-		// Output #3: output preview HLS audio (monitor)
-		"-map", "[ahls]",
+		// Output #2: low-latency HLS preview (video + audio)
+		"-map", "[vprev]",
+		"-map", "[aprev]",
+		"-c:v", "libx264",
+		"-preset", "ultrafast",
+		"-tune", "zerolatency",
+		"-profile:v", "baseline",
+		"-bf", "0",
+		"-g", "10",
+		"-keyint_min", "10",
+		"-sc_threshold", "0",
+		"-b:v", "800k",
+		"-maxrate", "1000k",
+		"-bufsize", "400k",
+		"-pix_fmt", "yuv420p",
 		"-c:a", "aac",
-		"-b:a", "128k",
+		"-b:a", "96k",
 		"-ar", "48000",
 		"-ac", "2",
 		"-f", "hls",
-		"-hls_time", "1",
+		"-hls_time", "0.5",
 		"-hls_list_size", "4",
-		"-hls_flags", "delete_segments+independent_segments+omit_endlist",
-		"-hls_segment_filename", playoutAudioSeg,
-		playoutAudioPlaylist,
+		"-hls_flags", "delete_segments+independent_segments+omit_endlist+program_date_time",
+		"-hls_segment_filename", previewSeg,
+		previewPlaylist,
 	)
 
 	cmd := exec.Command(m.ffmpegBin, args...)

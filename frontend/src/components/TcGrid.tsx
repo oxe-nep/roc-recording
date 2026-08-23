@@ -1,22 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  fetchPlayoutAudioLevels,
-  fetchPlayoutClients,
-  fetchStreams,
-  fetchTcLoop,
-  updateTcLoop,
-  type AudioLevels,
-  type Stream,
-  type TcLoopInfo,
-} from "@/lib/api";
+import { useState } from "react";
+import { updateTcLoop } from "@/lib/api";
 import { tcIsActive, tcPreviewHasSignal, tcSourceLabel, tcSourceShort } from "@/lib/tcUi";
 import { showTcCard } from "@/lib/workflow";
 import { useWorkflows } from "@/hooks/useWorkflows";
-import Thumbnail from "@/components/Thumbnail";
-import AudioMonitor from "@/components/AudioMonitor";
+import { useDashboard } from "@/hooks/useDashboard";
+import HlsPreview from "@/components/HlsPreview";
 import TcSettingsModal from "@/components/TcSettingsModal";
+import type { TcLoopInfo } from "@/lib/api";
 
 const METER_SEGMENTS = 24;
 const METER_MIN_DB = -50;
@@ -68,92 +60,20 @@ function statusMeta(tc?: TcLoopInfo, live?: boolean): string {
 }
 
 export default function TcGrid() {
-  const [streams, setStreams] = useState<Stream[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { loading, streams, tcById, metersPlayout: audio } = useDashboard();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Record<number, boolean>>({});
-  const [audio, setAudio] = useState<Record<number, AudioLevels>>({});
   const [listening, setListening] = useState<Record<number, boolean>>({});
   const [settingsId, setSettingsId] = useState<number | null>(null);
-  const [tcById, setTcById] = useState<Record<number, TcLoopInfo>>({});
   const { workflows } = useWorkflows();
-  const tcByIdRef = useRef<Record<number, TcLoopInfo>>({});
-  tcByIdRef.current = tcById;
 
   const channelIds = streams.filter((s) => showTcCard(workflows, s.id)).map((s) => s.id);
-
-  const load = useCallback(async () => {
-    try {
-      const streamData = await fetchStreams();
-      setStreams(streamData);
-      setError(null);
-      const ids = streamData.filter((s) => showTcCard(workflows, s.id)).map((s) => s.id);
-      await fetchPlayoutClients().catch(() => null);
-      const tcEntries = await Promise.all(
-        ids.map(async (id) => {
-          try {
-            return [id, await fetchTcLoop(id)] as const;
-          } catch {
-            return null;
-          }
-        }),
-      );
-      const next: Record<number, TcLoopInfo> = {};
-      for (const e of tcEntries) {
-        if (e) next[e[0]] = e[1];
-      }
-      setTcById(next);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, [workflows]);
-
-  useEffect(() => {
-    load();
-    const interval = setInterval(load, 1000);
-    return () => clearInterval(interval);
-  }, [load]);
-
-  useEffect(() => {
-    let alive = true;
-    const silence: AudioLevels = { l: -90, r: -90 };
-    const pollAudio = async () => {
-      const updates: Record<number, AudioLevels> = {};
-      for (const id of channelIds) {
-        const tc = tcByIdRef.current[id];
-        if (!tcIsActive(tc)) {
-          updates[id] = silence;
-        }
-      }
-      const active = channelIds.filter((id) => tcIsActive(tcByIdRef.current[id]));
-      await Promise.all(
-        active.map(async (id) => {
-          try {
-            updates[id] = await fetchPlayoutAudioLevels(id);
-          } catch {
-            updates[id] = silence;
-          }
-        }),
-      );
-      if (!alive || Object.keys(updates).length === 0) return;
-      setAudio((prev) => ({ ...prev, ...updates }));
-    };
-    const interval = setInterval(pollAudio, 500);
-    pollAudio();
-    return () => {
-      alive = false;
-      clearInterval(interval);
-    };
-  }, [channelIds.join(",")]);
 
   const stopTc = async (id: number) => {
     setBusy((b) => ({ ...b, [id]: true }));
     setError(null);
     try {
       await updateTcLoop(id, { enabled: false });
-      await load();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -194,26 +114,19 @@ export default function TcGrid() {
               const tcLive = tcPreviewHasSignal(tc);
               const isListening = !!listening[s.id];
               const tslText = s.tsl_text?.trim();
-              const hasSignal = s.status === "running";
               return (
                 <div
                   key={s.id}
                   className={`card-panel ${s.status}${tcOn ? " tc-active" : ""}${tcLive ? " tc-live" : ""}`}
                 >
-                  <AudioMonitor
-                    id={s.id}
-                    active={tcLive || tcOn}
-                    listening={isListening}
-                    playlistPath={`/hls/playout/${s.id}/audio.m3u8`}
-                  />
                   <div className="card-stage">
                     <div className="card-thumb">
-                      <Thumbnail
-                        id={s.id}
-                        active={tcLive || hasSignal}
-                        path={`/hls/playout/${s.id}/thumb.jpg`}
+                      <HlsPreview
+                        active={tcLive}
+                        listening={isListening}
+                        playlistPath={`/hls/playout/${s.id}/preview.m3u8`}
                       />
-                      {tslText && (hasSignal || tcOn) && (
+                      {tslText && tcOn && (
                         <div className="thumb-tsl-overlay">
                           <div className="tsl-badge" title={`TSL ${s.tsl_index ?? s.id}`}>
                             {tslText}
@@ -262,12 +175,12 @@ export default function TcGrid() {
                             {busy[s.id] ? "…" : "STOP"}
                           </button>
                         ) : null}
-                        {(tcLive || tcOn) && (
+                        {tcLive && (
                           <button
                             type="button"
                             className={`badge listen-btn ${isListening ? "active" : ""}`}
                             onClick={() => setListening((prev) => ({ ...prev, [s.id]: !prev[s.id] }))}
-                            title={isListening ? "Stop monitor" : "Monitor"}
+                            title={isListening ? "Mute" : "Unmute"}
                           >
                             {isListening ? "🔊" : "🔈"}
                           </button>
@@ -293,7 +206,7 @@ export default function TcGrid() {
         open={settingsId != null}
         channelId={settingsId}
         onClose={() => setSettingsId(null)}
-        onSaved={load}
+        onSaved={() => {}}
       />
     </section>
   );

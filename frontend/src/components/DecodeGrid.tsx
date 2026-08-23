@@ -1,11 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import {
-  fetchPlayoutAudioLevels,
-  fetchPlayoutClients,
-  fetchPlayoutLogs,
-  fetchPlayoutMedia,
   isPlayoutOn,
   isPlayoutPaused,
   pausePlayout,
@@ -13,12 +9,11 @@ import {
   startPlayout,
   stopPlayout,
   updatePlayoutClient,
-  type AudioLevels,
   type PlayoutClient,
-  type PlayoutMediaItem,
 } from "@/lib/api";
 import { showDecodeCard } from "@/lib/workflow";
 import { useWorkflows } from "@/hooks/useWorkflows";
+import { useDashboard } from "@/hooks/useDashboard";
 import Thumbnail from "@/components/Thumbnail";
 import AudioMonitor from "@/components/AudioMonitor";
 import DecodeSettingsModal from "@/components/DecodeSettingsModal";
@@ -120,75 +115,19 @@ function waitingLabel(c: PlayoutClient): string {
 }
 
 export default function DecodeGrid() {
-  const [clients, setClients] = useState<PlayoutClient[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { loading, playout: clients, metersPlayout: audio } = useDashboard();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Record<number, boolean>>({});
-  const [audio, setAudio] = useState<Record<number, AudioLevels>>({});
   const [listening, setListening] = useState<Record<number, boolean>>({});
   const [settingsId, setSettingsId] = useState<number | null>(null);
   const [mediaOpen, setMediaOpen] = useState(false);
   const { workflows } = useWorkflows();
-  const clientsRef = useRef<PlayoutClient[]>([]);
-  clientsRef.current = clients;
-
-  const load = useCallback(async () => {
-    try {
-      const data = await fetchPlayoutClients();
-      setClients(data);
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    load();
-    const interval = setInterval(load, 1000);
-    return () => clearInterval(interval);
-  }, [load]);
-
-  useEffect(() => {
-    let alive = true;
-    const silence: AudioLevels = { l: -90, r: -90 };
-    const pollAudio = async () => {
-      const all = clientsRef.current;
-      const updates: Record<number, AudioLevels> = {};
-      for (const c of all) {
-        if (!isPlayoutOn(c.status) || isPlayoutPaused(c.status)) {
-          updates[c.id] = silence;
-        }
-      }
-      const active = all.filter((c) => isPlayoutOn(c.status) && !isPlayoutPaused(c.status));
-      await Promise.all(
-        active.map(async (c) => {
-          try {
-            updates[c.id] = await fetchPlayoutAudioLevels(c.id);
-          } catch {
-            updates[c.id] = silence;
-          }
-        }),
-      );
-      if (!alive) return;
-      if (Object.keys(updates).length === 0) return;
-      setAudio((prev) => ({ ...prev, ...updates }));
-    };
-    const interval = setInterval(pollAudio, 500);
-    pollAudio();
-    return () => {
-      alive = false;
-      clearInterval(interval);
-    };
-  }, []);
 
   const withBusy = async (id: number, fn: () => Promise<unknown>) => {
     setBusy((b) => ({ ...b, [id]: true }));
     setError(null);
     try {
       await fn();
-      await load();
     } catch (e) {
       setError(String(e));
     } finally {
@@ -198,11 +137,9 @@ export default function DecodeGrid() {
 
   const toggleLoop = async (c: PlayoutClient) => {
     const next = !c.loop;
-    setClients((prev) => prev.map((x) => (x.id === c.id ? { ...x, loop: next } : x)));
     try {
       await updatePlayoutClient(c.id, { loop: next });
     } catch (e) {
-      setClients((prev) => prev.map((x) => (x.id === c.id ? { ...x, loop: c.loop } : x)));
       setError(String(e));
     }
   };
@@ -393,7 +330,7 @@ export default function DecodeGrid() {
         open={settingsId != null}
         client={settingsClient}
         onClose={() => setSettingsId(null)}
-        onSaved={load}
+        onSaved={() => {}}
       />
       <MediaLibraryModal open={mediaOpen} onClose={() => setMediaOpen(false)} />
     </section>

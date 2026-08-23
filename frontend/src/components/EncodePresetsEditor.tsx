@@ -97,11 +97,13 @@ const emptyForm = (): EncodePreset => ({
 
 type Props = {
   open: boolean;
-  onClose: () => void;
+  onClose?: () => void;
   onChanged?: () => void;
+  /** Render inside Settings tab — no backdrop or modal chrome. */
+  embedded?: boolean;
 };
 
-export default function EncodePresetsEditor({ open, onClose, onChanged }: Props) {
+export default function EncodePresetsEditor({ open, onClose, onChanged, embedded }: Props) {
   const [presets, setPresets] = useState<EncodePreset[]>([]);
   const [codecs, setCodecs] = useState<EncodeCodecOption[]>([]);
   const [form, setForm] = useState<EncodePreset>(emptyForm());
@@ -142,13 +144,13 @@ export default function EncodePresetsEditor({ open, onClose, onChanged }: Props)
   }, [open, load]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || embedded) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") onClose?.();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, embedded]);
 
   const videoMbps = useMemo(() => {
     const n = parseMbps(form.video_bitrate);
@@ -287,6 +289,157 @@ export default function EncodePresetsEditor({ open, onClose, onChanged }: Props)
 
   const derived = deriveFromMbps(Math.round(videoMbps));
 
+  const panel = (
+    <>
+      {error && <div className="error-message">{error}</div>}
+
+      <div className="presets-layout">
+        <div className="presets-list">
+          <button type="button" className="badge files-btn" onClick={startCreate} disabled={busy}>
+            + New
+          </button>
+          {presets.map((p) => (
+            <div key={p.id} className={`presets-row ${editingId === p.id ? "active" : ""}`}>
+              <button type="button" className="presets-row-main" onClick={() => startEdit(p)}>
+                <span className="presets-row-label">{p.label}</span>
+                <span className="presets-row-meta">
+                  {p.id} · {p.video_bitrate} · {p.audio_bitrate}
+                </span>
+              </button>
+              <button type="button" className="badge delete-btn" onClick={() => remove(p.id)} disabled={busy}>
+                Delete
+              </button>
+            </div>
+          ))}
+        </div>
+
+        <div className="presets-form">
+          <div className="presets-form-title">{editingId ? `Edit: ${form.label || editingId}` : "New preset"}</div>
+
+          <label className="presets-field">
+            <span>Name</span>
+            <input
+              value={form.label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="e.g. HQ 12 Mbit"
+              disabled={busy}
+            />
+          </label>
+          {!editingId && (
+            <label className="presets-field">
+              <span>Internal ID</span>
+              <input
+                value={form.id}
+                onChange={(e) => setForm((prev) => ({ ...prev, id: slugifyId(e.target.value) || e.target.value }))}
+                placeholder="auto from name"
+                disabled={busy}
+              />
+            </label>
+          )}
+
+          <div className="presets-grid">
+            <label className="presets-field">
+              <span>Video codec</span>
+              <select
+                value={form.video_codec}
+                onChange={(e) => setCodec(e.target.value)}
+                disabled={busy || codecOptions.length === 0}
+              >
+                {codecOptions.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="presets-field">
+              <span>Video bitrate</span>
+              <select
+                value={String(Math.round(videoMbps))}
+                onChange={(e) => setVideoMbps(Number(e.target.value))}
+                disabled={busy}
+              >
+                {mbpsOptions.map((m) => (
+                  <option key={m} value={m}>
+                    {m} Mbps{VIDEO_MBPS_HINT[m] ? ` — ${VIDEO_MBPS_HINT[m]}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="presets-field">
+              <span>Encoder speed / quality</span>
+              <select
+                value={form.video_preset}
+                onChange={(e) => setForm((prev) => ({ ...prev, video_preset: e.target.value }))}
+                disabled={busy}
+              >
+                {encoderPresets.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="presets-field">
+              <span>Keyframe interval</span>
+              <select
+                value={form.video_gop}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, video_gop: Number(e.target.value) || 50 }))
+                }
+                disabled={busy}
+              >
+                {gopOptions.map((g) => (
+                  <option key={g.value} value={g.value}>
+                    {g.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="presets-field">
+              <span>Audio bitrate</span>
+              <select
+                value={form.audio_bitrate}
+                onChange={(e) => setForm((prev) => ({ ...prev, audio_bitrate: e.target.value }))}
+                disabled={busy}
+              >
+                {audioOptions.map((a) => (
+                  <option key={a.value} value={a.value}>
+                    {a.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <p className="presets-derived">
+            Applied encode: {form.video_codec} · {derived.video_bitrate} (max {derived.video_maxrate},
+            buffer {derived.video_bufsize}) · {form.video_preset} · GOP {form.video_gop} · audio{" "}
+            {form.audio_bitrate}
+          </p>
+
+          <p className="presets-hint">
+            Codecs are detected from FFmpeg on the capture host. Running channels keep their
+            current encode; new settings apply the next time that channel&apos;s capture starts.
+          </p>
+          <div className="presets-form-actions">
+            <button type="button" className="global-rec-btn" onClick={save} disabled={busy}>
+              {busy ? "…" : editingId ? "Save changes" : "Create preset"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+
+  if (embedded) {
+    return <div className="settings-tab-panel">{panel}</div>;
+  }
+
   return (
     <div className="modal-backdrop" onClick={onClose} role="presentation">
       <div
@@ -301,149 +454,7 @@ export default function EncodePresetsEditor({ open, onClose, onChanged }: Props)
             ×
           </button>
         </div>
-
-        {error && <div className="error-message">{error}</div>}
-
-        <div className="presets-layout">
-          <div className="presets-list">
-            <button type="button" className="badge files-btn" onClick={startCreate} disabled={busy}>
-              + New
-            </button>
-            {presets.map((p) => (
-              <div key={p.id} className={`presets-row ${editingId === p.id ? "active" : ""}`}>
-                <button type="button" className="presets-row-main" onClick={() => startEdit(p)}>
-                  <span className="presets-row-label">{p.label}</span>
-                  <span className="presets-row-meta">
-                    {p.id} · {p.video_bitrate} · {p.audio_bitrate}
-                  </span>
-                </button>
-                <button type="button" className="badge delete-btn" onClick={() => remove(p.id)} disabled={busy}>
-                  Delete
-                </button>
-              </div>
-            ))}
-          </div>
-
-          <div className="presets-form">
-            <div className="presets-form-title">{editingId ? `Edit: ${form.label || editingId}` : "New preset"}</div>
-
-            <label className="presets-field">
-              <span>Name</span>
-              <input
-                value={form.label}
-                onChange={(e) => setLabel(e.target.value)}
-                placeholder="e.g. HQ 12 Mbit"
-                disabled={busy}
-              />
-            </label>
-            {!editingId && (
-              <label className="presets-field">
-                <span>Internal ID</span>
-                <input
-                  value={form.id}
-                  onChange={(e) => setForm((prev) => ({ ...prev, id: slugifyId(e.target.value) || e.target.value }))}
-                  placeholder="auto from name"
-                  disabled={busy}
-                />
-              </label>
-            )}
-
-            <div className="presets-grid">
-              <label className="presets-field">
-                <span>Video codec</span>
-                <select
-                  value={form.video_codec}
-                  onChange={(e) => setCodec(e.target.value)}
-                  disabled={busy || codecOptions.length === 0}
-                >
-                  {codecOptions.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="presets-field">
-                <span>Video bitrate</span>
-                <select
-                  value={String(Math.round(videoMbps))}
-                  onChange={(e) => setVideoMbps(Number(e.target.value))}
-                  disabled={busy}
-                >
-                  {mbpsOptions.map((m) => (
-                    <option key={m} value={m}>
-                      {m} Mbps{VIDEO_MBPS_HINT[m] ? ` — ${VIDEO_MBPS_HINT[m]}` : ""}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="presets-field">
-                <span>Encoder speed / quality</span>
-                <select
-                  value={form.video_preset}
-                  onChange={(e) => setForm((prev) => ({ ...prev, video_preset: e.target.value }))}
-                  disabled={busy}
-                >
-                  {encoderPresets.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="presets-field">
-                <span>Keyframe interval</span>
-                <select
-                  value={form.video_gop}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, video_gop: Number(e.target.value) || 50 }))
-                  }
-                  disabled={busy}
-                >
-                  {gopOptions.map((g) => (
-                    <option key={g.value} value={g.value}>
-                      {g.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="presets-field">
-                <span>Audio bitrate</span>
-                <select
-                  value={form.audio_bitrate}
-                  onChange={(e) => setForm((prev) => ({ ...prev, audio_bitrate: e.target.value }))}
-                  disabled={busy}
-                >
-                  {audioOptions.map((a) => (
-                    <option key={a.value} value={a.value}>
-                      {a.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <p className="presets-derived">
-              Applied encode: {form.video_codec} · {derived.video_bitrate} (max {derived.video_maxrate},
-              buffer {derived.video_bufsize}) · {form.video_preset} · GOP {form.video_gop} · audio{" "}
-              {form.audio_bitrate}
-            </p>
-
-            <p className="presets-hint">
-              Codecs are detected from FFmpeg on the capture host. Running channels keep their
-              current encode; new settings apply the next time that channel&apos;s capture starts.
-            </p>
-            <div className="presets-form-actions">
-              <button type="button" className="global-rec-btn" onClick={save} disabled={busy}>
-                {busy ? "…" : editingId ? "Save changes" : "Create preset"}
-              </button>
-            </div>
-          </div>
-        </div>
+        {panel}
       </div>
     </div>
   );

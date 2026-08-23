@@ -12,11 +12,14 @@ import {
   startPlayout,
   stopPlayout,
   updatePlayoutClient,
+  updateTcLoop,
   type AudioLevels,
   type PlayoutClient,
   type TcLoopInfo,
 } from "@/lib/api";
 import { tcBadgeText, tcIsActive, tcPreviewHasSignal, tcSourceLabel, tcSourceShort } from "@/lib/tcUi";
+import { showDecodeCard } from "@/lib/workflow";
+import { useWorkflows } from "@/hooks/useWorkflows";
 import Thumbnail from "@/components/Thumbnail";
 import AudioMonitor from "@/components/AudioMonitor";
 import DecodeSettingsModal from "@/components/DecodeSettingsModal";
@@ -128,6 +131,7 @@ export default function DecodeGrid() {
   const [settingsId, setSettingsId] = useState<number | null>(null);
   const [mediaOpen, setMediaOpen] = useState(false);
   const [tcById, setTcById] = useState<Record<number, TcLoopInfo>>({});
+  const { workflows } = useWorkflows();
   const clientsRef = useRef<PlayoutClient[]>([]);
   const tcByIdRef = useRef<Record<number, TcLoopInfo>>({});
   clientsRef.current = clients;
@@ -229,6 +233,11 @@ export default function DecodeGrid() {
   };
 
   const settingsClient = settingsId != null ? clients.find((c) => c.id === settingsId) ?? null : null;
+  const visibleClients = clients.filter((c) => showDecodeCard(workflows, c.id));
+
+  if (!loading && visibleClients.length === 0) {
+    return null;
+  }
 
   return (
     <section className="io-section">
@@ -252,11 +261,11 @@ export default function DecodeGrid() {
         <div className="loading">
           <span>Loading decode channels…</span>
         </div>
-      ) : clients.length === 0 ? (
-        <p className="io-section-empty">No decode channels yet — waiting for sinks on the host.</p>
+      ) : visibleClients.length === 0 ? (
+        <p className="io-section-empty">No decode channels in current workflows.</p>
       ) : (
         <div className="cards-grid">
-          {clients.map((c) => {
+          {visibleClients.map((c) => {
             const on = isPlayoutOn(c.status);
             const paused = isPlayoutPaused(c.status);
             const playing = on && !paused;
@@ -328,39 +337,56 @@ export default function DecodeGrid() {
                           {title}
                         </span>
                       </div>
-                      <div className="card-meta" title={cardMeta(c)}>
-                        <span className="card-meta-item">{formatDisplay(c.format_code)}</span>
-                        <span className="card-meta-sep">·</span>
-                        <span className="card-meta-item">{(c.source || "srt").toUpperCase()}</span>
-                        {tcOn && (
+                      <div
+                        className="card-meta"
+                        title={
+                          tcOn ? tcSourceLabel(tc?.source, tc?.udp_port, c.id) : cardMeta(c)
+                        }
+                      >
+                        {tcOn ? (
+                          <span className="card-meta-item card-meta-tc">
+                            {tcLive
+                              ? `TC · ${tcSourceShort(tc?.source)}`
+                              : tc?.status === "error"
+                                ? "TC · error"
+                                : "TC · starting"}
+                          </span>
+                        ) : (
                           <>
+                            <span className="card-meta-item">{formatDisplay(c.format_code)}</span>
                             <span className="card-meta-sep">·</span>
-                            <span className="card-meta-item card-meta-tc">
-                              {tcLive
-                                ? `TC · ${tcSourceShort(tc?.source)}`
-                                : tc?.status === "error"
-                                  ? "TC · error"
-                                  : "TC · starting"}
-                            </span>
+                            <span className="card-meta-item">{(c.source || "srt").toUpperCase()}</span>
                           </>
                         )}
                       </div>
                     </div>
                     <div className="card-actions">
-                      {isFile ? (
+                      {tcOn ? (
+                        <button
+                          type="button"
+                          className="tc-stop-btn"
+                          disabled={busy[c.id]}
+                          onClick={() =>
+                            withBusy(c.id, async () => updateTcLoop(c.id, { enabled: false }))
+                          }
+                          title="Stop TC Burn-in"
+                        >
+                          {busy[c.id] ? "…" : "STOP TC"}
+                        </button>
+                      ) : isFile ? (
                         <>
                           {!on || paused ? (
                             <button
                               type="button"
                               className="stream-btn idle"
-                              disabled={busy[c.id] || (!c.file_id && !paused) || tcOn}
+                              disabled={busy[c.id] || (!c.file_id && !paused)}
                               onClick={() =>
                                 withBusy(c.id, async () => {
                                   if (paused) await resumePlayout(c.id);
                                   else await startPlayout(c.id);
                                 })
                               }
-                              title={tcOn ? "Disable TC Burn-in first" : paused ? "Resume" : "Play"}
+                              title={paused ? "Resume" : "Play"}
                             >
                               {busy[c.id] ? "…" : "PLAY"}
                             </button>
@@ -404,8 +430,8 @@ export default function DecodeGrid() {
                               else await startPlayout(c.id);
                             })
                           }
-                          disabled={busy[c.id] || (tcOn && !on)}
-                          title={tcOn && !on ? "Disable TC Burn-in first" : on ? "Stop" : "Start"}
+                          disabled={busy[c.id]}
+                          title={on ? "Stop" : "Start"}
                         >
                           {busy[c.id] ? "…" : on ? "STOP" : "START"}
                         </button>

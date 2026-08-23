@@ -11,7 +11,6 @@ import {
   libraryFileURL,
   moveLibraryFile,
   renameLibraryCategory,
-  setRecordingsPath,
   type LibraryCategory,
   type LibraryFile,
 } from "@/lib/api";
@@ -34,8 +33,6 @@ export default function LibraryModal({ open, onClose, pickMode, onPick }: Props)
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [newCat, setNewCat] = useState("");
   const [storagePath, setStoragePath] = useState("");
-  const [pathDraft, setPathDraft] = useState("");
-  const [pathBusy, setPathBusy] = useState(false);
   const [playerURL, setPlayerURL] = useState<string | null>(null);
   const [playingKey, setPlayingKey] = useState<string | null>(null);
 
@@ -51,7 +48,6 @@ export default function LibraryModal({ open, onClose, pickMode, onPick }: Props)
       setCategories(cats);
       setFiles(list);
       setStoragePath(path);
-      setPathDraft((draft) => (draft === "" || draft === path ? path : draft));
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -62,20 +58,6 @@ export default function LibraryModal({ open, onClose, pickMode, onPick }: Props)
 
   const notifyLibraryChanged = () => {
     window.dispatchEvent(new Event("roc-library-changed"));
-  };
-
-  const savePath = async () => {
-    setPathBusy(true);
-    try {
-      const path = await setRecordingsPath(pathDraft.trim());
-      setStoragePath(path);
-      setPathDraft(path);
-      await load();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setPathBusy(false);
-    }
   };
 
   useEffect(() => {
@@ -215,29 +197,10 @@ export default function LibraryModal({ open, onClose, pickMode, onPick }: Props)
           </div>
         </div>
 
-        {!pickMode && (
-        <div className="library-path-bar">
-          <label className="library-path-label" htmlFor="recordings-path">
-            Storage path
-          </label>
-          <input
-            id="recordings-path"
-            className="library-path-input"
-            value={pathDraft}
-            onChange={(e) => setPathDraft(e.target.value)}
-            placeholder="/data/recordings"
-            disabled={pathBusy}
-            title="Absolute path on the capture host where category folders are created"
-          />
-          <button
-            type="button"
-            className="badge files-btn"
-            onClick={savePath}
-            disabled={pathBusy || !pathDraft.trim() || pathDraft.trim() === storagePath}
-          >
-            {pathBusy ? "…" : "Save"}
-          </button>
-        </div>
+        {!pickMode && storagePath && (
+        <p className="library-path-note" title={storagePath}>
+          Storage: {storagePath}
+        </p>
         )}
 
         {error && <div className="error-message">{error}</div>}

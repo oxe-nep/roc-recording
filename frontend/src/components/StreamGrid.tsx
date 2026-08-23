@@ -14,6 +14,7 @@ import {
   stopRecording,
   startSrt,
   stopSrt,
+  updateTcLoop,
   type Stream,
   type AudioLevels,
   type RecordingInfo,
@@ -24,6 +25,8 @@ import {
   isCaptureOn,
 } from "@/lib/api";
 import { tcBadgeText, tcIsActive, tcPreviewHasSignal, tcSourceLabel, tcSourceShort } from "@/lib/tcUi";
+import { showEncodeCard } from "@/lib/workflow";
+import { useWorkflows } from "@/hooks/useWorkflows";
 import Thumbnail from "@/components/Thumbnail";
 import AudioMonitor from "@/components/AudioMonitor";
 import ChannelSettingsModal from "@/components/ChannelSettingsModal";
@@ -102,6 +105,7 @@ export default function StreamGrid() {
   const [listening, setListening] = useState<Record<number, boolean>>({});
   const [settingsId, setSettingsId] = useState<number | null>(null);
   const [tcById, setTcById] = useState<Record<number, TcLoopInfo>>({});
+  const { workflows } = useWorkflows();
   const streamsRef = useRef<Stream[]>([]);
   const tcByIdRef = useRef<Record<number, TcLoopInfo>>({});
   streamsRef.current = streams;
@@ -250,6 +254,18 @@ export default function StreamGrid() {
     }
   };
 
+  const stopTc = async (id: number) => {
+    setBusy((b) => ({ ...b, [id]: true }));
+    try {
+      await updateTcLoop(id, { enabled: false });
+      await load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy((b) => ({ ...b, [id]: false }));
+    }
+  };
+
   const anyRecording = Object.values(recordings).some((r) => r.status === "recording");
 
   useEffect(() => {
@@ -263,9 +279,14 @@ export default function StreamGrid() {
   };
 
   const settingsStream = settingsId != null ? streams.find((s) => s.id === settingsId) ?? null : null;
+  const visibleStreams = streams.filter((s) => showEncodeCard(workflows, s.id));
 
   if (loading && streams.length === 0) {
     return <div className="loading"><span>Connecting to backend…</span></div>;
+  }
+
+  if (visibleStreams.length === 0) {
+    return null;
   }
 
   return (
@@ -285,7 +306,7 @@ export default function StreamGrid() {
         </div>
 
       <div className="cards-grid">
-        {streams.map((s) => {
+        {visibleStreams.map((s) => {
           const rec = recordings[s.id];
           const isRecording = rec?.status === "recording";
           const isEncoding = isRecording && !!rec?.encoding;
@@ -309,7 +330,7 @@ export default function StreamGrid() {
               <div className="card-stage">
                 <div className="card-thumb">
                   <Thumbnail id={s.id} active={captureOn || tcLive} />
-                  {tslText && (
+                  {tslText && (hasSignal || tcLive) && (
                     <div className="thumb-tsl-overlay">
                       <div className="tsl-badge" title={`TSL ${s.tsl_index ?? s.id}`}>
                         {tslText}
@@ -372,93 +393,107 @@ export default function StreamGrid() {
                     </div>
                     <div
                       className="card-meta"
-                      title={[
-                        s.format || (s.status === "waiting" ? "Waiting for signal" : null),
-                        cat === "_unsorted" ? "Unsorted" : cat,
-                        activePreset?.label || s.encode_preset || null,
-                      ]
-                        .filter(Boolean)
-                        .join(" · ")}
+                      title={
+                        tcOn
+                          ? tcSourceLabel(tc?.source, tc?.udp_port, s.id)
+                          : [
+                              s.format || (s.status === "waiting" ? "Waiting for signal" : null),
+                              cat === "_unsorted" ? "Unsorted" : cat,
+                              activePreset?.label || s.encode_preset || null,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")
+                      }
                     >
-                      {s.format ? (
+                      {tcOn ? (
+                        <span className="card-meta-item card-meta-tc">
+                          {tcLive
+                            ? `TC · ${tcSourceShort(tc?.source)}`
+                            : tc?.status === "error"
+                              ? "TC · error"
+                              : "TC · starting"}
+                        </span>
+                      ) : (
                         <>
-                          <span className="card-meta-item card-meta-format">{s.format}</span>
+                          {s.format ? (
+                            <>
+                              <span className="card-meta-item card-meta-format">{s.format}</span>
+                              <span className="card-meta-sep">·</span>
+                            </>
+                          ) : s.status === "waiting" ? (
+                            <>
+                              <span className="card-meta-item card-meta-waiting">Waiting for signal</span>
+                              <span className="card-meta-sep">·</span>
+                            </>
+                          ) : null}
+                          <span className="card-meta-item">
+                            {cat === "_unsorted" ? "Unsorted" : cat}
+                          </span>
                           <span className="card-meta-sep">·</span>
-                        </>
-                      ) : s.status === "waiting" ? (
-                        <>
-                          <span className="card-meta-item card-meta-waiting">Waiting for signal</span>
-                          <span className="card-meta-sep">·</span>
-                        </>
-                      ) : null}
-                      <span className="card-meta-item">
-                        {cat === "_unsorted" ? "Unsorted" : cat}
-                      </span>
-                      <span className="card-meta-sep">·</span>
-                      <span className="card-meta-item">
-                        {activePreset?.label || s.encode_preset || "—"}
-                      </span>
-                      {tcOn && (
-                        <>
-                          <span className="card-meta-sep">·</span>
-                          <span className="card-meta-item card-meta-tc">
-                            {tcLive
-                              ? `TC · ${tcSourceShort(tc?.source)}`
-                              : tc?.status === "error"
-                                ? "TC · error"
-                                : "TC · starting"}
+                          <span className="card-meta-item">
+                            {activePreset?.label || s.encode_preset || "—"}
                           </span>
                         </>
                       )}
                     </div>
                   </div>
                   <div className="card-actions">
-                    <button
-                      type="button"
-                      className={`rec-btn ${isRecording ? "recording" : "idle"}`}
-                      onClick={() => toggleRecording(s.id)}
-                      disabled={recBusy[s.id] || tcOn || (!hasSignal && !isRecording && !tcLive)}
-                      title={
-                        tcOn
-                          ? "TC Burn-in is active on this channel"
-                          : isRecording
-                            ? "Stop recording"
-                            : s.status === "waiting"
-                              ? "Waiting for input signal"
-                              : !hasSignal && !tcLive
-                                ? "Start channel before recording"
-                                : "Start recording"
-                      }
-                    >
-                      {recBusy[s.id] ? "…" : "REC"}
-                    </button>
-                    <button
-                      type="button"
-                      className={`stream-btn ${srtOn ? "streaming" : "idle"}`}
-                      onClick={() => toggleSrt(s.id)}
-                      disabled={srtBusy[s.id] || tcOn || (!hasSignal && !srtOn && !tcLive)}
-                      title={
-                        tcOn
-                          ? "TC Burn-in is active on this channel"
-                          : srtOn
-                            ? srtById[s.id]?.publish_url || "Stop SRT stream"
-                            : s.status === "waiting"
-                              ? "Waiting for input signal"
-                              : !hasSignal && !tcLive
-                                ? "Start channel before streaming"
-                                : "Start SRT stream (configure in settings)"
-                      }
-                    >
-                      {srtBusy[s.id] ? "…" : "STREAM"}
-                    </button>
-                    {!captureOn && !tcOn && (
+                    {tcOn ? (
                       <button
-                        className={`badge ${s.status}`}
-                        onClick={() => startPreview(s)}
+                        type="button"
+                        className="tc-stop-btn"
+                        onClick={() => stopTc(s.id)}
                         disabled={busy[s.id]}
+                        title="Stop TC Burn-in"
                       >
-                        {busy[s.id] ? "…" : "Start"}
+                        {busy[s.id] ? "…" : "STOP TC"}
                       </button>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className={`rec-btn ${isRecording ? "recording" : "idle"}`}
+                          onClick={() => toggleRecording(s.id)}
+                          disabled={recBusy[s.id] || (!hasSignal && !isRecording)}
+                          title={
+                            isRecording
+                              ? "Stop recording"
+                              : s.status === "waiting"
+                                ? "Waiting for input signal"
+                                : !hasSignal
+                                  ? "Start channel before recording"
+                                  : "Start recording"
+                          }
+                        >
+                          {recBusy[s.id] ? "…" : "REC"}
+                        </button>
+                        <button
+                          type="button"
+                          className={`stream-btn ${srtOn ? "streaming" : "idle"}`}
+                          onClick={() => toggleSrt(s.id)}
+                          disabled={srtBusy[s.id] || (!hasSignal && !srtOn)}
+                          title={
+                            srtOn
+                              ? srtById[s.id]?.publish_url || "Stop SRT stream"
+                              : s.status === "waiting"
+                                ? "Waiting for input signal"
+                                : !hasSignal
+                                  ? "Start channel before streaming"
+                                  : "Start SRT stream (configure in settings)"
+                          }
+                        >
+                          {srtBusy[s.id] ? "…" : "STREAM"}
+                        </button>
+                        {!captureOn && (
+                          <button
+                            className={`badge ${s.status}`}
+                            onClick={() => startPreview(s)}
+                            disabled={busy[s.id]}
+                          >
+                            {busy[s.id] ? "…" : "Start"}
+                          </button>
+                        )}
+                      </>
                     )}
                     {(hasSignal || tcLive) && (
                       <button

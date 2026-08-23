@@ -21,6 +21,7 @@ import (
 	"github.com/roc-recording/backend/internal/sysmetrics"
 	"github.com/roc-recording/backend/internal/tcloop"
 	"github.com/roc-recording/backend/internal/tsl"
+	"github.com/roc-recording/backend/internal/workflow"
 )
 
 type streamResponse struct {
@@ -54,7 +55,7 @@ type recordingFileResponse struct {
 	URL     string    `json:"url"`
 }
 
-func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Manager, playMgr *playout.Manager, tcMgr *tcloop.Manager, tslMgr *tsl.Manager, hlsHandler *hlshandler.Handler, apiKey, allowedOrigins, hlsBaseURL string, metrics *sysmetrics.Collector) http.Handler {
+func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Manager, playMgr *playout.Manager, tcMgr *tcloop.Manager, tslMgr *tsl.Manager, wfStore *workflow.Store, hlsHandler *hlshandler.Handler, apiKey, allowedOrigins, hlsBaseURL string, metrics *sysmetrics.Collector) http.Handler {
 	r := chi.NewRouter()
 	r.Use(quietRequestLogger())
 	r.Use(middleware.Recoverer)
@@ -587,6 +588,46 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 			jsonOK(w, map[string]string{"path": path})
 		})
 
+		r.Get("/api/workflows", func(w http.ResponseWriter, r *http.Request) {
+			all := wfStore.All()
+			out := make(map[string]string, len(all))
+			for id, mode := range all {
+				out[strconv.Itoa(id)] = string(mode)
+			}
+			for _, s := range mgr.List() {
+				key := strconv.Itoa(s.ID)
+				if _, ok := out[key]; !ok {
+					out[key] = string(workflow.ModeRecord)
+				}
+			}
+			jsonOK(w, out)
+		})
+
+		r.Put("/api/workflows/{id}", func(w http.ResponseWriter, r *http.Request) {
+			id, err := strconv.Atoi(chi.URLParam(r, "id"))
+			if err != nil {
+				jsonError(w, "invalid channel id", http.StatusBadRequest)
+				return
+			}
+			if _, ok := mgr.StatusByID(id); !ok {
+				jsonError(w, "unknown channel", http.StatusNotFound)
+				return
+			}
+			var body struct {
+				Workflow string `json:"workflow"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				jsonError(w, "invalid json body", http.StatusBadRequest)
+				return
+			}
+			mode, err := wfStore.Set(id, workflow.Mode(body.Workflow))
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusConflict)
+				return
+			}
+			jsonOK(w, map[string]any{"id": id, "workflow": mode})
+		})
+
 		r.Post("/api/recordings/{id}/start", func(w http.ResponseWriter, r *http.Request) {
 			id, err := strconv.Atoi(chi.URLParam(r, "id"))
 			if err != nil {
@@ -795,7 +836,7 @@ func shouldSkipRequestLog(r *http.Request) bool {
 		strings.HasPrefix(path, "/hls/"):
 		return true
 	case path == "/api/streams", path == "/api/recordings", path == "/api/srt", path == "/api/system", path == "/api/encode/presets",
-		path == "/api/encode/options",
+		path == "/api/encode/options", path == "/api/workflows",
 		path == "/api/library/categories", path == "/api/library/files",
 		path == "/api/playout", path == "/api/playout/devices", path == "/api/playout/media":
 		return true

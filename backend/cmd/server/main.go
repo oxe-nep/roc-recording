@@ -24,6 +24,7 @@ import (
 	"github.com/roc-recording/backend/internal/sysmetrics"
 	"github.com/roc-recording/backend/internal/tcloop"
 	"github.com/roc-recording/backend/internal/tsl"
+	"github.com/roc-recording/backend/internal/workflow"
 )
 
 // tcPlayoutBridge adapts playout.Manager for tcloop.PlayoutBridge.
@@ -176,9 +177,13 @@ func main() {
 		log.Printf("TSL listener disabled: %v", err)
 	}
 
+	wfStore := workflow.NewStore(filepath.Join(filepath.Dir(cfgPath), "channel-workflows.json"))
+	wfStore.Load()
+	wfStore.Ensure(channelIDs)
+
 	hlsH := hlshandler.NewHandler(cfg.HLSDir, cfg.AllowedOrigins)
 	metrics := sysmetrics.NewCollector(recMgr.RecordingDir())
-	router := api.NewRouter(mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, hlsH, cfg.APIKey, cfg.AllowedOrigins, hlsBase, metrics)
+	router := api.NewRouter(mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, wfStore, hlsH, cfg.APIKey, cfg.AllowedOrigins, hlsBase, metrics)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,

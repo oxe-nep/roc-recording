@@ -244,6 +244,29 @@ export async function setRecordingsPath(path: string): Promise<string> {
   return body.path as string;
 }
 
+export type ChannelWorkflow = "record" | "tc" | "playout";
+
+export async function fetchWorkflows(): Promise<Record<string, ChannelWorkflow>> {
+  const res = await apiFetch("/api/workflows");
+  if (!res.ok) throw new Error(`fetchWorkflows: ${res.status}`);
+  return res.json();
+}
+
+export async function updateWorkflow(
+  id: number,
+  workflow: ChannelWorkflow,
+): Promise<{ id: number; workflow: ChannelWorkflow }> {
+  const res = await apiFetch(`/api/workflows/${id}`, {
+    method: "PUT",
+    body: JSON.stringify({ workflow }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `updateWorkflow: ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function fetchLibraryCategories(): Promise<LibraryCategory[]> {
   const res = await apiFetch("/api/library/categories");
   if (!res.ok) throw new Error(`fetchLibraryCategories: ${res.status}`);

@@ -228,14 +228,14 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
     }
   };
 
-  const applyTc = async () => {
+  const applyTc = async (enabled: boolean) => {
     if (channelId == null) return;
     setBusy(true);
     setError(null);
-    setTcApplyMsg(tcEnabled ? "Applying TC burn-in…" : "Stopping TC burn-in…");
+    setTcApplyMsg(enabled ? "Starting TC…" : "Stopping TC…");
     try {
       const tc = await updateTcLoop(channelId, {
-        enabled: tcEnabled,
+        enabled,
         source: tcSource,
         udp_port: tcSource === "external" ? tcEffectivePort : 0,
         fontsize: tcFontSize,
@@ -252,14 +252,14 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
       setTcError(tc.error || "");
 
       if (tc.enabled) {
-        setTcApplyMsg("Waiting for TC loop…");
+        setTcApplyMsg("Waiting for TC…");
         for (let i = 0; i < 20; i++) {
           await new Promise((r) => setTimeout(r, 400));
           const latest = await fetchTcLoop(channelId);
           setTcStatus(latest.status);
           setTcError(latest.error || "");
           if (latest.status === "running") {
-            setTcApplyMsg("TC burn-in is live.");
+            setTcApplyMsg(null);
             break;
           }
           if (latest.status === "error") {
@@ -269,7 +269,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
           }
         }
       } else {
-        setTcApplyMsg("TC burn-in stopped.");
+        setTcApplyMsg(null);
       }
       onSaved();
     } catch (e) {
@@ -277,7 +277,6 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
       setError(String(e));
     } finally {
       setBusy(false);
-      window.setTimeout(() => setTcApplyMsg(null), 2500);
     }
   };
 
@@ -335,28 +334,15 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
 
           {error && <div className="error-message">{error}</div>}
 
-          {active && (
+          {tcApplyMsg && <div className="channel-settings-note tc-apply-note">{tcApplyMsg}</div>}
+
+          {!tcOn && active && (
             <div className="channel-settings-lock">
               Decode is active — stop it before changing format, source, or SRT/file settings.
             </div>
           )}
 
-          {tcOn && (
-            <div className="channel-settings-note tc-active-note">
-              <strong>TC Burn-in active on channel {client.id}.</strong>{" "}
-              Input {client.id} → DeckLink output with {tcSourceText.toLowerCase()}. Normal encode and
-              decode playout are blocked until TC is turned off.
-            </div>
-          )}
-
-          {tcEnabled && !tcOn && (
-            <div className="channel-settings-note tc-pending-note">
-              TC will start when you apply. Encode and decode on this channel will stop automatically.
-            </div>
-          )}
-
-          {tcApplyMsg && <div className="channel-settings-note tc-apply-note">{tcApplyMsg}</div>}
-
+          {!tcOn && (
           <div className="channel-settings-form">
             <label className="presets-field">
               <span>Name</span>
@@ -521,35 +507,17 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
               </>
             )}
           </div>
+          )}
 
-          <div className={`channel-settings-srt channel-settings-tc${tcEnabled ? " enabled" : ""}`}>
+          <div className={`channel-settings-srt channel-settings-tc${tcOn ? " enabled" : ""}`}>
             <div className="channel-settings-srt-head">
               <h3>TC Burn-in</h3>
               <span className={tcStatusPillClass(tcStatus, tcEnabled)}>
                 {tcStatusLabel(tcStatus, tcEnabled)}
               </span>
             </div>
-            <p className="channel-settings-hint">
-              Low-latency passthrough from encode input {client.id} with a burned-in timecode overlay on
-              this DeckLink output. Preview and audio meters stay available while TC runs.
-            </p>
             <div className="channel-settings-form">
-              <label className="presets-field tc-enable-row">
-                <input
-                  type="checkbox"
-                  checked={tcEnabled}
-                  onChange={(e) => setTcEnabled(e.target.checked)}
-                  disabled={busy}
-                />
-                <span>
-                  <strong>Enable TC Burn-in</strong>
-                  <span className="channel-settings-hint">
-                    Exclusive mode — stops encode and normal decode on this channel pair.
-                  </span>
-                </span>
-              </label>
-
-              <div className={`tc-settings-body${tcEnabled ? "" : " dimmed"}`}>
+              <div className="tc-settings-body">
                 <div className="tc-settings-row">
                   <div className="tc-settings-fields">
                     <label className="presets-field">
@@ -557,7 +525,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                       <select
                         value={tcSource}
                         onChange={(e) => setTcSource(e.target.value as TcLoopSource)}
-                        disabled={busy || !tcEnabled}
+                        disabled={busy}
                       >
                         <option value="tod">Time of day (host clock)</option>
                         <option value="external">External (UDP)</option>
@@ -574,12 +542,8 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                           onChange={(e) =>
                             setTcUdpPort(Number(e.target.value) || defaultTcUdpPort(channelId ?? 0))
                           }
-                          disabled={busy || !tcEnabled}
+                          disabled={busy}
                         />
-                        <span className="channel-settings-hint">
-                          Send plain text, e.g. <code>12:34:56:12</code> or <code>12:34:56</code>. Default
-                          port {defaultTcUdpPort(channelId ?? 0)} per channel.
-                        </span>
                       </label>
                     )}
                     <label className="presets-field">
@@ -590,7 +554,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                         max={200}
                         value={tcFontSize}
                         onChange={(e) => setTcFontSize(Number(e.target.value) || 48)}
-                        disabled={busy || !tcEnabled}
+                        disabled={busy}
                       />
                     </label>
                     <label className="presets-field">
@@ -602,7 +566,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                         step={0.05}
                         value={tcOpacity}
                         onChange={(e) => setTcOpacity(Number(e.target.value))}
-                        disabled={busy || !tcEnabled}
+                        disabled={busy}
                       />
                     </label>
                     <label className="presets-field">
@@ -610,7 +574,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                       <select
                         value={tcPosition}
                         onChange={(e) => setTcPosition(e.target.value as TcLoopPosition)}
-                        disabled={busy || !tcEnabled}
+                        disabled={busy}
                       >
                         <option value="bottom_right">Bottom right</option>
                         <option value="bottom_left">Bottom left</option>
@@ -632,30 +596,45 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
               )}
             </div>
             <div className="channel-settings-actions">
-              <button
-                type="button"
-                className={`global-rec-btn${tcEnabled ? " tc-apply-on" : ""}`}
-                onClick={applyTc}
-                disabled={busy}
-              >
-                {busy
-                  ? "…"
-                  : tcEnabled
-                    ? tcOn
-                      ? "Update TC Burn-in"
-                      : "Start TC Burn-in"
-                    : "Stop TC Burn-in"}
-              </button>
+              {tcOn ? (
+                <>
+                  <button
+                    type="button"
+                    className="global-rec-btn tc-apply-on"
+                    onClick={() => applyTc(true)}
+                    disabled={busy}
+                  >
+                    {busy ? "…" : "Update"}
+                  </button>
+                  <button
+                    type="button"
+                    className="tc-stop-btn"
+                    onClick={() => applyTc(false)}
+                    disabled={busy}
+                  >
+                    {busy ? "…" : "Stop burn-in"}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="global-rec-btn tc-apply-on"
+                  onClick={() => applyTc(true)}
+                  disabled={busy}
+                >
+                  {busy ? "…" : "Start burn-in"}
+                </button>
+              )}
             </div>
           </div>
 
+          {!tcOn && (
           <div className="channel-settings-actions">
             <button
               type="button"
               className={`stream-btn ${active ? "streaming" : "idle"}`}
               onClick={toggleRun}
-              disabled={busy || (tcOn && !active)}
-              title={tcOn && !active ? "Disable TC Burn-in first" : undefined}
+              disabled={busy}
             >
               {busy ? "…" : active ? "STOP" : source === "file" ? "PLAY" : "START"}
             </button>
@@ -666,7 +645,17 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
               {busy ? "…" : "Save"}
             </button>
           </div>
+          )}
 
+          {tcOn && (
+            <div className="channel-settings-actions">
+              <button type="button" className="badge" onClick={onClose} disabled={busy}>
+                Close
+              </button>
+            </div>
+          )}
+
+          {!tcOn && (
           <div className="channel-settings-logs">
             <div className="channel-settings-logs-head">
               <h3>Decode logs</h3>
@@ -680,6 +669,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
               </pre>
             )}
           </div>
+          )}
         </div>
       </div>
 

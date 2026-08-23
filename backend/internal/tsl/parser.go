@@ -42,9 +42,8 @@ func ParsePacket(buf []byte) ([]Message, error) {
 		if msg == nil || next <= ptr {
 			break
 		}
-		if strings.TrimSpace(msg.Text) != "" {
-			out = append(out, *msg)
-		}
+		// Keep empty text — routers clear UMD labels by sending blank strings.
+		out = append(out, *msg)
 		ptr = next
 	}
 	return out, nil

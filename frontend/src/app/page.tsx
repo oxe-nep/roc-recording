@@ -4,11 +4,11 @@ import { useEffect, useState } from "react";
 import StreamGrid from "@/components/StreamGrid";
 import DecodeGrid from "@/components/DecodeGrid";
 import SystemStatus from "@/components/SystemStatus";
-import EncodePresetsEditor from "@/components/EncodePresetsEditor";
 import LibraryModal from "@/components/LibraryModal";
+import SettingsModal from "@/components/SettingsModal";
 
 export default function Home() {
-  const [presetsOpen, setPresetsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [anyRecording, setAnyRecording] = useState(false);
 
@@ -40,25 +40,20 @@ export default function Home() {
           </button>
           <button
             type="button"
-            className={`header-library-link header-link-btn ${anyRecording ? "is-disabled" : ""}`}
-            onClick={() => {
-              if (anyRecording) return;
-              setPresetsOpen(true);
-            }}
-            disabled={anyRecording}
-            title={anyRecording ? "Locked while recording" : "Edit encode presets"}
+            className="header-library-link header-link-btn"
+            onClick={() => setSettingsOpen(true)}
           >
-            Encode presets
+            Settings
           </button>
         </div>
         <SystemStatus />
       </header>
       <StreamGrid />
       <DecodeGrid />
-      <EncodePresetsEditor
-        open={presetsOpen}
-        onClose={() => setPresetsOpen(false)}
-        onChanged={() => window.dispatchEvent(new Event("roc-presets-changed"))}
+      <SettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        anyRecording={anyRecording}
       />
       <LibraryModal
         open={libraryOpen}

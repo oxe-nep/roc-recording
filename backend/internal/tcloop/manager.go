@@ -89,7 +89,6 @@ type CaptureBridge interface {
 	InputArgs(id int) ([]string, error)
 	InputArgsForTC(id int) ([]string, error)
 	Stop(id int) error
-	Start(id int) error
 }
 
 // PlayoutBridge provides decode sink config and activity checks.

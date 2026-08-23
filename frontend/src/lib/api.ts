@@ -532,11 +532,14 @@ export async function updatePlayoutClient(id: number, body: PlayoutUpdateInput):
 }
 
 export type TcLoopPosition = "bottom_right" | "bottom_left" | "top_right" | "top_left" | "center";
+export type TcLoopSource = "tod" | "external";
 
 export interface TcLoopInfo {
   id: number;
   enabled: boolean;
   status: "off" | "running" | "error";
+  source: TcLoopSource;
+  udp_port: number;
   fontsize: number;
   opacity: number;
   position: TcLoopPosition;
@@ -545,6 +548,8 @@ export interface TcLoopInfo {
 
 export type TcLoopUpdateInput = {
   enabled?: boolean;
+  source?: TcLoopSource;
+  udp_port?: number;
   fontsize?: number;
   opacity?: number;
   position?: TcLoopPosition;

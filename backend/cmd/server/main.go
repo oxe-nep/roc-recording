@@ -106,6 +106,7 @@ func main() {
 
 	tcMgr := tcloop.NewManager(
 		cfg.FFmpegBin,
+		cfg.HLSDir,
 		tcloop.SettingsPath(filepath.Dir(cfgPath)),
 		mgr,
 		tcPlayoutBridge{playMgr},

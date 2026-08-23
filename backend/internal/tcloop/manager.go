@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,9 +35,21 @@ const (
 	PosCenter      Position = "center"
 )
 
+// Source selects the timecode overlay content.
+type Source string
+
+const (
+	SourceTOD        Source = "tod"        // host wall clock
+	SourceExternal   Source = "external"   // UDP timecode (see udp_port)
+)
+
+const audioSilence = -90.0
+
 // Settings are persisted per channel id (decode N ↔ encode/input N).
 type Settings struct {
 	Enabled  bool     `json:"enabled"`
+	Source   Source   `json:"source"`    // tod | external, default tod
+	UDPPort  int      `json:"udp_port"`  // external TC listen port; default 9300+N
 	FontSize int      `json:"fontsize"`  // px, default 48
 	Opacity  float64  `json:"opacity"`  // 0..1 text opacity, default 0.9
 	Position Position `json:"position"` // default bottom_right
@@ -47,6 +60,8 @@ type Info struct {
 	ID       int      `json:"id"`
 	Enabled  bool     `json:"enabled"`
 	Status   Status   `json:"status"`
+	Source   Source   `json:"source"`
+	UDPPort  int      `json:"udp_port"`
 	FontSize int      `json:"fontsize"`
 	Opacity  float64  `json:"opacity"`
 	Position Position `json:"position"`
@@ -55,6 +70,8 @@ type Info struct {
 
 type UpdateInput struct {
 	Enabled  *bool     `json:"enabled"`
+	Source   *Source   `json:"source"`
+	UDPPort  *int      `json:"udp_port"`
 	FontSize *int      `json:"fontsize"`
 	Opacity  *float64  `json:"opacity"`
 	Position *Position `json:"position"`
@@ -85,28 +102,34 @@ type PlayoutBridge interface {
 }
 
 type channelState struct {
-	mu         sync.Mutex
-	settings   Settings
-	status     Status
-	lastErr    string
-	cmd        *exec.Cmd
-	stopCh     chan struct{}
-	deviceAlt  bool // next open uses label ↔ unique-id alternate
+	mu        sync.Mutex
+	settings  Settings
+	status    Status
+	lastErr   string
+	AudioL    float64
+	AudioR    float64
+	cmd       *exec.Cmd
+	stopCh    chan struct{}
+	deviceAlt bool // next open uses label ↔ unique-id alternate
 }
 
 type Manager struct {
 	mu           sync.RWMutex
 	channels     map[int]*channelState
 	ffmpegBin    string
+	hlsDir       string
 	settingsPath string
 	capture      CaptureBridge
 	playout      PlayoutBridge
 }
 
-func NewManager(ffmpegBin, settingsPath string, capture CaptureBridge, play PlayoutBridge) *Manager {
+var reAstatsPeak = regexp.MustCompile(`lavfi\.astats\.(\d+)\.Peak_level=([-\d.]+|-?inf)`)
+
+func NewManager(ffmpegBin, hlsDir, settingsPath string, capture CaptureBridge, play PlayoutBridge) *Manager {
 	return &Manager{
 		channels:     make(map[int]*channelState),
 		ffmpegBin:    ffmpegBin,
+		hlsDir:       hlsDir,
 		settingsPath: settingsPath,
 		capture:      capture,
 		playout:      play,
@@ -116,6 +139,8 @@ func NewManager(ffmpegBin, settingsPath string, capture CaptureBridge, play Play
 func defaultSettings() Settings {
 	return Settings{
 		Enabled:  false,
+		Source:   SourceTOD,
+		UDPPort:  0,
 		FontSize: 48,
 		Opacity:  0.9,
 		Position: PosBottomRight,
@@ -192,7 +217,34 @@ func normalizeSettings(s Settings) Settings {
 	default:
 		s.Position = d.Position
 	}
+	if s.Source != SourceExternal {
+		s.Source = SourceTOD
+	}
+	if s.UDPPort < 0 || s.UDPPort > 65535 {
+		s.UDPPort = 0
+	}
 	return s
+}
+
+func (m *Manager) AudioLevels(id int) (l, r float64, ok bool) {
+	st := m.get(id)
+	if st == nil {
+		return 0, 0, false
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.status != StatusRunning {
+		return 0, 0, false
+	}
+	return st.AudioL, st.AudioR, true
+}
+
+func (m *Manager) EncodeThumbPath(id int) string {
+	return filepath.Join(m.hlsDir, strconv.Itoa(id), "thumb.jpg")
+}
+
+func (m *Manager) PlayoutThumbPath(id int) string {
+	return filepath.Join(m.hlsDir, "playout", strconv.Itoa(id), "thumb.jpg")
 }
 
 func (m *Manager) IsEnabled(id int) bool {
@@ -233,11 +285,20 @@ func (m *Manager) Get(id int) (Info, error) {
 		ID:       id,
 		Enabled:  st.settings.Enabled,
 		Status:   st.status,
+		Source:   st.settings.Source,
+		UDPPort:  effectiveUDPPort(id, st.settings),
 		FontSize: st.settings.FontSize,
 		Opacity:  st.settings.Opacity,
 		Position: st.settings.Position,
 		Error:    st.lastErr,
 	}, nil
+}
+
+func effectiveUDPPort(id int, s Settings) int {
+	if s.UDPPort > 0 {
+		return s.UDPPort
+	}
+	return defaultUDPPort(id)
 }
 
 func (m *Manager) Update(id int, in UpdateInput) (Info, error) {
@@ -253,6 +314,12 @@ func (m *Manager) Update(id int, in UpdateInput) (Info, error) {
 	cfg := st.settings
 	if in.Enabled != nil {
 		cfg.Enabled = *in.Enabled
+	}
+	if in.Source != nil {
+		cfg.Source = *in.Source
+	}
+	if in.UDPPort != nil {
+		cfg.UDPPort = *in.UDPPort
 	}
 	if in.FontSize != nil {
 		cfg.FontSize = *in.FontSize
@@ -526,9 +593,20 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		samplesPerFrame = 1920
 	}
 
-	textPath := filepath.Join(os.TempDir(), fmt.Sprintf("roc-tcloop-%d-tod.txt", id))
+	encodeOutDir := filepath.Join(m.hlsDir, strconv.Itoa(id))
+	playoutOutDir := filepath.Join(m.hlsDir, "playout", strconv.Itoa(id))
+	_ = os.MkdirAll(encodeOutDir, 0o755)
+	_ = os.MkdirAll(playoutOutDir, 0o755)
+	encodeThumb := filepath.Join(encodeOutDir, "thumb.jpg")
+	playoutThumb := filepath.Join(playoutOutDir, "thumb.jpg")
+	encodeAudioPlaylist := filepath.Join(encodeOutDir, "audio.m3u8")
+	playoutAudioPlaylist := filepath.Join(playoutOutDir, "audio.m3u8")
+	encodeAudioSeg := filepath.Join(encodeOutDir, "audio_%03d.ts")
+	playoutAudioSeg := filepath.Join(playoutOutDir, "audio_%03d.ts")
+
+	textPath := filepath.Join(os.TempDir(), fmt.Sprintf("roc-tcloop-%d-tc.txt", id))
 	clockStop := make(chan struct{})
-	if err := startTODClockFile(textPath, clockStop); err != nil {
+	if err := startClockFile(textPath, cfg.Source, id, cfg.UDPPort, clockStop); err != nil {
 		return err
 	}
 	defer func() {
@@ -537,31 +615,35 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 	}()
 
 	draw := buildDrawtext(cfg, textPath)
-	var vchain string
+	var vbase string
 	if interlaced {
-		vchain = fmt.Sprintf(
-			"[0:v]yadif=mode=0:deint=interlaced,scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,tinterlace=interleave_top,format=yuv422p10le,%s[v]",
+		vbase = fmt.Sprintf(
+			"[0:v]yadif=mode=0:deint=interlaced,scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,tinterlace=interleave_top,format=yuv422p10le,%s",
 			w, h, w, h, fps*2, draw,
 		)
 	} else {
-		vchain = fmt.Sprintf(
-			"[0:v]yadif=mode=0:deint=interlaced,scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,format=yuv422p10le,%s[v]",
+		vbase = fmt.Sprintf(
+			"[0:v]yadif=mode=0:deint=interlaced,scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,format=yuv422p10le,%s",
 			w, h, w, h, fps, draw,
 		)
 	}
-	// Use generated silence so missing DeckLink audio does not kill the graph.
-	filter := vchain + ";" + fmt.Sprintf(
-		"[1:a]aformat=channel_layouts=stereo,asetnsamples=n=%d:p=0[a]",
-		samplesPerFrame,
-	)
+	filter := vbase + ",split=2[vdl][vthumbsrc];" +
+		"[vthumbsrc]scale=640:360,format=yuv420p[vthumb];" +
+		fmt.Sprintf(
+			"[0:a]aformat=channel_layouts=stereo,asplit=3[adeck][ameter][ahls];"+
+				"[adeck]asetnsamples=n=%d:p=0[aout];"+
+				"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none,"+
+				"ametadata=print,anullsink",
+			samplesPerFrame,
+		)
 
-	args := []string{"-hide_banner", "-loglevel", "info", "-fflags", "+genpts+discardcorrupt"}
+	args := []string{"-hide_banner", "-loglevel", "info", "-fflags", "+genpts+discardcorrupt", "-y"}
 	args = append(args, inputArgs...)
 	args = append(args,
-		"-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
 		"-filter_complex", filter,
-		"-map", "[v]",
-		"-map", "[a]",
+		// Output #1: DeckLink with burned-in TC
+		"-map", "[vdl]",
+		"-map", "[aout]",
 		"-c:v", "v210",
 		"-c:a", "pcm_s16le",
 		"-ar", "48000",
@@ -576,7 +658,46 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 	if formatCode != "" && !isAllDigits(formatCode) {
 		args = append(args, "-format_code", strings.TrimSpace(formatCode))
 	}
-	args = append(args, "-preroll", "0.5", "-f", "decklink", openDevice)
+	args = append(args, "-preroll", "0.5", "-f", "decklink", openDevice,
+		// Output #2: encode-side thumbnail
+		"-map", "[vthumb]",
+		"-r", "1",
+		"-q:v", "4",
+		"-update", "1",
+		"-f", "image2",
+		encodeThumb,
+		// Output #3: decode-side thumbnail
+		"-map", "[vthumb]",
+		"-r", "1",
+		"-q:v", "4",
+		"-update", "1",
+		"-f", "image2",
+		playoutThumb,
+		// Output #4: encode-side HLS audio
+		"-map", "[ahls]",
+		"-c:a", "aac",
+		"-b:a", "128k",
+		"-ar", "48000",
+		"-ac", "2",
+		"-f", "hls",
+		"-hls_time", "1",
+		"-hls_list_size", "4",
+		"-hls_flags", "delete_segments+independent_segments+omit_endlist",
+		"-hls_segment_filename", encodeAudioSeg,
+		encodeAudioPlaylist,
+		// Output #5: decode-side HLS audio
+		"-map", "[ahls]",
+		"-c:a", "aac",
+		"-b:a", "128k",
+		"-ar", "48000",
+		"-ac", "2",
+		"-f", "hls",
+		"-hls_time", "1",
+		"-hls_list_size", "4",
+		"-hls_flags", "delete_segments+independent_segments+omit_endlist",
+		"-hls_segment_filename", playoutAudioSeg,
+		playoutAudioPlaylist,
+	)
 
 	cmd := exec.Command(m.ffmpegBin, args...)
 	stderr, err := cmd.StderrPipe()
@@ -585,9 +706,16 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 	}
 	st.mu.Lock()
 	st.cmd = cmd
+	st.AudioL = audioSilence
+	st.AudioR = audioSilence
 	st.mu.Unlock()
 
-	log.Printf("[tcloop %d] starting TOD burn-in → decklink %q format=%s (primary=%q alt=%q tryAlt=%v)", id, openDevice, formatCode, openPrimary, openAlt, tryAlt)
+	srcLabel := "time of day"
+	if cfg.Source == SourceExternal {
+		srcLabel = fmt.Sprintf("UDP :%d", effectiveUDPPort(id, cfg))
+	}
+	log.Printf("[tcloop %d] starting TC burn-in (%s) → decklink %q format=%s (primary=%q alt=%q tryAlt=%v)",
+		id, srcLabel, openDevice, formatCode, openPrimary, openAlt, tryAlt)
 	if err := cmd.Start(); err != nil {
 		st.mu.Lock()
 		st.cmd = nil
@@ -595,7 +723,7 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		return err
 	}
 	errLines := make(chan []string, 1)
-	go func() { errLines <- collectStderr(stderr) }()
+	go func() { errLines <- collectStderr(stderr, st) }()
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -676,28 +804,6 @@ func escapeFilterPath(p string) string {
 	return p
 }
 
-func startTODClockFile(path string, stop <-chan struct{}) error {
-	write := func() error {
-		return os.WriteFile(path, []byte(time.Now().Format("15:04:05")), 0o644)
-	}
-	if err := write(); err != nil {
-		return fmt.Errorf("tod clock file: %w", err)
-	}
-	go func() {
-		t := time.NewTicker(200 * time.Millisecond)
-		defer t.Stop()
-		for {
-			select {
-			case <-stop:
-				return
-			case <-t.C:
-				_ = write()
-			}
-		}
-	}()
-	return nil
-}
-
 func positionXY(pos Position) (x, y string) {
 	const margin = 40
 	switch pos {
@@ -741,7 +847,7 @@ func isDeckLinkOpenFailure(lines []string) bool {
 	return false
 }
 
-func collectStderr(r io.Reader) []string {
+func collectStderr(r io.Reader, st *channelState) []string {
 	var lines []string
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -752,8 +858,31 @@ func collectStderr(r io.Reader) []string {
 		if len(lines) > 40 {
 			lines = lines[len(lines)-40:]
 		}
+		if mm := reAstatsPeak.FindStringSubmatch(line); len(mm) == 3 {
+			ch, _ := strconv.Atoi(mm[1])
+			val := parsePeakDB(mm[2])
+			st.mu.Lock()
+			switch ch {
+			case 1:
+				st.AudioL = val
+			case 2:
+				st.AudioR = val
+			}
+			st.mu.Unlock()
+		}
 	}
 	return lines
+}
+
+func parsePeakDB(s string) float64 {
+	if s == "-inf" {
+		return audioSilence
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return audioSilence
+	}
+	return v
 }
 
 func summarizeFFmpegErr(lines []string) string {

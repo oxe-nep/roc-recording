@@ -9,6 +9,7 @@ import {
   fetchEncodePresets,
   fetchLibraryCategories,
   fetchSrtAll,
+  fetchTcLoop,
   startRecording,
   stopRecording,
   startSrt,
@@ -19,8 +20,10 @@ import {
   type EncodePreset,
   type LibraryCategory,
   type SrtInfo,
+  type TcLoopInfo,
   isCaptureOn,
 } from "@/lib/api";
+import { tcBadgeText, tcIsActive, tcPreviewHasSignal, tcSourceLabel } from "@/lib/tcUi";
 import Thumbnail from "@/components/Thumbnail";
 import AudioMonitor from "@/components/AudioMonitor";
 import ChannelSettingsModal from "@/components/ChannelSettingsModal";
@@ -98,8 +101,11 @@ export default function StreamGrid() {
   const [audio, setAudio] = useState<Record<number, AudioLevels>>({});
   const [listening, setListening] = useState<Record<number, boolean>>({});
   const [settingsId, setSettingsId] = useState<number | null>(null);
+  const [tcById, setTcById] = useState<Record<number, TcLoopInfo>>({});
   const streamsRef = useRef<Stream[]>([]);
+  const tcByIdRef = useRef<Record<number, TcLoopInfo>>({});
   streamsRef.current = streams;
+  tcByIdRef.current = tcById;
 
   const load = useCallback(async () => {
     try {
@@ -110,6 +116,20 @@ export default function StreamGrid() {
         fetchSrtAll().catch(() => null),
       ]);
       setStreams(streamData);
+      const tcEntries = await Promise.all(
+        streamData.map(async (s) => {
+          try {
+            return [s.id, await fetchTcLoop(s.id)] as const;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      const tcMap: Record<number, TcLoopInfo> = {};
+      for (const e of tcEntries) {
+        if (e) tcMap[e[0]] = e[1];
+      }
+      setTcById(tcMap);
       const recMap: Record<number, RecordingInfo> = {};
       for (const r of recData) recMap[r.id] = r;
       setRecordings(recMap);
@@ -155,16 +175,33 @@ export default function StreamGrid() {
 
   useEffect(() => {
     let alive = true;
+    const silence: AudioLevels = { l: -90, r: -90 };
     const pollAudio = async () => {
-      const running = streamsRef.current.filter((s) => isCaptureOn(s.status));
-      if (running.length === 0) return;
+      const all = streamsRef.current;
       const updates: Record<number, AudioLevels> = {};
+      for (const s of all) {
+        const tc = tcByIdRef.current[s.id];
+        const tcLive = tcPreviewHasSignal(tc);
+        if (!isCaptureOn(s.status) && !tcLive) {
+          updates[s.id] = silence;
+        }
+      }
+      const active = all.filter((s) => {
+        const tc = tcByIdRef.current[s.id];
+        return isCaptureOn(s.status) || tcPreviewHasSignal(tc);
+      });
+      if (active.length === 0) {
+        if (Object.keys(updates).length > 0 && alive) {
+          setAudio((prev) => ({ ...prev, ...updates }));
+        }
+        return;
+      }
       await Promise.all(
-        running.map(async (s) => {
+        active.map(async (s) => {
           try {
             updates[s.id] = await fetchAudioLevels(s.id);
           } catch {
-            // ignore transient audio fetch errors
+            updates[s.id] = silence;
           }
         }),
       );
@@ -258,14 +295,29 @@ export default function StreamGrid() {
           const cat = rec?.category || "_unsorted";
           const captureOn = isCaptureOn(s.status);
           const hasSignal = s.status === "running";
+          const tc = tcById[s.id];
+          const tcOn = tcIsActive(tc);
+          const tcLive = tcPreviewHasSignal(tc);
+          const tcBadge = tcBadgeText(tc);
           return (
-            <div key={s.id} className={`card-panel ${s.status}`}>
-              <AudioMonitor id={s.id} active={hasSignal} listening={isListening} />
+            <div
+              key={s.id}
+              className={`card-panel ${s.status}${tcOn ? " tc-active" : ""}${tcLive ? " tc-live" : ""}`}
+            >
+              <AudioMonitor id={s.id} active={hasSignal || tcLive} listening={isListening} />
               <div className="card-stage">
                 <div className="card-thumb">
-                  <Thumbnail id={s.id} active={captureOn} />
-                  {(isRecording || srtOn) && (
+                  <Thumbnail id={s.id} active={captureOn || tcLive} />
+                  {(isRecording || srtOn || tcOn) && (
                     <div className="thumb-badges">
+                      {tcBadge && (
+                        <div
+                          className={`tc-badge${tc?.status === "error" ? " error" : tcLive ? "" : " starting"}`}
+                          title={tcSourceLabel(tc?.source, tc?.udp_port, s.id)}
+                        >
+                          {tcBadge}
+                        </div>
+                      )}
                       {isEncoding && (
                         <div className="rec-badge">
                           REC · {formatElapsed(rec?.elapsed_sec)} · {formatBitrate(rec?.bitrate_kbps)}
@@ -338,6 +390,12 @@ export default function StreamGrid() {
                       <span className="card-meta-item">
                         {activePreset?.label || s.encode_preset || "—"}
                       </span>
+                      {tcOn && (
+                        <>
+                          <span className="card-meta-sep">·</span>
+                          <span className="card-meta-item card-meta-tc">TC burn-in</span>
+                        </>
+                      )}
                     </div>
                   </div>
                   <div className="card-actions">

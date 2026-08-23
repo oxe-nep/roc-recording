@@ -16,6 +16,7 @@ import {
   type PlayoutClient,
   type TcLoopInfo,
 } from "@/lib/api";
+import { tcBadgeText, tcIsActive, tcPreviewHasSignal, tcSourceLabel } from "@/lib/tcUi";
 import Thumbnail from "@/components/Thumbnail";
 import AudioMonitor from "@/components/AudioMonitor";
 import DecodeSettingsModal from "@/components/DecodeSettingsModal";
@@ -128,7 +129,9 @@ export default function DecodeGrid() {
   const [mediaOpen, setMediaOpen] = useState(false);
   const [tcById, setTcById] = useState<Record<number, TcLoopInfo>>({});
   const clientsRef = useRef<PlayoutClient[]>([]);
+  const tcByIdRef = useRef<Record<number, TcLoopInfo>>({});
   clientsRef.current = clients;
+  tcByIdRef.current = tcById;
 
   const load = useCallback(async () => {
     try {
@@ -169,11 +172,16 @@ export default function DecodeGrid() {
       const all = clientsRef.current;
       const updates: Record<number, AudioLevels> = {};
       for (const c of all) {
-        if (!isPlayoutOn(c.status) || isPlayoutPaused(c.status)) {
+        const tc = tcByIdRef.current[c.id];
+        const tcLive = tcPreviewHasSignal(tc);
+        if ((!isPlayoutOn(c.status) || isPlayoutPaused(c.status)) && !tcLive) {
           updates[c.id] = silence;
         }
       }
-      const active = all.filter((c) => isPlayoutOn(c.status) && !isPlayoutPaused(c.status));
+      const active = all.filter((c) => {
+        const tc = tcByIdRef.current[c.id];
+        return (isPlayoutOn(c.status) && !isPlayoutPaused(c.status)) || tcPreviewHasSignal(tc);
+      });
       await Promise.all(
         active.map(async (c) => {
           try {
@@ -257,23 +265,31 @@ export default function DecodeGrid() {
             const isFile = c.source === "file";
             const title = cardTitle(c);
             const tc = tcById[c.id];
-            const tcOn = !!tc?.enabled || tc?.status === "running";
+            const tcOn = tcIsActive(tc);
+            const tcLive = tcPreviewHasSignal(tc);
+            const tcBadge = tcBadgeText(tc);
             return (
-              <div key={c.id} className={`card-panel ${c.status}`}>
+              <div
+                key={c.id}
+                className={`card-panel ${c.status}${tcOn ? " tc-active" : ""}${tcLive ? " tc-live" : ""}`}
+              >
                 <AudioMonitor
                   id={c.id}
-                  active={playing}
+                  active={playing || tcLive}
                   listening={isListening}
                   playlistPath={`/hls/playout/${c.id}/audio.m3u8`}
                 />
                 <div className="card-stage">
                   <div className="card-thumb">
-                    <Thumbnail id={c.id} active={on} path={`/hls/playout/${c.id}/thumb.jpg`} />
+                    <Thumbnail id={c.id} active={on || tcLive} path={`/hls/playout/${c.id}/thumb.jpg`} />
                     {(on || tcOn) && (
                       <div className="thumb-badges">
-                        {tcOn && (
-                          <div className="stream-badge" title="TC Burn-in (time of day)">
-                            TC · {tc?.status === "running" ? "burn-in" : tc?.status || "on"}
+                        {tcBadge && (
+                          <div
+                            className={`tc-badge${tc?.status === "error" ? " error" : tcLive ? "" : " starting"}`}
+                            title={tcSourceLabel(tc?.source, tc?.udp_port, c.id)}
+                          >
+                            {tcBadge}
                           </div>
                         )}
                         {on && (
@@ -316,6 +332,12 @@ export default function DecodeGrid() {
                         <span className="card-meta-item">{formatDisplay(c.format_code)}</span>
                         <span className="card-meta-sep">·</span>
                         <span className="card-meta-item">{(c.source || "srt").toUpperCase()}</span>
+                        {tcOn && (
+                          <>
+                            <span className="card-meta-sep">·</span>
+                            <span className="card-meta-item card-meta-tc">TC burn-in</span>
+                          </>
+                        )}
                       </div>
                     </div>
                     <div className="card-actions">
@@ -382,12 +404,12 @@ export default function DecodeGrid() {
                           {busy[c.id] ? "…" : on ? "STOP" : "START"}
                         </button>
                       )}
-                      {playing && (
+                      {(playing || tcLive) && (
                         <button
                           type="button"
                           className={`badge listen-btn ${isListening ? "active" : ""}`}
                           onClick={() => setListening((prev) => ({ ...prev, [c.id]: !prev[c.id] }))}
-                          title={isListening ? "Stop audio monitor" : "Monitor decode audio"}
+                          title={isListening ? "Stop audio monitor" : "Monitor audio"}
                         >
                           {isListening ? "🔊" : "🔈"}
                         </button>

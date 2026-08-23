@@ -65,6 +65,14 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 			http.NotFound(w, r)
 			return
 		}
+		if tcMgr != nil {
+			if l, r2, ok := tcMgr.AudioLevels(id); ok {
+				w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
+				w.Header().Set("Cache-Control", "no-cache, no-store")
+				jsonOK(w, map[string]float64{"l": l, "r": r2})
+				return
+			}
+		}
 		l, r2, ok := mgr.AudioLevels(id)
 		if !ok {
 			http.NotFound(w, r)
@@ -80,6 +88,14 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 			http.NotFound(w, r)
 			return
 		}
+		if tcMgr != nil {
+			if l, r2, ok := tcMgr.AudioLevels(id); ok {
+				w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
+				w.Header().Set("Cache-Control", "no-cache, no-store")
+				jsonOK(w, map[string]float64{"l": l, "r": r2})
+				return
+			}
+		}
 		l, r2, ok := playMgr.AudioLevels(id)
 		if !ok {
 			http.NotFound(w, r)
@@ -94,6 +110,13 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 		id, err := strconv.Atoi(idParam)
 		if err != nil {
 			http.NotFound(w, r)
+			return
+		}
+		if tcMgr != nil && tcMgr.IsRunning(id) {
+			w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
+			w.Header().Set("Cache-Control", "no-cache, no-store")
+			w.Header().Set("Content-Type", "image/jpeg")
+			http.ServeFile(w, r, tcMgr.EncodeThumbPath(id))
 			return
 		}
 		status, ok := mgr.StatusByID(id)
@@ -113,6 +136,14 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 			http.NotFound(w, r)
 			return
 		}
+		if tcMgr != nil {
+			if l, r2, ok := tcMgr.AudioLevels(id); ok {
+				w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
+				w.Header().Set("Cache-Control", "no-cache, no-store")
+				jsonOK(w, map[string]float64{"l": l, "r": r2})
+				return
+			}
+		}
 		l, r2, ok := playMgr.AudioLevels(id)
 		if !ok {
 			http.NotFound(w, r)
@@ -126,6 +157,13 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 		id, err := strconv.Atoi(chi.URLParam(r, "id"))
 		if err != nil {
 			http.NotFound(w, r)
+			return
+		}
+		if tcMgr != nil && tcMgr.IsRunning(id) {
+			w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
+			w.Header().Set("Cache-Control", "no-cache, no-store")
+			w.Header().Set("Content-Type", "image/jpeg")
+			http.ServeFile(w, r, tcMgr.PlayoutThumbPath(id))
 			return
 		}
 		status, ok := playMgr.StatusByID(id)

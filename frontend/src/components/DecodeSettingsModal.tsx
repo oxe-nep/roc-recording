@@ -17,9 +17,17 @@ import {
   type PlayoutDevice,
   type PlayoutMediaItem,
   type TcLoopPosition,
+  type TcLoopSource,
 } from "@/lib/api";
 import LibraryModal from "@/components/LibraryModal";
+import TcPositionPreview from "@/components/TcPositionPreview";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
+import {
+  defaultTcUdpPort,
+  tcSourceLabel,
+  tcStatusLabel,
+  tcStatusPillClass,
+} from "@/lib/tcUi";
 
 type Props = {
   open: boolean;
@@ -58,10 +66,13 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
   const [logs, setLogs] = useState<string[]>([]);
   const [tcEnabled, setTcEnabled] = useState(false);
   const [tcStatus, setTcStatus] = useState<"off" | "running" | "error">("off");
+  const [tcSource, setTcSource] = useState<TcLoopSource>("tod");
+  const [tcUdpPort, setTcUdpPort] = useState(0);
   const [tcFontSize, setTcFontSize] = useState(48);
   const [tcOpacity, setTcOpacity] = useState(0.9);
   const [tcPosition, setTcPosition] = useState<TcLoopPosition>("bottom_right");
   const [tcError, setTcError] = useState("");
+  const [tcApplyMsg, setTcApplyMsg] = useState<string | null>(null);
   const logBoxRef = useRef<HTMLPreElement>(null);
 
   useBodyScrollLock(open);
@@ -69,6 +80,8 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
   const channelId = client?.id;
   const active = client ? isPlayoutOn(client.status) : false;
   const tcOn = tcEnabled || tcStatus === "running";
+  const tcEffectivePort = tcUdpPort > 0 ? tcUdpPort : defaultTcUdpPort(channelId ?? 0);
+  const tcSourceText = tcSourceLabel(tcSource, tcEffectivePort, channelId ?? 0);
   const deviceName = client?.device || "";
   const deviceLabel = client?.device_label || deviceName;
 
@@ -97,6 +110,8 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
         setFileLabel((prev) => prev || displayFileLabel(client.file_id || "", client.file_name, files));
         setTcEnabled(!!tc.enabled);
         setTcStatus(tc.status);
+        setTcSource(tc.source === "external" ? "external" : "tod");
+        setTcUdpPort(tc.udp_port || defaultTcUdpPort(channelId));
         setTcFontSize(tc.fontsize || 48);
         setTcOpacity(tc.opacity ?? 0.9);
         setTcPosition(tc.position || "bottom_right");
@@ -217,24 +232,52 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
     if (channelId == null) return;
     setBusy(true);
     setError(null);
+    setTcApplyMsg(tcEnabled ? "Applying TC burn-in…" : "Stopping TC burn-in…");
     try {
       const tc = await updateTcLoop(channelId, {
         enabled: tcEnabled,
+        source: tcSource,
+        udp_port: tcSource === "external" ? tcEffectivePort : 0,
         fontsize: tcFontSize,
         opacity: tcOpacity,
         position: tcPosition,
       });
       setTcEnabled(!!tc.enabled);
       setTcStatus(tc.status);
+      setTcSource(tc.source === "external" ? "external" : "tod");
+      setTcUdpPort(tc.udp_port || defaultTcUdpPort(channelId));
       setTcFontSize(tc.fontsize || 48);
       setTcOpacity(tc.opacity ?? 0.9);
       setTcPosition(tc.position || "bottom_right");
       setTcError(tc.error || "");
+
+      if (tc.enabled) {
+        setTcApplyMsg("Waiting for TC loop…");
+        for (let i = 0; i < 20; i++) {
+          await new Promise((r) => setTimeout(r, 400));
+          const latest = await fetchTcLoop(channelId);
+          setTcStatus(latest.status);
+          setTcError(latest.error || "");
+          if (latest.status === "running") {
+            setTcApplyMsg("TC burn-in is live.");
+            break;
+          }
+          if (latest.status === "error") {
+            setTcApplyMsg(null);
+            setError(latest.error || "TC burn-in failed to start");
+            break;
+          }
+        }
+      } else {
+        setTcApplyMsg("TC burn-in stopped.");
+      }
       onSaved();
     } catch (e) {
+      setTcApplyMsg(null);
       setError(String(e));
     } finally {
       setBusy(false);
+      window.setTimeout(() => setTcApplyMsg(null), 2500);
     }
   };
 
@@ -299,11 +342,20 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
           )}
 
           {tcOn && (
-            <div className="channel-settings-lock">
-              TC Burn-in is exclusive on this channel — encode and normal decode playout are blocked.
-              Uses input {client.id} → this DeckLink output. Burns host time of day.
+            <div className="channel-settings-note tc-active-note">
+              <strong>TC Burn-in active on channel {client.id}.</strong>{" "}
+              Input {client.id} → DeckLink output with {tcSourceText.toLowerCase()}. Normal encode and
+              decode playout are blocked until TC is turned off.
             </div>
           )}
+
+          {tcEnabled && !tcOn && (
+            <div className="channel-settings-note tc-pending-note">
+              TC will start when you apply. Encode and decode on this channel will stop automatically.
+            </div>
+          )}
+
+          {tcApplyMsg && <div className="channel-settings-note tc-apply-note">{tcApplyMsg}</div>}
 
           <div className="channel-settings-form">
             <label className="presets-field">
@@ -470,69 +522,129 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
             )}
           </div>
 
-          <div className="channel-settings-srt" style={{ marginTop: 14 }}>
+          <div className={`channel-settings-srt channel-settings-tc${tcEnabled ? " enabled" : ""}`}>
             <div className="channel-settings-srt-head">
               <h3>TC Burn-in</h3>
-              <span className="channel-settings-hint">
-                {tcStatus === "running" ? "running" : tcStatus === "error" ? "error" : "off"}
-                {tcError ? ` — ${tcError}` : ""}
+              <span className={tcStatusPillClass(tcStatus, tcEnabled)}>
+                {tcStatusLabel(tcStatus, tcEnabled)}
               </span>
             </div>
             <p className="channel-settings-hint">
-              Low-latency loop: encode input {client.id} → time-of-day burn-in → this output. Applying
-              stops encode and decode on this channel automatically; encode restarts when TC is turned off.
+              Low-latency passthrough from encode input {client.id} with a burned-in timecode overlay on
+              this DeckLink output. Preview and audio meters stay available while TC runs.
             </p>
             <div className="channel-settings-form">
-              <label className="presets-field" style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+              <label className="presets-field tc-enable-row">
                 <input
                   type="checkbox"
                   checked={tcEnabled}
                   onChange={(e) => setTcEnabled(e.target.checked)}
                   disabled={busy}
                 />
-                <span>Enable TC Burn-in (time of day)</span>
+                <span>
+                  <strong>Enable TC Burn-in</strong>
+                  <span className="channel-settings-hint">
+                    Exclusive mode — stops encode and normal decode on this channel pair.
+                  </span>
+                </span>
               </label>
-              <label className="presets-field">
-                <span>Font size</span>
-                <input
-                  type="number"
-                  min={12}
-                  max={200}
-                  value={tcFontSize}
-                  onChange={(e) => setTcFontSize(Number(e.target.value) || 48)}
-                  disabled={busy}
-                />
-              </label>
-              <label className="presets-field">
-                <span>Opacity ({Math.round(tcOpacity * 100)}%)</span>
-                <input
-                  type="range"
-                  min={0.2}
-                  max={1}
-                  step={0.05}
-                  value={tcOpacity}
-                  onChange={(e) => setTcOpacity(Number(e.target.value))}
-                  disabled={busy}
-                />
-              </label>
-              <label className="presets-field">
-                <span>Position</span>
-                <select
-                  value={tcPosition}
-                  onChange={(e) => setTcPosition(e.target.value as TcLoopPosition)}
-                  disabled={busy}
-                >
-                  <option value="bottom_right">Bottom right</option>
-                  <option value="bottom_left">Bottom left</option>
-                  <option value="top_right">Top right</option>
-                  <option value="top_left">Top left</option>
-                  <option value="center">Center</option>
-                </select>
-              </label>
+
+              <div className={`tc-settings-body${tcEnabled ? "" : " dimmed"}`}>
+                <div className="tc-settings-row">
+                  <div className="tc-settings-fields">
+                    <label className="presets-field">
+                      <span>Timecode source</span>
+                      <select
+                        value={tcSource}
+                        onChange={(e) => setTcSource(e.target.value as TcLoopSource)}
+                        disabled={busy || !tcEnabled}
+                      >
+                        <option value="tod">Time of day (host clock)</option>
+                        <option value="external">External (UDP)</option>
+                      </select>
+                    </label>
+                    {tcSource === "external" && (
+                      <label className="presets-field">
+                        <span>UDP listen port</span>
+                        <input
+                          type="number"
+                          min={1}
+                          max={65535}
+                          value={tcEffectivePort}
+                          onChange={(e) =>
+                            setTcUdpPort(Number(e.target.value) || defaultTcUdpPort(channelId ?? 0))
+                          }
+                          disabled={busy || !tcEnabled}
+                        />
+                        <span className="channel-settings-hint">
+                          Send plain text, e.g. <code>12:34:56:12</code> or <code>12:34:56</code>. Default
+                          port {defaultTcUdpPort(channelId ?? 0)} per channel.
+                        </span>
+                      </label>
+                    )}
+                    <label className="presets-field">
+                      <span>Font size</span>
+                      <input
+                        type="number"
+                        min={12}
+                        max={200}
+                        value={tcFontSize}
+                        onChange={(e) => setTcFontSize(Number(e.target.value) || 48)}
+                        disabled={busy || !tcEnabled}
+                      />
+                    </label>
+                    <label className="presets-field">
+                      <span>Opacity ({Math.round(tcOpacity * 100)}%)</span>
+                      <input
+                        type="range"
+                        min={0.2}
+                        max={1}
+                        step={0.05}
+                        value={tcOpacity}
+                        onChange={(e) => setTcOpacity(Number(e.target.value))}
+                        disabled={busy || !tcEnabled}
+                      />
+                    </label>
+                    <label className="presets-field">
+                      <span>Position</span>
+                      <select
+                        value={tcPosition}
+                        onChange={(e) => setTcPosition(e.target.value as TcLoopPosition)}
+                        disabled={busy || !tcEnabled}
+                      >
+                        <option value="bottom_right">Bottom right</option>
+                        <option value="bottom_left">Bottom left</option>
+                        <option value="top_right">Top right</option>
+                        <option value="top_left">Top left</option>
+                        <option value="center">Center</option>
+                      </select>
+                    </label>
+                  </div>
+                  <TcPositionPreview
+                    position={tcPosition}
+                    fontsize={tcFontSize}
+                    opacity={tcOpacity}
+                  />
+                </div>
+              </div>
+              {tcError && tcStatus === "error" && (
+                <div className="channel-settings-lock tc-error-note">{tcError}</div>
+              )}
             </div>
             <div className="channel-settings-actions">
-              <button type="button" className="global-rec-btn" onClick={applyTc} disabled={busy}>
-                {busy ? "…" : "Apply TC Burn-in"}
+              <button
+                type="button"
+                className={`global-rec-btn${tcEnabled ? " tc-apply-on" : ""}`}
+                onClick={applyTc}
+                disabled={busy}
+              >
+                {busy
+                  ? "…"
+                  : tcEnabled
+                    ? tcOn
+                      ? "Update TC Burn-in"
+                      : "Start TC Burn-in"
+                    : "Stop TC Burn-in"}
               </button>
             </div>
           </div>

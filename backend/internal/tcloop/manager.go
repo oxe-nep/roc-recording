@@ -67,6 +67,7 @@ type CaptureBridge interface {
 	ChannelExists(id int) bool
 	IsActive(id int) bool
 	InputArgs(id int) ([]string, error)
+	InputArgsForTC(id int) ([]string, error)
 	Stop(id int) error
 	Start(id int) error
 }
@@ -475,11 +476,11 @@ func (m *Manager) runLoop(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		if err != nil {
 			st.lastErr = err.Error()
 			st.status = StatusError
-			log.Printf("[tcloop %d] ffmpeg exited: %v – retry in %s", id, err, delay)
 			if isFilterConfigError(err.Error()) {
 				// Bad filtergraph will never self-heal — back off hard so we do not thrash DeckLink.
 				delay = 30 * time.Second
 			}
+			log.Printf("[tcloop %d] ffmpeg exited: %v – retry in %s", id, err, delay)
 		} else {
 			st.lastErr = ""
 			log.Printf("[tcloop %d] ffmpeg exited – retry in %s", id, delay)
@@ -497,7 +498,7 @@ func (m *Manager) runLoop(id int, st *channelState, stopCh <-chan struct{}, cfg 
 }
 
 func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg Settings) error {
-	inputArgs, err := m.capture.InputArgs(id)
+	inputArgs, err := m.capture.InputArgsForTC(id)
 	if err != nil {
 		return err
 	}
@@ -525,17 +526,27 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		samplesPerFrame = 1920
 	}
 
-	draw := buildDrawtext(cfg)
+	textPath := filepath.Join(os.TempDir(), fmt.Sprintf("roc-tcloop-%d-tod.txt", id))
+	clockStop := make(chan struct{})
+	if err := startTODClockFile(textPath, clockStop); err != nil {
+		return err
+	}
+	defer func() {
+		close(clockStop)
+		_ = os.Remove(textPath)
+	}()
+
+	draw := buildDrawtext(cfg, textPath)
 	var vchain string
 	if interlaced {
 		vchain = fmt.Sprintf(
-			"[0:v]yadif=mode=0:deint=interlaced,%s,scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,tinterlace=interleave_top,format=yuv422p10le[v]",
-			draw, w, h, w, h, fps*2,
+			"[0:v]yadif=mode=0:deint=interlaced,scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,tinterlace=interleave_top,format=yuv422p10le,%s[v]",
+			w, h, w, h, fps*2, draw,
 		)
 	} else {
 		vchain = fmt.Sprintf(
-			"[0:v]yadif=mode=0:deint=interlaced,%s,scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,format=yuv422p10le[v]",
-			draw, w, h, w, h, fps,
+			"[0:v]yadif=mode=0:deint=interlaced,scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,format=yuv422p10le,%s[v]",
+			w, h, w, h, fps, draw,
 		)
 	}
 	// Use generated silence so missing DeckLink audio does not kill the graph.
@@ -558,7 +569,6 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		"-fps_mode", "cfr",
 		"-r", fmt.Sprintf("%g", fps),
 		"-s", fmt.Sprintf("%dx%d", w, h),
-		"-shortest",
 	)
 	if interlaced {
 		args = append(args, "-flags", "+ilme+ildct", "-field_order", "tt")
@@ -645,18 +655,47 @@ func (m *Manager) resolveDeckLinkOpen(device string) (primary, alt string) {
 	return primary, ""
 }
 
-func buildDrawtext(cfg Settings) string {
+func buildDrawtext(cfg Settings, textFile string) string {
 	x, y := positionXY(cfg.Position)
 	boxA := cfg.Opacity * 0.55
 	if boxA < 0.2 {
 		boxA = 0.2
 	}
-	// Single-quoted option values may contain ':' without \: escaping.
-	// Keep text= last so nothing after the quoted value can confuse the parser.
+	// textfile+reload avoids putting ':' inside filtergraph option values
+	// (this FFmpeg build still splits quoted text='%H:%M:%S').
 	return fmt.Sprintf(
-		"drawtext=font=Sans:fontsize=%d:fontcolor=white@%.2f:box=1:boxcolor=black@%.2f:boxborderw=10:x=%s:y=%s:expansion=strftime:text='%%H:%%M:%%S'",
-		cfg.FontSize, cfg.Opacity, boxA, x, y,
+		"drawtext=font=Sans:fontsize=%d:fontcolor=white@%.2f:box=1:boxcolor=black@%.2f:boxborderw=10:x=%s:y=%s:reload=1:textfile=%s",
+		cfg.FontSize, cfg.Opacity, boxA, x, y, escapeFilterPath(textFile),
 	)
+}
+
+func escapeFilterPath(p string) string {
+	p = strings.ReplaceAll(p, `\`, `\\`)
+	p = strings.ReplaceAll(p, `:`, `\:`)
+	p = strings.ReplaceAll(p, `'`, `\'`)
+	return p
+}
+
+func startTODClockFile(path string, stop <-chan struct{}) error {
+	write := func() error {
+		return os.WriteFile(path, []byte(time.Now().Format("15:04:05")), 0o644)
+	}
+	if err := write(); err != nil {
+		return fmt.Errorf("tod clock file: %w", err)
+	}
+	go func() {
+		t := time.NewTicker(200 * time.Millisecond)
+		defer t.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+				_ = write()
+			}
+		}
+	}()
+	return nil
 }
 
 func positionXY(pos Position) (x, y string) {

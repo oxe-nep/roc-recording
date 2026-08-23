@@ -481,6 +481,23 @@ func (m *Manager) IsActive(id int) bool {
 
 // InputArgs returns sanitized DeckLink capture args for channel id (for TC Burn-in).
 func (m *Manager) InputArgs(id int) ([]string, error) {
+	args, err := m.rawInputArgs(id)
+	if err != nil {
+		return nil, err
+	}
+	return sanitizeInputArgs(args), nil
+}
+
+// InputArgsForTC returns DeckLink input args for TC passthrough (keeps signal_loss_action repeat).
+func (m *Manager) InputArgsForTC(id int) ([]string, error) {
+	args, err := m.rawInputArgs(id)
+	if err != nil {
+		return nil, err
+	}
+	return ensureSignalLossRepeat(args), nil
+}
+
+func (m *Manager) rawInputArgs(id int) ([]string, error) {
 	m.mu.RLock()
 	s, ok := m.streams[id]
 	m.mu.RUnlock()
@@ -490,11 +507,28 @@ func (m *Manager) InputArgs(id int) ([]string, error) {
 	s.mu.Lock()
 	raw := s.ffmpegInput
 	s.mu.Unlock()
-	args := sanitizeInputArgs(shellSplit(raw))
+	args := shellSplit(raw)
 	if len(args) == 0 {
 		return nil, fmt.Errorf("channel %d has no ffmpeg_input", id)
 	}
 	return args, nil
+}
+
+func ensureSignalLossRepeat(args []string) []string {
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-signal_loss_action" {
+			return args
+		}
+	}
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-i" {
+			out := append([]string{}, args[:i]...)
+			out = append(out, "-signal_loss_action", "repeat")
+			out = append(out, args[i:]...)
+			return out
+		}
+	}
+	return append(append([]string{}, args...), "-signal_loss_action", "repeat")
 }
 
 func (m *Manager) runLoop(s *Stream) {

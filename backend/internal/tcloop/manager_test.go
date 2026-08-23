@@ -5,15 +5,22 @@ import (
 	"testing"
 )
 
-func TestBuildDrawtextQuotedStrftime(t *testing.T) {
-	got := buildDrawtext(Settings{FontSize: 48, Opacity: 0.9, Position: PosTopLeft})
-	if !strings.Contains(got, "expansion=strftime") {
-		t.Fatalf("missing strftime expansion: %s", got)
+func TestBuildDrawtextUsesTextfile(t *testing.T) {
+	got := buildDrawtext(Settings{FontSize: 48, Opacity: 0.9, Position: PosTopLeft}, "/tmp/roc-tcloop-1-tod.txt")
+	if !strings.Contains(got, "textfile=/tmp/roc-tcloop-1-tod.txt") {
+		t.Fatalf("expected textfile path, got: %s", got)
 	}
-	if !strings.Contains(got, "text='%H:%M:%S'") {
-		t.Fatalf("expected quoted HH:MM:SS without backslash escapes, got: %s", got)
+	if !strings.Contains(got, "reload=1") {
+		t.Fatalf("expected reload=1, got: %s", got)
 	}
-	if strings.Contains(got, `\:`) {
-		t.Fatalf("backslash-colon should not appear inside quoted text: %s", got)
+	if strings.Contains(got, "%H") || strings.Contains(got, "localtime") {
+		t.Fatalf("should not embed clock format in filtergraph: %s", got)
+	}
+}
+
+func TestEscapeFilterPath(t *testing.T) {
+	got := escapeFilterPath(`C:\tmp:x`)
+	if !strings.Contains(got, `\:`) {
+		t.Fatalf("expected escaped colon, got %q", got)
 	}
 }

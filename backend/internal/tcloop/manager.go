@@ -856,13 +856,27 @@ func isDeckLinkOpenFailure(lines []string) bool {
 	return false
 }
 
+func isTCLoopNoise(line string) bool {
+	if strings.Contains(line, "Parsed_ametadata") || strings.Contains(line, "lavfi.astats") {
+		return true
+	}
+	// HLS segment rotation is very chatty at info level.
+	if strings.Contains(line, "Opening '") &&
+		(strings.Contains(line, ".ts'") || strings.Contains(line, ".m3u8")) {
+		return true
+	}
+	return false
+}
+
 func collectStderr(r io.Reader, st *channelState) []string {
 	var lines []string
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
 		line := sc.Text()
-		log.Printf("[tcloop] %s", line)
+		if !isTCLoopNoise(line) {
+			log.Printf("[tcloop] %s", line)
+		}
 		lines = append(lines, line)
 		if len(lines) > 40 {
 			lines = lines[len(lines)-40:]

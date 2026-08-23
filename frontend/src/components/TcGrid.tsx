@@ -83,6 +83,18 @@ export default function TcGrid() {
     }
   };
 
+  const startTc = async (id: number) => {
+    setBusy((b) => ({ ...b, [id]: true }));
+    setError(null);
+    try {
+      await updateTcLoop(id, { enabled: true });
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy((b) => ({ ...b, [id]: false }));
+    }
+  };
+
   if (!loading && channelIds.length === 0) {
     return null;
   }
@@ -122,9 +134,10 @@ export default function TcGrid() {
                   <div className="card-stage">
                     <div className="card-thumb">
                       <HlsPreview
-                        active={tcLive}
+                        active={tcOn}
                         listening={isListening}
                         playlistPath={`/hls/playout/${s.id}/preview.m3u8`}
+                        sessionKey={`${s.id}-${tc?.status ?? "off"}-${tcOn ? "on" : "off"}`}
                       />
                       {tslText && tcOn && (
                         <div className="thumb-tsl-overlay">
@@ -174,7 +187,16 @@ export default function TcGrid() {
                           >
                             {busy[s.id] ? "…" : "STOP"}
                           </button>
-                        ) : null}
+                        ) : (
+                          <button
+                            type="button"
+                            className="tc-start-btn"
+                            disabled={busy[s.id]}
+                            onClick={() => startTc(s.id)}
+                          >
+                            {busy[s.id] ? "…" : "START"}
+                          </button>
+                        )}
                         {tcLive && (
                           <button
                             type="button"

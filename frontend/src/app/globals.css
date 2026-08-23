@@ -2028,6 +2028,26 @@ html {
   cursor: not-allowed;
 }
 
+.tc-start-btn {
+  flex-shrink: 0;
+  height: 1.7rem;
+  min-width: 4.2rem;
+  padding: 0 10px;
+  border-radius: 5px;
+  border: 1px solid rgba(72, 180, 120, 0.55);
+  background: rgba(72, 180, 120, 0.14);
+  color: #9ee0b8;
+  font: inherit;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.tc-start-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .loading {
   display: flex;
   flex-direction: column;

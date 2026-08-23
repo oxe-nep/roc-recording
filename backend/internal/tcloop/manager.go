@@ -97,7 +97,6 @@ type PlayoutBridge interface {
 	ChannelExists(id int) bool
 	IsActive(id int) bool
 	Stop(id int) error
-	Start(id int) error
 	Sink(id int) (device, formatCode string, err error)
 	ResolveOpenDevice(device string) string
 	LookupDeviceOpen(device string) string
@@ -115,7 +114,8 @@ type channelState struct {
 	AudioR    float64
 	cmd       *exec.Cmd
 	stopCh    chan struct{}
-	deviceAlt bool // next open uses label ↔ unique-id alternate
+	runGen    uint64 // ownership token for runLoop vs stop/start races
+	deviceAlt bool   // next open uses label ↔ unique-id alternate
 }
 
 type Manager struct {
@@ -400,8 +400,8 @@ func (m *Manager) Update(id int, in UpdateInput) (Info, error) {
 			log.Printf("[tcloop] channel %d: TC process did not exit in time", id)
 		}
 		time.Sleep(decklinkSettle)
-		m.restartCapture(id)
-		m.restartPlayout(id)
+		// Leave DeckLink free. Pair-mode workflow starts encode/decode itself;
+		// auto-restarting playout here races TC Start and steals the preview path.
 	}
 	return m.Get(id)
 }
@@ -430,6 +430,8 @@ func (m *Manager) startLocked(id int, st *channelState) error {
 	st.settings.Enabled = true
 	st.settings = normalizeSettings(st.settings)
 	cfg := st.settings
+	st.runGen++
+	gen := st.runGen
 	st.stopCh = make(chan struct{})
 	st.status = StatusRestarting
 	st.lastErr = ""
@@ -440,7 +442,7 @@ func (m *Manager) startLocked(id int, st *channelState) error {
 	_ = m.saveLocked()
 	m.mu.Unlock()
 
-	go m.runLoop(id, st, stopCh, cfg)
+	go m.runLoop(id, st, stopCh, cfg, gen)
 	return nil
 }
 
@@ -494,28 +496,6 @@ func (m *Manager) releaseInput(id int) error {
 		time.Sleep(decklinkSettle)
 	}
 	return nil
-}
-
-func (m *Manager) restartCapture(id int) {
-	if m.capture == nil {
-		return
-	}
-	if err := m.capture.Start(id); err != nil {
-		log.Printf("[tcloop] channel %d encode restart after TC Burn-in off: %v", id, err)
-		return
-	}
-	log.Printf("[tcloop] channel %d encode restarted after TC Burn-in off", id)
-}
-
-func (m *Manager) restartPlayout(id int) {
-	if m.playout == nil {
-		return
-	}
-	if err := m.playout.Start(id); err != nil {
-		log.Printf("[tcloop] channel %d decode restart after TC Burn-in off: %v", id, err)
-		return
-	}
-	log.Printf("[tcloop] channel %d decode restarted after TC Burn-in off", id)
 }
 
 func (m *Manager) Stop(id int) error {
@@ -577,29 +557,36 @@ func (m *Manager) StartEnabled() {
 	}
 }
 
-func (m *Manager) runLoop(id int, st *channelState, stopCh <-chan struct{}, cfg Settings) {
+func (m *Manager) runLoop(id int, st *channelState, stopCh <-chan struct{}, cfg Settings, gen uint64) {
 	const (
-		restartDelay   = 2 * time.Second
-		stableAfter    = 10 * time.Second
-		maxBackoff     = 30 * time.Second
+		restartDelay = 2 * time.Second
+		stableAfter  = 10 * time.Second
+		maxBackoff   = 30 * time.Second
 	)
 	consecutiveFails := 0
 
 	defer func() {
 		st.mu.Lock()
+		defer st.mu.Unlock()
+		// Only the active generation may clear shared slots — a superseded
+		// loop must not Kill/nil the replacement process (stop→start race).
+		if st.runGen != gen {
+			return
+		}
 		if st.cmd != nil && st.cmd.Process != nil {
 			_ = st.cmd.Process.Kill()
 		}
 		st.cmd = nil
 		st.stopCh = nil
-		st.mu.Unlock()
 	}()
 
 	for {
 		select {
 		case <-stopCh:
 			st.mu.Lock()
-			st.status = StatusOff
+			if st.runGen == gen {
+				st.status = StatusOff
+			}
 			st.mu.Unlock()
 			return
 		default:
@@ -608,10 +595,16 @@ func (m *Manager) runLoop(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		st.mu.Lock()
 		cfg = normalizeSettings(st.settings)
 		enabled := cfg.Enabled
+		mine := st.runGen == gen
 		st.mu.Unlock()
+		if !mine {
+			return
+		}
 		if !enabled {
 			st.mu.Lock()
-			st.status = StatusOff
+			if st.runGen == gen {
+				st.status = StatusOff
+			}
 			st.mu.Unlock()
 			return
 		}
@@ -623,7 +616,9 @@ func (m *Manager) runLoop(id int, st *channelState, stopCh <-chan struct{}, cfg 
 			select {
 			case <-stopCh:
 				st.mu.Lock()
-				st.status = StatusOff
+				if st.runGen == gen {
+					st.status = StatusOff
+				}
 				st.mu.Unlock()
 				return
 			case <-time.After(decklinkSettle):
@@ -631,22 +626,32 @@ func (m *Manager) runLoop(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		}
 
 		st.mu.Lock()
+		if st.runGen != gen {
+			st.mu.Unlock()
+			return
+		}
 		st.status = StatusRestarting
 		st.lastErr = ""
 		st.mu.Unlock()
 
 		start := time.Now()
-		err := m.runOnce(id, st, stopCh, cfg)
+		err := m.runOnce(id, st, stopCh, cfg, gen)
 		select {
 		case <-stopCh:
 			st.mu.Lock()
-			st.status = StatusOff
+			if st.runGen == gen {
+				st.status = StatusOff
+			}
 			st.mu.Unlock()
 			return
 		default:
 		}
 
 		st.mu.Lock()
+		if st.runGen != gen {
+			st.mu.Unlock()
+			return
+		}
 		if !st.settings.Enabled {
 			st.status = StatusOff
 			st.mu.Unlock()
@@ -671,7 +676,7 @@ func (m *Manager) runLoop(id int, st *channelState, stopCh <-chan struct{}, cfg 
 				delay = maxBackoff
 			} else {
 				st.status = StatusRestarting
-				exp := restartDelay * time.Duration(1<<min(consecutiveFails-1, 4))
+				exp := restartDelay * time.Duration(1 << min(consecutiveFails-1, 4))
 				if exp > delay {
 					delay = exp
 				}
@@ -690,7 +695,9 @@ func (m *Manager) runLoop(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		select {
 		case <-stopCh:
 			st.mu.Lock()
-			st.status = StatusOff
+			if st.runGen == gen {
+				st.status = StatusOff
+			}
 			st.mu.Unlock()
 			return
 		case <-time.After(delay):
@@ -698,7 +705,7 @@ func (m *Manager) runLoop(id int, st *channelState, stopCh <-chan struct{}, cfg 
 	}
 }
 
-func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg Settings) error {
+func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg Settings, gen uint64) error {
 	inputArgs, err := m.capture.InputArgsForTC(id)
 	if err != nil {
 		return err
@@ -729,6 +736,7 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 
 	// Preview is a single low-latency HLS (A/V) for the TC card — no JPEG / audio-only split.
 	playoutOutDir := filepath.Join(m.hlsDir, "playout", strconv.Itoa(id))
+	_ = os.RemoveAll(playoutOutDir)
 	_ = os.MkdirAll(playoutOutDir, 0o755)
 	previewPlaylist := filepath.Join(playoutOutDir, "preview.m3u8")
 	previewSeg := filepath.Join(playoutOutDir, "preview_%03d.ts")
@@ -825,6 +833,10 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		return err
 	}
 	st.mu.Lock()
+	if st.runGen != gen {
+		st.mu.Unlock()
+		return fmt.Errorf("superseded")
+	}
 	st.cmd = cmd
 	st.AudioL = audioSilence
 	st.AudioR = audioSilence
@@ -841,12 +853,16 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 	defer close(astatsStop)
 	if err := cmd.Start(); err != nil {
 		st.mu.Lock()
-		st.cmd = nil
+		if st.runGen == gen {
+			st.cmd = nil
+		}
 		st.mu.Unlock()
 		return err
 	}
 	st.mu.Lock()
-	st.status = StatusRunning
+	if st.runGen == gen {
+		st.status = StatusRunning
+	}
 	st.mu.Unlock()
 	errLines := make(chan []string, 1)
 	go func() { errLines <- collectStderr(stderr, st) }()
@@ -862,20 +878,24 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		<-done
 		<-errLines
 		st.mu.Lock()
-		st.cmd = nil
+		if st.runGen == gen {
+			st.cmd = nil
+		}
 		st.mu.Unlock()
 		return nil
 	case err := <-done:
 		lines := <-errLines
 		st.mu.Lock()
-		st.cmd = nil
-		if err != nil && openAlt != "" && openAlt != openPrimary && isDeckLinkOpenFailure(lines) {
-			next := openAlt
-			if tryAlt {
-				next = openPrimary
+		if st.runGen == gen {
+			st.cmd = nil
+			if err != nil && openAlt != "" && openAlt != openPrimary && isDeckLinkOpenFailure(lines) {
+				next := openAlt
+				if tryAlt {
+					next = openPrimary
+				}
+				st.deviceAlt = !tryAlt
+				log.Printf("[tcloop %d] DeckLink open with %q failed – next retry will use %q", id, openDevice, next)
 			}
-			st.deviceAlt = !tryAlt
-			log.Printf("[tcloop %d] DeckLink open with %q failed – next retry will use %q", id, openDevice, next)
 		}
 		st.mu.Unlock()
 		if err != nil {
@@ -917,8 +937,9 @@ func buildDrawtext(cfg Settings, textFile string) string {
 	}
 	// textfile+reload avoids putting ':' inside filtergraph option values
 	// (this FFmpeg build still splits quoted text='%H:%M:%S').
+	// expansion=none: never interpret % / %{...} from the clock file (external TC).
 	return fmt.Sprintf(
-		"drawtext=font=Sans:fontsize=%d:fontcolor=white@%.2f:box=1:boxcolor=black@%.2f:boxborderw=10:x=%s:y=%s:reload=1:textfile=%s",
+		"drawtext=font=Sans:fontsize=%d:fontcolor=white@%.2f:box=1:boxcolor=black@%.2f:boxborderw=10:x=%s:y=%s:reload=1:expansion=none:textfile=%s",
 		cfg.FontSize, cfg.Opacity, boxA, x, y, escapeFilterPath(textFile),
 	)
 }

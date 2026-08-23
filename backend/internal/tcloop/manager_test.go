@@ -13,6 +13,9 @@ func TestBuildDrawtextUsesTextfile(t *testing.T) {
 	if !strings.Contains(got, "reload=1") {
 		t.Fatalf("expected reload=1, got: %s", got)
 	}
+	if !strings.Contains(got, "expansion=none") {
+		t.Fatalf("expected expansion=none, got: %s", got)
+	}
 	if strings.Contains(got, "%H") || strings.Contains(got, "localtime") {
 		t.Fatalf("should not embed clock format in filtergraph: %s", got)
 	}

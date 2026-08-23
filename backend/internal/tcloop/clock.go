@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -16,9 +17,42 @@ func defaultUDPPort(id int) int {
 	return 9300 + id
 }
 
+// writeClockFile atomically replaces path so FFmpeg drawtext reload=1 never
+// observes a truncated/empty file mid-write (a known crash source).
+func writeClockFile(path, text string) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".roc-tc-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.WriteString(text); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	cleanup = false
+	return nil
+}
+
 func startTODClockFile(path string, stop <-chan struct{}) error {
 	write := func() error {
-		return os.WriteFile(path, []byte(time.Now().Format("15:04:05")), 0o644)
+		return writeClockFile(path, time.Now().Format("15:04:05"))
 	}
 	if err := write(); err != nil {
 		return fmt.Errorf("tod clock file: %w", err)
@@ -47,13 +81,20 @@ func startUDPClockFile(path string, port int, stop <-chan struct{}) error {
 	if err != nil {
 		return fmt.Errorf("udp listen :%d: %w", port, err)
 	}
-	if err := os.WriteFile(path, []byte("--:--:--"), 0o644); err != nil {
+	if err := writeClockFile(path, "--:--:--"); err != nil {
 		_ = conn.Close()
 		return fmt.Errorf("udp clock file: %w", err)
 	}
+
+	// Unblock ReadFromUDP immediately when the TC process stops / restarts.
 	go func() {
-		defer conn.Close()
+		<-stop
+		_ = conn.Close()
+	}()
+
+	go func() {
 		buf := make([]byte, 512)
+		last := ""
 		for {
 			select {
 			case <-stop:
@@ -63,15 +104,22 @@ func startUDPClockFile(path string, port int, stop <-chan struct{}) error {
 			_ = conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 			n, _, err := conn.ReadFromUDP(buf)
 			if err != nil {
-				continue
+				select {
+				case <-stop:
+					return
+				default:
+					continue
+				}
 			}
 			tc := normalizeTimecode(string(buf[:n]))
-			if tc == "" {
+			if tc == "" || tc == last {
 				continue
 			}
-			if err := os.WriteFile(path, []byte(tc), 0o644); err != nil {
+			if err := writeClockFile(path, tc); err != nil {
 				log.Printf("[tcloop] udp clock write: %v", err)
+				continue
 			}
+			last = tc
 		}
 	}()
 	log.Printf("[tcloop] listening for external timecode on UDP :%d", port)

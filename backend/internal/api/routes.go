@@ -637,6 +637,8 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 					disabled := false
 					if _, err := tcMgr.Update(id, tcloop.UpdateInput{Enabled: &disabled}); err != nil {
 						log.Printf("[workflow] channel %d: stop TC on pair mode: %v", id, err)
+					} else if err := mgr.Start(id); err != nil {
+						log.Printf("[workflow] channel %d: restart encode after TC off: %v", id, err)
 					}
 				}
 				if cfg.Mode == workflow.ModeTC && prev.Mode != workflow.ModeTC {

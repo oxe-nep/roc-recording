@@ -47,8 +47,14 @@ export function showDecodeCard(
   workflows: Record<number, ChannelWorkflowConfig>,
   channelId: number,
 ): boolean {
-  const mode = workflowMode(workflows, channelId);
-  return mode === "pair" || mode === "tc";
+  return workflowMode(workflows, channelId) === "pair";
+}
+
+export function showTcCard(
+  workflows: Record<number, ChannelWorkflowConfig>,
+  channelId: number,
+): boolean {
+  return workflowMode(workflows, channelId) === "tc";
 }
 
 export function isTcWorkflow(

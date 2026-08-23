@@ -10,26 +10,13 @@ import {
   startPlayout,
   stopPlayout,
   updatePlayoutClient,
-  fetchTcLoop,
-  updateTcLoop,
   type LibraryFile,
   type PlayoutClient,
   type PlayoutDevice,
   type PlayoutMediaItem,
-  type TcLoopPosition,
-  type TcLoopSource,
 } from "@/lib/api";
 import LibraryModal from "@/components/LibraryModal";
-import TcPositionPreview from "@/components/TcPositionPreview";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
-import { useWorkflows } from "@/hooks/useWorkflows";
-import { isTcWorkflow } from "@/lib/workflow";
-import {
-  defaultTcUdpPort,
-  tcSourceLabel,
-  tcStatusLabel,
-  tcStatusPillClass,
-} from "@/lib/tcUi";
 
 type Props = {
   open: boolean;
@@ -66,27 +53,12 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
   const [error, setError] = useState<string | null>(null);
   const [logsOpen, setLogsOpen] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
-  const [tcEnabled, setTcEnabled] = useState(false);
-  const [tcStatus, setTcStatus] = useState<"off" | "running" | "restarting" | "error">("off");
-  const [tcSource, setTcSource] = useState<TcLoopSource>("tod");
-  const [tcUdpPort, setTcUdpPort] = useState(0);
-  const [tcFontSize, setTcFontSize] = useState(48);
-  const [tcOpacity, setTcOpacity] = useState(0.9);
-  const [tcPosition, setTcPosition] = useState<TcLoopPosition>("bottom_right");
-  const [tcError, setTcError] = useState("");
-  const [tcApplyMsg, setTcApplyMsg] = useState<string | null>(null);
   const logBoxRef = useRef<HTMLPreElement>(null);
 
   useBodyScrollLock(open);
 
-  const { workflows } = useWorkflows();
   const channelId = client?.id;
-  const tcWorkflow = channelId != null && isTcWorkflow(workflows, channelId);
   const active = client ? isPlayoutOn(client.status) : false;
-  const tcOn =
-    tcEnabled || tcStatus === "running" || tcStatus === "restarting";
-  const tcEffectivePort = tcUdpPort > 0 ? tcUdpPort : defaultTcUdpPort(channelId ?? 0);
-  const tcSourceText = tcSourceLabel(tcSource, tcEffectivePort, channelId ?? 0);
   const deviceName = client?.device || "";
   const deviceLabel = client?.device_label || deviceName;
 
@@ -108,23 +80,14 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
     setLogsOpen(false);
     setLogs([]);
     setLibraryOpen(false);
-    Promise.all([fetchPlayoutDevices(), fetchPlayoutMedia(), fetchTcLoop(channelId)])
-      .then(([devs, files, tc]) => {
+    Promise.all([fetchPlayoutDevices(), fetchPlayoutMedia()])
+      .then(([devs, files]) => {
         setDevices(devs);
         setMedia(files);
         setFileLabel((prev) => prev || displayFileLabel(client.file_id || "", client.file_name, files));
-        setTcEnabled(!!tc.enabled);
-        setTcStatus(tc.status);
-        setTcSource(tc.source === "external" ? "external" : "tod");
-        setTcUdpPort(tc.udp_port || defaultTcUdpPort(channelId));
-        setTcFontSize(tc.fontsize || 48);
-        setTcOpacity(tc.opacity ?? 0.9);
-        setTcPosition(tc.position || "bottom_right");
-        setTcError(tc.error || "");
       })
       .catch((e) => setError(String(e)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, channelId]);
+  }, [open, client, channelId]);
 
   useEffect(() => {
     if (!open || channelId == null || !logsOpen) return;
@@ -212,7 +175,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
 
   const apply = async () => {
     if (active) {
-      setError("Stop decode before changing settings");
+      setError("Stop decode first");
       return;
     }
     const invalid = validate();
@@ -233,63 +196,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
     }
   };
 
-  const applyTc = async (enabled: boolean) => {
-    if (channelId == null) return;
-    setBusy(true);
-    setError(null);
-    setTcApplyMsg(enabled ? "Starting TC…" : "Stopping TC…");
-    try {
-      const tc = await updateTcLoop(channelId, {
-        enabled,
-        source: tcSource,
-        udp_port: tcSource === "external" ? tcEffectivePort : 0,
-        fontsize: tcFontSize,
-        opacity: tcOpacity,
-        position: tcPosition,
-      });
-      setTcEnabled(!!tc.enabled);
-      setTcStatus(tc.status);
-      setTcSource(tc.source === "external" ? "external" : "tod");
-      setTcUdpPort(tc.udp_port || defaultTcUdpPort(channelId));
-      setTcFontSize(tc.fontsize || 48);
-      setTcOpacity(tc.opacity ?? 0.9);
-      setTcPosition(tc.position || "bottom_right");
-      setTcError(tc.error || "");
-
-      if (tc.enabled) {
-        setTcApplyMsg("Waiting for TC…");
-        for (let i = 0; i < 20; i++) {
-          await new Promise((r) => setTimeout(r, 400));
-          const latest = await fetchTcLoop(channelId);
-          setTcStatus(latest.status);
-          setTcError(latest.error || "");
-          if (latest.status === "running") {
-            setTcApplyMsg(null);
-            break;
-          }
-          if (latest.status === "error") {
-            setTcApplyMsg(null);
-            setError(latest.error || "TC burn-in failed to start");
-            break;
-          }
-        }
-      } else {
-        setTcApplyMsg(null);
-      }
-      onSaved();
-    } catch (e) {
-      setTcApplyMsg(null);
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const toggleRun = async () => {
-    if (tcOn && !active) {
-      setError("Stop TC first");
-      return;
-    }
     setBusy(true);
     setError(null);
     try {
@@ -325,12 +232,12 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
           className="modal-panel channel-settings-modal"
           onClick={(e) => e.stopPropagation()}
           role="dialog"
-          aria-label={tcWorkflow ? `TC settings for channel ${client.id}` : `Decode settings for ${client.name}`}
+          aria-label={`Decode settings for ${client.name}`}
         >
           <div className="modal-header">
             <h2>
               <span className="input-badge decode">{client.id}</span>
-              <span>{tcWorkflow ? `TC ${client.id}` : name.trim() || `Decode ${client.id}`}</span>
+              <span>{name.trim() || `Decode ${client.id}`}</span>
             </h2>
             <button type="button" className="modal-close" onClick={onClose} aria-label="Close" disabled={busy}>
               ×
@@ -339,13 +246,8 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
 
           {error && <div className="error-message">{error}</div>}
 
-          {tcApplyMsg && <div className="channel-settings-note tc-apply-note">{tcApplyMsg}</div>}
+          {active && <div className="channel-settings-lock">Stop decode first.</div>}
 
-          {!tcOn && active && !tcWorkflow && (
-            <div className="channel-settings-lock">Stop decode first.</div>
-          )}
-
-          {!tcOn && !tcWorkflow && (
           <div className="channel-settings-form">
             <label className="presets-field">
               <span>Name</span>
@@ -452,8 +354,8 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                     onChange={(e) => setMode(e.target.value as "listener" | "caller")}
                     disabled={busy || active}
                   >
-                    <option value="listener">Listener (publishers connect to us)</option>
-                    <option value="caller">Caller (we pull from a target)</option>
+                    <option value="listener">Listener</option>
+                    <option value="caller">Caller</option>
                   </select>
                 </label>
 
@@ -510,136 +412,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
               </>
             )}
           </div>
-          )}
 
-          <div className={`channel-settings-srt channel-settings-tc${tcOn ? " enabled" : ""}`}>
-            <div className="channel-settings-srt-head">
-              <h3>TC burn-in</h3>
-              <span className={tcStatusPillClass(tcStatus, tcEnabled)}>
-                {tcStatusLabel(tcStatus, tcEnabled)}
-              </span>
-            </div>
-            <div className="channel-settings-form">
-              <div className="tc-settings-body">
-                <div className="tc-settings-row">
-                  <div className="tc-settings-fields">
-                    <label className="presets-field">
-                      <span>Timecode source</span>
-                      <select
-                        value={tcSource}
-                        onChange={(e) => setTcSource(e.target.value as TcLoopSource)}
-                        disabled={busy}
-                      >
-                        <option value="tod">Time of day</option>
-                        <option value="external">External (UDP)</option>
-                      </select>
-                    </label>
-                    {tcSource === "external" && (
-                      <label className="presets-field">
-                        <span>UDP listen port</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={65535}
-                          value={tcEffectivePort}
-                          onChange={(e) =>
-                            setTcUdpPort(Number(e.target.value) || defaultTcUdpPort(channelId ?? 0))
-                          }
-                          disabled={busy}
-                        />
-                      </label>
-                    )}
-                    <label className="presets-field">
-                      <span>Font size</span>
-                      <input
-                        type="number"
-                        min={12}
-                        max={200}
-                        value={tcFontSize}
-                        onChange={(e) => setTcFontSize(Number(e.target.value) || 48)}
-                        disabled={busy}
-                      />
-                    </label>
-                    <label className="presets-field">
-                      <span>Opacity ({Math.round(tcOpacity * 100)}%)</span>
-                      <input
-                        type="range"
-                        min={0.2}
-                        max={1}
-                        step={0.05}
-                        value={tcOpacity}
-                        onChange={(e) => setTcOpacity(Number(e.target.value))}
-                        disabled={busy}
-                      />
-                    </label>
-                    <label className="presets-field">
-                      <span>Position</span>
-                      <select
-                        value={tcPosition}
-                        onChange={(e) => setTcPosition(e.target.value as TcLoopPosition)}
-                        disabled={busy}
-                      >
-                        <option value="bottom_right">Bottom right</option>
-                        <option value="bottom_left">Bottom left</option>
-                        <option value="top_right">Top right</option>
-                        <option value="top_left">Top left</option>
-                        <option value="center">Center</option>
-                      </select>
-                    </label>
-                  </div>
-                  <TcPositionPreview
-                    position={tcPosition}
-                    fontsize={tcFontSize}
-                    opacity={tcOpacity}
-                  />
-                </div>
-              </div>
-              {tcError && tcStatus === "error" && (
-                <div className="channel-settings-lock tc-error-note">{tcError}</div>
-              )}
-            </div>
-            <div className="channel-settings-actions">
-              {tcOn ? (
-                <>
-                  <button
-                    type="button"
-                    className="global-rec-btn tc-apply-on"
-                    onClick={() => applyTc(true)}
-                    disabled={busy}
-                  >
-                    {busy ? "…" : "Update"}
-                  </button>
-                  <button
-                    type="button"
-                    className="tc-stop-btn"
-                    onClick={() => applyTc(false)}
-                    disabled={busy}
-                  >
-                    {busy ? "…" : "Stop"}
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  className="global-rec-btn tc-apply-on"
-                  onClick={() => applyTc(true)}
-                  disabled={busy}
-                >
-                  {busy ? "…" : "Start"}
-                </button>
-              )}
-            </div>
-          </div>
-
-          {tcWorkflow && !tcOn && (
-            <div className="channel-settings-actions">
-              <button type="button" className="badge" onClick={onClose} disabled={busy}>
-                Close
-              </button>
-            </div>
-          )}
-
-          {!tcOn && !tcWorkflow && (
           <div className="channel-settings-actions">
             <button
               type="button"
@@ -656,20 +429,10 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
               {busy ? "…" : "Save"}
             </button>
           </div>
-          )}
 
-          {tcOn && (
-            <div className="channel-settings-actions">
-              <button type="button" className="badge" onClick={onClose} disabled={busy}>
-                Close
-              </button>
-            </div>
-          )}
-
-          {!tcOn && !tcWorkflow && (
           <div className="channel-settings-logs">
             <div className="channel-settings-logs-head">
-              <h3>Decode logs</h3>
+              <h3>Logs</h3>
               <button type="button" className="badge" onClick={() => setLogsOpen((v) => !v)}>
                 {logsOpen ? "Hide" : "Show"}
               </button>
@@ -680,7 +443,6 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
               </pre>
             )}
           </div>
-          )}
         </div>
       </div>
 

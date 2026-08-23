@@ -8,22 +8,18 @@ import {
   fetchEncodePresets,
   fetchLibraryCategories,
   fetchSrtAll,
-  fetchTcLoop,
   startRecording,
   stopRecording,
   startSrt,
   stopSrt,
-  updateTcLoop,
   type Stream,
   type AudioLevels,
   type RecordingInfo,
   type EncodePreset,
   type LibraryCategory,
   type SrtInfo,
-  type TcLoopInfo,
   isCaptureOn,
 } from "@/lib/api";
-import { tcBadgeText, tcIsActive, tcPreviewHasSignal, tcSourceLabel, tcSourceShort } from "@/lib/tcUi";
 import { showEncodeCard } from "@/lib/workflow";
 import { useWorkflows } from "@/hooks/useWorkflows";
 import Thumbnail from "@/components/Thumbnail";
@@ -97,18 +93,14 @@ export default function StreamGrid() {
   const [srtById, setSrtById] = useState<Record<number, SrtInfo>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<Record<number, boolean>>({});
   const [recBusy, setRecBusy] = useState<Record<number, boolean>>({});
   const [srtBusy, setSrtBusy] = useState<Record<number, boolean>>({});
   const [audio, setAudio] = useState<Record<number, AudioLevels>>({});
   const [listening, setListening] = useState<Record<number, boolean>>({});
   const [settingsId, setSettingsId] = useState<number | null>(null);
-  const [tcById, setTcById] = useState<Record<number, TcLoopInfo>>({});
   const { workflows } = useWorkflows();
   const streamsRef = useRef<Stream[]>([]);
-  const tcByIdRef = useRef<Record<number, TcLoopInfo>>({});
   streamsRef.current = streams;
-  tcByIdRef.current = tcById;
 
   const load = useCallback(async () => {
     try {
@@ -119,20 +111,6 @@ export default function StreamGrid() {
         fetchSrtAll().catch(() => null),
       ]);
       setStreams(streamData);
-      const tcEntries = await Promise.all(
-        streamData.map(async (s) => {
-          try {
-            return [s.id, await fetchTcLoop(s.id)] as const;
-          } catch {
-            return null;
-          }
-        }),
-      );
-      const tcMap: Record<number, TcLoopInfo> = {};
-      for (const e of tcEntries) {
-        if (e) tcMap[e[0]] = e[1];
-      }
-      setTcById(tcMap);
       const recMap: Record<number, RecordingInfo> = {};
       for (const r of recData) recMap[r.id] = r;
       setRecordings(recMap);
@@ -183,16 +161,11 @@ export default function StreamGrid() {
       const all = streamsRef.current;
       const updates: Record<number, AudioLevels> = {};
       for (const s of all) {
-        const tc = tcByIdRef.current[s.id];
-        const tcLive = tcPreviewHasSignal(tc);
-        if (!isCaptureOn(s.status) && !tcLive) {
+        if (!isCaptureOn(s.status)) {
           updates[s.id] = silence;
         }
       }
-      const active = all.filter((s) => {
-        const tc = tcByIdRef.current[s.id];
-        return isCaptureOn(s.status) || tcPreviewHasSignal(tc);
-      });
+      const active = all.filter((s) => isCaptureOn(s.status));
       if (active.length === 0) {
         if (Object.keys(updates).length > 0 && alive) {
           setAudio((prev) => ({ ...prev, ...updates }));
@@ -240,18 +213,6 @@ export default function StreamGrid() {
       setError(String(e));
     } finally {
       setSrtBusy((b) => ({ ...b, [id]: false }));
-    }
-  };
-
-  const stopTc = async (id: number) => {
-    setBusy((b) => ({ ...b, [id]: true }));
-    try {
-      await updateTcLoop(id, { enabled: false });
-      await load();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy((b) => ({ ...b, [id]: false }));
     }
   };
 
@@ -305,37 +266,22 @@ export default function StreamGrid() {
           const cat = rec?.category || "_unsorted";
           const captureOn = isCaptureOn(s.status);
           const hasSignal = s.status === "running";
-          const tc = tcById[s.id];
-          const tcOn = tcIsActive(tc);
-          const tcLive = tcPreviewHasSignal(tc);
-          const tcBadge = tcBadgeText(tc);
           const tslText = s.tsl_text?.trim();
           return (
-            <div
-              key={s.id}
-              className={`card-panel ${s.status}${tcOn ? " tc-active" : ""}${tcLive ? " tc-live" : ""}`}
-            >
-              <AudioMonitor id={s.id} active={hasSignal || tcLive} listening={isListening} />
+            <div key={s.id} className={`card-panel ${s.status}`}>
+              <AudioMonitor id={s.id} active={hasSignal} listening={isListening} />
               <div className="card-stage">
                 <div className="card-thumb">
-                  <Thumbnail id={s.id} active={captureOn || tcLive} />
-                  {tslText && (hasSignal || tcLive) && (
+                  <Thumbnail id={s.id} active={captureOn} />
+                  {tslText && hasSignal && (
                     <div className="thumb-tsl-overlay">
                       <div className="tsl-badge" title={`TSL ${s.tsl_index ?? s.id}`}>
                         {tslText}
                       </div>
                     </div>
                   )}
-                  {(isRecording || srtOn || (tcOn && !tcLive)) && (
+                  {(isRecording || srtOn) && (
                     <div className="thumb-badges">
-                      {tcBadge && !tcLive && (
-                        <div
-                          className={`tc-badge${tc?.status === "error" ? " error" : " starting"}`}
-                          title={tcSourceLabel(tc?.source, tc?.udp_port, s.id)}
-                        >
-                          {tc?.status === "error" ? "TC · error" : "TC · starting…"}
-                        </div>
-                      )}
                       {isEncoding && (
                         <div className="rec-badge">
                           REC · {formatElapsed(rec?.elapsed_sec)} · {formatBitrate(rec?.bitrate_kbps)}
@@ -382,66 +328,37 @@ export default function StreamGrid() {
                     </div>
                     <div
                       className="card-meta"
-                      title={
-                        tcOn
-                          ? tcSourceLabel(tc?.source, tc?.udp_port, s.id)
-                          : [
-                              s.format || (s.status === "waiting" ? "Waiting for signal" : null),
-                              cat === "_unsorted" ? "Unsorted" : cat,
-                              activePreset?.label || s.encode_preset || null,
-                            ]
-                              .filter(Boolean)
-                              .join(" · ")
-                      }
+                      title={[
+                        s.format || (s.status === "waiting" ? "Waiting for signal" : null),
+                        cat === "_unsorted" ? "Unsorted" : cat,
+                        activePreset?.label || s.encode_preset || null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
                     >
-                      {tcOn ? (
-                        <span className="card-meta-item card-meta-tc">
-                          {tcLive
-                            ? `TC · ${tcSourceShort(tc?.source)}`
-                            : tc?.status === "restarting"
-                              ? "TC · reconnecting"
-                              : tc?.status === "error"
-                                ? "TC · error"
-                                : "TC · starting"}
-                        </span>
-                      ) : (
+                      {s.format ? (
                         <>
-                          {s.format ? (
-                            <>
-                              <span className="card-meta-item card-meta-format">{s.format}</span>
-                              <span className="card-meta-sep">·</span>
-                            </>
-                          ) : s.status === "waiting" ? (
-                            <>
-                              <span className="card-meta-item card-meta-waiting">Waiting for signal</span>
-                              <span className="card-meta-sep">·</span>
-                            </>
-                          ) : null}
-                          <span className="card-meta-item">
-                            {cat === "_unsorted" ? "Unsorted" : cat}
-                          </span>
+                          <span className="card-meta-item card-meta-format">{s.format}</span>
                           <span className="card-meta-sep">·</span>
-                          <span className="card-meta-item">
-                            {activePreset?.label || s.encode_preset || "—"}
-                          </span>
                         </>
-                      )}
+                      ) : s.status === "waiting" ? (
+                        <>
+                          <span className="card-meta-item card-meta-waiting">Waiting for signal</span>
+                          <span className="card-meta-sep">·</span>
+                        </>
+                      ) : null}
+                      <span className="card-meta-item">
+                        {cat === "_unsorted" ? "Unsorted" : cat}
+                      </span>
+                      <span className="card-meta-sep">·</span>
+                      <span className="card-meta-item">
+                        {activePreset?.label || s.encode_preset || "—"}
+                      </span>
                     </div>
                   </div>
                   <div className="card-actions">
-                    {tcOn ? (
+                    <>
                       <button
-                        type="button"
-                        className="tc-stop-btn"
-                        onClick={() => stopTc(s.id)}
-                        disabled={busy[s.id]}
-                        title="Stop TC Burn-in"
-                      >
-                        {busy[s.id] ? "…" : "STOP TC"}
-                      </button>
-                    ) : (
-                      <>
-                        <button
                           type="button"
                           className={`rec-btn ${isRecording ? "recording" : "idle"}`}
                           onClick={() => toggleRecording(s.id)}
@@ -475,9 +392,8 @@ export default function StreamGrid() {
                         >
                           {srtBusy[s.id] ? "…" : "STREAM"}
                         </button>
-                      </>
-                    )}
-                    {(hasSignal || tcLive) && (
+                    </>
+                    {hasSignal && (
                       <button
                         className={`badge listen-btn ${isListening ? "active" : ""}`}
                         onClick={() => toggleListen(s.id)}

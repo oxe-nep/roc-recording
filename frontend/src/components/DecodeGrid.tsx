@@ -4,7 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchPlayoutAudioLevels,
   fetchPlayoutClients,
-  fetchTcLoop,
+  fetchPlayoutLogs,
+  fetchPlayoutMedia,
   isPlayoutOn,
   isPlayoutPaused,
   pausePlayout,
@@ -12,13 +13,11 @@ import {
   startPlayout,
   stopPlayout,
   updatePlayoutClient,
-  updateTcLoop,
   type AudioLevels,
   type PlayoutClient,
-  type TcLoopInfo,
+  type PlayoutMediaItem,
 } from "@/lib/api";
-import { tcBadgeText, tcIsActive, tcPreviewHasSignal, tcSourceLabel, tcSourceShort } from "@/lib/tcUi";
-import { showDecodeCard, isTcWorkflow } from "@/lib/workflow";
+import { showDecodeCard } from "@/lib/workflow";
 import { useWorkflows } from "@/hooks/useWorkflows";
 import Thumbnail from "@/components/Thumbnail";
 import AudioMonitor from "@/components/AudioMonitor";
@@ -68,7 +67,7 @@ function litSegmentCount(db?: number): number {
 function SegmentedMeter({ db, label }: { db?: number; label: string }) {
   const lit = litSegmentCount(db);
   return (
-    <div className="audio-col" title={`${label}`}>
+    <div className="audio-col" title={label}>
       <div className="audio-segments" aria-hidden>
         {Array.from({ length: METER_SEGMENTS }, (_, i) => (
           <span key={i} className={`audio-seg ${segmentZone(i)}${i < lit ? " on" : ""}`} />
@@ -98,7 +97,6 @@ function basename(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
-/** Primary card title: file name or SRT stream target. */
 function cardTitle(c: PlayoutClient): string {
   if (c.source === "file") {
     if (c.file_name) return basename(c.file_name);
@@ -116,9 +114,9 @@ function cardMeta(c: PlayoutClient): string {
 }
 
 function waitingLabel(c: PlayoutClient): string {
-  if (c.source === "file") return "DECODE · file…";
-  if (c.mode === "caller") return "DECODE · connecting…";
-  return "DECODE · waiting for publisher";
+  if (c.source === "file") return "File…";
+  if (c.mode === "caller") return "Connecting…";
+  return "Waiting";
 }
 
 export default function DecodeGrid() {
@@ -130,32 +128,15 @@ export default function DecodeGrid() {
   const [listening, setListening] = useState<Record<number, boolean>>({});
   const [settingsId, setSettingsId] = useState<number | null>(null);
   const [mediaOpen, setMediaOpen] = useState(false);
-  const [tcById, setTcById] = useState<Record<number, TcLoopInfo>>({});
   const { workflows } = useWorkflows();
   const clientsRef = useRef<PlayoutClient[]>([]);
-  const tcByIdRef = useRef<Record<number, TcLoopInfo>>({});
   clientsRef.current = clients;
-  tcByIdRef.current = tcById;
 
   const load = useCallback(async () => {
     try {
       const data = await fetchPlayoutClients();
       setClients(data);
       setError(null);
-      const tcEntries = await Promise.all(
-        data.map(async (c) => {
-          try {
-            return [c.id, await fetchTcLoop(c.id)] as const;
-          } catch {
-            return null;
-          }
-        }),
-      );
-      const next: Record<number, TcLoopInfo> = {};
-      for (const e of tcEntries) {
-        if (e) next[e[0]] = e[1];
-      }
-      setTcById(next);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -176,16 +157,11 @@ export default function DecodeGrid() {
       const all = clientsRef.current;
       const updates: Record<number, AudioLevels> = {};
       for (const c of all) {
-        const tc = tcByIdRef.current[c.id];
-        const tcLive = tcPreviewHasSignal(tc);
-        if ((!isPlayoutOn(c.status) || isPlayoutPaused(c.status)) && !tcLive) {
+        if (!isPlayoutOn(c.status) || isPlayoutPaused(c.status)) {
           updates[c.id] = silence;
         }
       }
-      const active = all.filter((c) => {
-        const tc = tcByIdRef.current[c.id];
-        return (isPlayoutOn(c.status) && !isPlayoutPaused(c.status)) || tcPreviewHasSignal(tc);
-      });
+      const active = all.filter((c) => isPlayoutOn(c.status) && !isPlayoutPaused(c.status));
       await Promise.all(
         active.map(async (c) => {
           try {
@@ -222,7 +198,6 @@ export default function DecodeGrid() {
 
   const toggleLoop = async (c: PlayoutClient) => {
     const next = !c.loop;
-    // Optimistic UI only — never touch play/pause/stop.
     setClients((prev) => prev.map((x) => (x.id === c.id ? { ...x, loop: next } : x)));
     try {
       await updatePlayoutClient(c.id, { loop: next });
@@ -234,7 +209,6 @@ export default function DecodeGrid() {
 
   const settingsClient = settingsId != null ? clients.find((c) => c.id === settingsId) ?? null : null;
   const visibleClients = clients.filter((c) => showDecodeCard(workflows, c.id));
-  const tcOnlySection = visibleClients.length > 0 && visibleClients.every((c) => isTcWorkflow(workflows, c.id));
 
   if (!loading && visibleClients.length === 0) {
     return null;
@@ -243,12 +217,10 @@ export default function DecodeGrid() {
   return (
     <section className="io-section">
       <div className="io-section-head">
-        <h2 className="io-section-title">{tcOnlySection ? "TC burn-in" : "Decode"}</h2>
-        {!tcOnlySection && (
-          <button type="button" className="badge" onClick={() => setMediaOpen(true)}>
-            Media
-          </button>
-        )}
+        <h2 className="io-section-title">Decode</h2>
+        <button type="button" className="badge" onClick={() => setMediaOpen(true)}>
+          Media
+        </button>
       </div>
 
       {error && (
@@ -262,7 +234,7 @@ export default function DecodeGrid() {
 
       {loading && clients.length === 0 ? (
         <div className="loading">
-          <span>Loading decode channels…</span>
+          <span>Loading…</span>
         </div>
       ) : visibleClients.length === 0 ? (
         <p className="io-section-empty">No channels.</p>
@@ -275,48 +247,32 @@ export default function DecodeGrid() {
             const hasMedia = c.status === "running";
             const isListening = !!listening[c.id];
             const isFile = c.source === "file";
-            const tc = tcById[c.id];
-            const tcOn = tcIsActive(tc);
-            const tcLive = tcPreviewHasSignal(tc);
-            const tcBadge = tcBadgeText(tc);
-            const tcWorkflow = isTcWorkflow(workflows, c.id);
-            const title = tcWorkflow && !tcOn ? `TC ${c.id}` : cardTitle(c);
+            const title = cardTitle(c);
             return (
-              <div
-                key={c.id}
-                className={`card-panel ${c.status}${tcOn ? " tc-active" : ""}${tcLive ? " tc-live" : ""}`}
-              >
+              <div key={c.id} className={`card-panel ${c.status}`}>
                 <AudioMonitor
                   id={c.id}
-                  active={playing || tcLive}
+                  active={playing}
                   listening={isListening}
                   playlistPath={`/hls/playout/${c.id}/audio.m3u8`}
                 />
                 <div className="card-stage">
                   <div className="card-thumb">
-                    <Thumbnail id={c.id} active={on || tcLive} path={`/hls/playout/${c.id}/thumb.jpg`} />
-                    {(on || (tcOn && !tcLive)) && (
+                    <Thumbnail id={c.id} active={on} path={`/hls/playout/${c.id}/thumb.jpg`} />
+                    {on && (
                       <div className="thumb-badges">
-                        {tcBadge && !tcLive && (
-                          <div
-                            className={`tc-badge${tc?.status === "error" ? " error" : " starting"}`}
-                            title={tcSourceLabel(tc?.source, tc?.udp_port, c.id)}
-                          >
-                            {tc?.status === "error" ? "TC · error" : "TC · starting…"}
-                          </div>
-                        )}
-                        {on && (
-                          <div className={`stream-badge${hasMedia || c.sending ? "" : " waiting"}`}>
-                            {paused
-                              ? "DECODE · paused"
-                              : hasMedia || c.sending
-                                ? isFile
-                                  ? "DECODE · playing"
-                                  : `DECODE · ${formatBitrate(c.bitrate_kbps) === "--" ? "live" : formatBitrate(c.bitrate_kbps)}`
-                                : waitingLabel(c)}
-                          </div>
-                        )}
-                        {isFile && on && (c.duration_sec ?? 0) > 0 && (
+                        <div className={`stream-badge${hasMedia || c.sending ? "" : " waiting"}`}>
+                          {paused
+                            ? "Paused"
+                            : hasMedia || c.sending
+                              ? isFile
+                                ? "Playing"
+                                : formatBitrate(c.bitrate_kbps) === "--"
+                                  ? "Live"
+                                  : formatBitrate(c.bitrate_kbps)
+                              : waitingLabel(c)}
+                        </div>
+                        {isFile && (c.duration_sec ?? 0) > 0 && (
                           <div className="stream-badge waiting" title="Elapsed / remaining">
                             {formatClock(c.elapsed_sec)} / −{formatClock(c.remain_sec)}
                           </div>
@@ -341,47 +297,14 @@ export default function DecodeGrid() {
                           {title}
                         </span>
                       </div>
-                      <div
-                        className="card-meta"
-                        title={
-                          tcOn ? tcSourceLabel(tc?.source, tc?.udp_port, c.id) : cardMeta(c)
-                        }
-                      >
-                        {tcOn ? (
-                          <span className="card-meta-item card-meta-tc">
-                            {tcLive
-                              ? `TC · ${tcSourceShort(tc?.source)}`
-                              : tc?.status === "restarting"
-                                ? "TC · reconnecting"
-                                : tc?.status === "error"
-                                  ? "TC · error"
-                                  : "TC · starting"}
-                          </span>
-                        ) : tcWorkflow ? (
-                          <span className="card-meta-item card-meta-tc">Off</span>
-                        ) : (
-                          <>
-                            <span className="card-meta-item">{formatDisplay(c.format_code)}</span>
-                            <span className="card-meta-sep">·</span>
-                            <span className="card-meta-item">{(c.source || "srt").toUpperCase()}</span>
-                          </>
-                        )}
+                      <div className="card-meta" title={cardMeta(c)}>
+                        <span className="card-meta-item">{formatDisplay(c.format_code)}</span>
+                        <span className="card-meta-sep">·</span>
+                        <span className="card-meta-item">{(c.source || "srt").toUpperCase()}</span>
                       </div>
                     </div>
                     <div className="card-actions">
-                      {tcOn ? (
-                        <button
-                          type="button"
-                          className="tc-stop-btn"
-                          disabled={busy[c.id]}
-                          onClick={() =>
-                            withBusy(c.id, async () => updateTcLoop(c.id, { enabled: false }))
-                          }
-                          title="Stop TC Burn-in"
-                        >
-                          {busy[c.id] ? "…" : "STOP TC"}
-                        </button>
-                      ) : tcWorkflow ? null : isFile ? (
+                      {isFile ? (
                         <>
                           {!on || paused ? (
                             <button
@@ -423,7 +346,7 @@ export default function DecodeGrid() {
                             className={`badge loop-btn${c.loop ? " active" : ""}`}
                             disabled={busy[c.id]}
                             onClick={() => toggleLoop(c)}
-                            title={c.loop ? "Loop on — click to play once" : "Loop off — click to loop"}
+                            title={c.loop ? "Loop on" : "Loop off"}
                           >
                             LOOP
                           </button>
@@ -439,12 +362,12 @@ export default function DecodeGrid() {
                           {busy[c.id] ? "…" : "STOP"}
                         </button>
                       ) : null}
-                      {(playing || tcLive) && (
+                      {playing && (
                         <button
                           type="button"
                           className={`badge listen-btn ${isListening ? "active" : ""}`}
                           onClick={() => setListening((prev) => ({ ...prev, [c.id]: !prev[c.id] }))}
-                          title={isListening ? "Stop audio monitor" : "Monitor audio"}
+                          title={isListening ? "Stop monitor" : "Monitor"}
                         >
                           {isListening ? "🔊" : "🔈"}
                         </button>
@@ -453,7 +376,6 @@ export default function DecodeGrid() {
                         type="button"
                         className="badge settings-btn"
                         onClick={() => setSettingsId(c.id)}
-                        title={tcWorkflow ? "TC settings" : "Decode settings"}
                         aria-label="Settings"
                       >
                         ⚙

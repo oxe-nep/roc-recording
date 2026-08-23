@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import StreamGrid from "@/components/StreamGrid";
+import TcGrid from "@/components/TcGrid";
 import DecodeGrid from "@/components/DecodeGrid";
 import SystemStatus from "@/components/SystemStatus";
 import LibraryModal from "@/components/LibraryModal";
@@ -49,6 +50,7 @@ export default function Home() {
         <SystemStatus />
       </header>
       <StreamGrid />
+      <TcGrid />
       <DecodeGrid />
       <SettingsModal
         open={settingsOpen}

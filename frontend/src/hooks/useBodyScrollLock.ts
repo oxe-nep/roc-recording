@@ -3,33 +3,21 @@
 import { useEffect } from "react";
 
 let lockCount = 0;
-let savedHtmlOverflow = "";
 let savedBodyOverflow = "";
-let savedBodyPaddingRight = "";
 
 function applyLock() {
-  const html = document.documentElement;
   const body = document.body;
-  savedHtmlOverflow = html.style.overflow;
   savedBodyOverflow = body.style.overflow;
-  savedBodyPaddingRight = body.style.paddingRight;
-  const scrollbar = Math.max(0, window.innerWidth - html.clientWidth);
-  html.style.overflow = "hidden";
+  // scrollbar-gutter: stable on <html> already reserves the gutter —
+  // only hide overflow; do not add padding or the layout shifts.
   body.style.overflow = "hidden";
-  if (scrollbar > 0) {
-    body.style.paddingRight = `${scrollbar}px`;
-  }
 }
 
 function releaseLock() {
-  const html = document.documentElement;
-  const body = document.body;
-  html.style.overflow = savedHtmlOverflow;
-  body.style.overflow = savedBodyOverflow;
-  body.style.paddingRight = savedBodyPaddingRight;
+  document.body.style.overflow = savedBodyOverflow;
 }
 
-/** Lock page scroll while a modal is open without shifting layout (scrollbar compensation). */
+/** Lock page scroll while a modal is open without shifting layout. */
 export function useBodyScrollLock(locked: boolean) {
   useEffect(() => {
     if (!locked) return;

@@ -305,17 +305,37 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
               )}
             </label>
 
-            <label className="presets-field">
+            <div className="presets-field">
               <span>Source</span>
-              <select
-                value={source}
-                onChange={(e) => setSource(e.target.value as "srt" | "file")}
-                disabled={busy || active}
-              >
-                <option value="srt">SRT</option>
-                <option value="file">File</option>
-              </select>
-            </label>
+              <div className="tc-source-options">
+                <label className={`workflow-option${source === "srt" ? " active" : ""}`}>
+                  <input
+                    type="radio"
+                    name={`decode-source-${client.id}`}
+                    checked={source === "srt"}
+                    disabled={busy || active}
+                    onChange={() => setSource("srt")}
+                  />
+                  <span className="workflow-option-text">
+                    <strong>SRT</strong>
+                    <span className="workflow-option-hint">Network stream</span>
+                  </span>
+                </label>
+                <label className={`workflow-option${source === "file" ? " active" : ""}`}>
+                  <input
+                    type="radio"
+                    name={`decode-source-${client.id}`}
+                    checked={source === "file"}
+                    disabled={busy || active}
+                    onChange={() => setSource("file")}
+                  />
+                  <span className="workflow-option-text">
+                    <strong>File</strong>
+                    <span className="workflow-option-hint">Library / upload</span>
+                  </span>
+                </label>
+              </div>
+            </div>
 
             {source === "file" ? (
               <>

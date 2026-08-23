@@ -38,7 +38,7 @@ export function tcSourceLabel(
     const port = udpPort && udpPort > 0 ? udpPort : defaultTcUdpPort(channelId ?? 0);
     return `UDP :${port}`;
   }
-  return "Time of day";
+  return "Time Of Day";
 }
 
 export function tcStatusLabel(status?: TcLoopInfo["status"], enabled?: boolean): string {

@@ -647,21 +647,46 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 				return
 			}
 			if tcMgr != nil {
-				if cfg.Mode == workflow.ModePair && (tcMgr.IsEnabled(id) || tcMgr.IsRunning(id)) {
+				leavingTC := prev.Mode == workflow.ModeTC && cfg.Mode != workflow.ModeTC
+				enteringTC := cfg.Mode == workflow.ModeTC && prev.Mode != workflow.ModeTC
+				tcActive := tcMgr.IsEnabled(id) || tcMgr.IsRunning(id)
+
+				if leavingTC && tcActive {
 					disabled := false
 					if _, err := tcMgr.Update(id, tcloop.UpdateInput{Enabled: &disabled}); err != nil {
-						log.Printf("[workflow] channel %d: stop TC on pair mode: %v", id, err)
-					} else if err := mgr.Start(id); err != nil {
-						log.Printf("[workflow] channel %d: restart encode after TC off: %v", id, err)
-					} else if runtimeStore != nil {
-						runtimeStore.SetCapture(id, true)
+						log.Printf("[workflow] channel %d: stop TC: %v", id, err)
+					} else if workflow.NeedsEncode(cfg.Mode) {
+						if err := mgr.Start(id); err != nil {
+							log.Printf("[workflow] channel %d: restart encode after TC: %v", id, err)
+						} else if runtimeStore != nil {
+							runtimeStore.SetCapture(id, true)
+						}
+					} else {
+						_ = mgr.Stop(id)
+						if runtimeStore != nil {
+							runtimeStore.SetCapture(id, false)
+						}
 					}
-				}
-				if cfg.Mode == workflow.ModeTC && prev.Mode != workflow.ModeTC {
+				} else if enteringTC {
+					_ = mgr.Stop(id)
+					if runtimeStore != nil {
+						runtimeStore.SetCapture(id, false)
+					}
 					tcMgr.EnsureChannel(id)
 					enabled := true
 					if _, err := tcMgr.Update(id, tcloop.UpdateInput{Enabled: &enabled}); err != nil {
 						log.Printf("[workflow] channel %d: auto-start TC: %v", id, err)
+					}
+				} else if workflow.NeedsEncode(cfg.Mode) && !workflow.NeedsEncode(prev.Mode) {
+					if err := mgr.Start(id); err != nil {
+						log.Printf("[workflow] channel %d: start encode: %v", id, err)
+					} else if runtimeStore != nil {
+						runtimeStore.SetCapture(id, true)
+					}
+				} else if !workflow.NeedsEncode(cfg.Mode) && workflow.NeedsEncode(prev.Mode) && cfg.Mode != workflow.ModeTC {
+					_ = mgr.Stop(id)
+					if runtimeStore != nil {
+						runtimeStore.SetCapture(id, false)
 					}
 				}
 			}

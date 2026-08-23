@@ -146,17 +146,37 @@ export default function TcSettingsModal({ open, channelId, onClose, onSaved }: P
             <div className="tc-settings-body">
               <div className="tc-settings-row">
                 <div className="tc-settings-fields">
-                  <label className="presets-field">
-                    <span>Source</span>
-                    <select
-                      value={tcSource}
-                      onChange={(e) => setTcSource(e.target.value as TcLoopSource)}
-                      disabled={busy}
-                    >
-                      <option value="tod">TOD</option>
-                      <option value="external">UDP</option>
-                    </select>
-                  </label>
+                  <div className="presets-field">
+                    <span>Timecode source</span>
+                    <div className="tc-source-options">
+                      <label className={`workflow-option${tcSource === "tod" ? " active" : ""}`}>
+                        <input
+                          type="radio"
+                          name={`tc-source-${channelId}`}
+                          checked={tcSource === "tod"}
+                          disabled={busy}
+                          onChange={() => setTcSource("tod")}
+                        />
+                        <span className="workflow-option-text">
+                          <strong>Time Of Day</strong>
+                          <span className="workflow-option-hint">Host clock</span>
+                        </span>
+                      </label>
+                      <label className={`workflow-option${tcSource === "external" ? " active" : ""}`}>
+                        <input
+                          type="radio"
+                          name={`tc-source-${channelId}`}
+                          checked={tcSource === "external"}
+                          disabled={busy}
+                          onChange={() => setTcSource("external")}
+                        />
+                        <span className="workflow-option-text">
+                          <strong>UDP Input</strong>
+                          <span className="workflow-option-hint">External LTC</span>
+                        </span>
+                      </label>
+                    </div>
+                  </div>
                   {tcSource === "external" && (
                     <label className="presets-field">
                       <span>UDP port</span>

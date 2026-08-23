@@ -10,7 +10,7 @@ import {
 } from "@/lib/api";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { useWorkflows } from "@/hooks/useWorkflows";
-import { workflowMode, type ChannelWorkflowMode } from "@/lib/workflow";
+import { WORKFLOW_OPTIONS, workflowMode, type ChannelWorkflowMode } from "@/lib/workflow";
 import EncodePresetsEditor from "@/components/EncodePresetsEditor";
 
 type Tab = "storage" | "presets" | "workflows";
@@ -192,31 +192,25 @@ export default function SettingsModal({
                     <div className="workflow-row-head">
                       <span className="input-badge">{id}</span>
                     </div>
-                    <div className="workflow-options">
-                      <label className={`workflow-option${mode === "pair" ? " active" : ""}`}>
-                        <input
-                          type="radio"
-                          name={`workflow-${id}`}
-                          checked={mode === "pair"}
-                          disabled={busy}
-                          onChange={() => void setWorkflowMode(id, "pair")}
-                        />
-                        <span className="workflow-option-text">
-                          <strong>I/O</strong>
-                        </span>
-                      </label>
-                      <label className={`workflow-option${mode === "tc" ? " active" : ""}`}>
-                        <input
-                          type="radio"
-                          name={`workflow-${id}`}
-                          checked={mode === "tc"}
-                          disabled={busy}
-                          onChange={() => void setWorkflowMode(id, "tc")}
-                        />
-                        <span className="workflow-option-text">
-                          <strong>TC</strong>
-                        </span>
-                      </label>
+                    <div className="workflow-options workflow-options-4">
+                      {WORKFLOW_OPTIONS.map((opt) => (
+                        <label
+                          key={opt.mode}
+                          className={`workflow-option${mode === opt.mode ? " active" : ""}`}
+                        >
+                          <input
+                            type="radio"
+                            name={`workflow-${id}`}
+                            checked={mode === opt.mode}
+                            disabled={busy}
+                            onChange={() => void setWorkflowMode(id, opt.mode)}
+                          />
+                          <span className="workflow-option-text">
+                            <strong>{opt.label}</strong>
+                            <span className="workflow-option-hint">{opt.hint}</span>
+                          </span>
+                        </label>
+                      ))}
                     </div>
                   </div>
                 );

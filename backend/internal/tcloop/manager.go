@@ -471,13 +471,18 @@ func (m *Manager) runLoop(id int, st *channelState, stopCh <-chan struct{}, cfg 
 			st.mu.Unlock()
 			return
 		}
+		delay := restartDelay
 		if err != nil {
 			st.lastErr = err.Error()
 			st.status = StatusError
-			log.Printf("[tcloop %d] ffmpeg exited: %v – retry in %s", id, err, restartDelay)
+			log.Printf("[tcloop %d] ffmpeg exited: %v – retry in %s", id, err, delay)
+			if isFilterConfigError(err.Error()) {
+				// Bad filtergraph will never self-heal — back off hard so we do not thrash DeckLink.
+				delay = 30 * time.Second
+			}
 		} else {
 			st.lastErr = ""
-			log.Printf("[tcloop %d] ffmpeg exited – retry in %s", id, restartDelay)
+			log.Printf("[tcloop %d] ffmpeg exited – retry in %s", id, delay)
 		}
 		st.mu.Unlock()
 		select {
@@ -486,7 +491,7 @@ func (m *Manager) runLoop(id int, st *channelState, stopCh <-chan struct{}, cfg 
 			st.status = StatusOff
 			st.mu.Unlock()
 			return
-		case <-time.After(restartDelay):
+		case <-time.After(delay):
 		}
 	}
 }
@@ -646,10 +651,10 @@ func buildDrawtext(cfg Settings) string {
 	if boxA < 0.2 {
 		boxA = 0.2
 	}
-	// expansion=strftime avoids %{...} braces that fight filtergraph ':' parsing.
-	// Filtergraph needs \: for literal colons in the strftime pattern.
+	// Single-quoted option values may contain ':' without \: escaping.
+	// Keep text= last so nothing after the quoted value can confuse the parser.
 	return fmt.Sprintf(
-		"drawtext=font=Sans:fontsize=%d:fontcolor=white@%.2f:box=1:boxcolor=black@%.2f:boxborderw=10:x=%s:y=%s:expansion=strftime:text=%%H\\:%%M\\:%%S",
+		"drawtext=font=Sans:fontsize=%d:fontcolor=white@%.2f:box=1:boxcolor=black@%.2f:boxborderw=10:x=%s:y=%s:expansion=strftime:text='%%H:%%M:%%S'",
 		cfg.FontSize, cfg.Opacity, boxA, x, y,
 	)
 }
@@ -668,6 +673,13 @@ func positionXY(pos Position) (x, y string) {
 	default: // bottom_right
 		return fmt.Sprintf("w-tw-%d", margin), fmt.Sprintf("h-th-%d", margin)
 	}
+}
+
+func isFilterConfigError(msg string) bool {
+	lower := strings.ToLower(msg)
+	return strings.Contains(lower, "error parsing") ||
+		strings.Contains(lower, "no option name") ||
+		strings.Contains(lower, "invalid argument") && strings.Contains(lower, "filter")
 }
 
 func isDeckLinkOpenFailure(lines []string) bool {

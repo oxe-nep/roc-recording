@@ -417,15 +417,17 @@ export default function StreamGrid() {
                       type="button"
                       className={`rec-btn ${isRecording ? "recording" : "idle"}`}
                       onClick={() => toggleRecording(s.id)}
-                      disabled={recBusy[s.id] || (!hasSignal && !isRecording)}
+                      disabled={recBusy[s.id] || tcOn || (!hasSignal && !isRecording && !tcLive)}
                       title={
-                        isRecording
-                          ? "Stop recording"
-                          : s.status === "waiting"
-                            ? "Waiting for input signal"
-                            : !hasSignal
-                              ? "Start channel before recording"
-                              : "Start recording"
+                        tcOn
+                          ? "TC Burn-in is active on this channel"
+                          : isRecording
+                            ? "Stop recording"
+                            : s.status === "waiting"
+                              ? "Waiting for input signal"
+                              : !hasSignal && !tcLive
+                                ? "Start channel before recording"
+                                : "Start recording"
                       }
                     >
                       {recBusy[s.id] ? "…" : "REC"}
@@ -434,20 +436,22 @@ export default function StreamGrid() {
                       type="button"
                       className={`stream-btn ${srtOn ? "streaming" : "idle"}`}
                       onClick={() => toggleSrt(s.id)}
-                      disabled={srtBusy[s.id] || (!hasSignal && !srtOn)}
+                      disabled={srtBusy[s.id] || tcOn || (!hasSignal && !srtOn && !tcLive)}
                       title={
-                        srtOn
-                          ? srtById[s.id]?.publish_url || "Stop SRT stream"
-                          : s.status === "waiting"
-                            ? "Waiting for input signal"
-                            : !hasSignal
-                              ? "Start channel before streaming"
-                              : "Start SRT stream (configure in settings)"
+                        tcOn
+                          ? "TC Burn-in is active on this channel"
+                          : srtOn
+                            ? srtById[s.id]?.publish_url || "Stop SRT stream"
+                            : s.status === "waiting"
+                              ? "Waiting for input signal"
+                              : !hasSignal && !tcLive
+                                ? "Start channel before streaming"
+                                : "Start SRT stream (configure in settings)"
                       }
                     >
                       {srtBusy[s.id] ? "…" : "STREAM"}
                     </button>
-                    {!captureOn && (
+                    {!captureOn && !tcOn && (
                       <button
                         className={`badge ${s.status}`}
                         onClick={() => startPreview(s)}
@@ -456,7 +460,7 @@ export default function StreamGrid() {
                         {busy[s.id] ? "…" : "Start"}
                       </button>
                     )}
-                    {hasSignal && (
+                    {(hasSignal || tcLive) && (
                       <button
                         className={`badge listen-btn ${isListening ? "active" : ""}`}
                         onClick={() => toggleListen(s.id)}

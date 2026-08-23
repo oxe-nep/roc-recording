@@ -47,7 +47,7 @@ func startUDPClockFile(path string, port int, stop <-chan struct{}) error {
 	if err != nil {
 		return fmt.Errorf("udp listen :%d: %w", port, err)
 	}
-	if err := os.WriteFile(path, []byte("--:--:--:--"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("--:--:--"), 0o644); err != nil {
 		_ = conn.Close()
 		return fmt.Errorf("udp clock file: %w", err)
 	}
@@ -86,7 +86,7 @@ func normalizeTimecode(raw string) string {
 	if i := strings.IndexAny(line, "\r\n"); i >= 0 {
 		line = strings.TrimSpace(line[:i])
 	}
-	// Accept "HH:MM:SS:FF" or "HH:MM:SS;FF" or "HH:MM:SS" from the sender as-is.
+	// Accept HH:MM:SS with optional :FF / ;FF from senders — burn-in shows time only.
 	line = strings.Map(func(r rune) rune {
 		if r < 32 || r == 127 {
 			return -1
@@ -98,6 +98,18 @@ func normalizeTimecode(raw string) string {
 	}
 	if !reTimecodeLine.MatchString(line) {
 		return ""
+	}
+	return stripTimecodeFrames(line)
+}
+
+func stripTimecodeFrames(line string) string {
+	sep := ":"
+	if strings.Contains(line, ";") {
+		sep = ";"
+	}
+	parts := strings.Split(line, sep)
+	if len(parts) >= 4 {
+		return strings.Join(parts[:3], ":")
 	}
 	return line
 }

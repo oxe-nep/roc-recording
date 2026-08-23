@@ -22,6 +22,8 @@ import {
 import LibraryModal from "@/components/LibraryModal";
 import TcPositionPreview from "@/components/TcPositionPreview";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
+import { useWorkflows } from "@/hooks/useWorkflows";
+import { isTcWorkflow } from "@/lib/workflow";
 import {
   defaultTcUdpPort,
   tcSourceLabel,
@@ -77,9 +79,12 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
 
   useBodyScrollLock(open);
 
+  const { workflows } = useWorkflows();
   const channelId = client?.id;
+  const tcWorkflow = channelId != null && isTcWorkflow(workflows, channelId);
   const active = client ? isPlayoutOn(client.status) : false;
-  const tcOn = tcEnabled || tcStatus === "running";
+  const tcOn =
+    tcEnabled || tcStatus === "running" || tcStatus === "restarting";
   const tcEffectivePort = tcUdpPort > 0 ? tcUdpPort : defaultTcUdpPort(channelId ?? 0);
   const tcSourceText = tcSourceLabel(tcSource, tcEffectivePort, channelId ?? 0);
   const deviceName = client?.device || "";
@@ -282,7 +287,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
 
   const toggleRun = async () => {
     if (tcOn && !active) {
-      setError("Disable TC Burn-in before starting decode playout");
+      setError("Stop TC first");
       return;
     }
     setBusy(true);
@@ -320,12 +325,12 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
           className="modal-panel channel-settings-modal"
           onClick={(e) => e.stopPropagation()}
           role="dialog"
-          aria-label={`Decode settings for ${client.name}`}
+          aria-label={tcWorkflow ? `TC settings for channel ${client.id}` : `Decode settings for ${client.name}`}
         >
           <div className="modal-header">
             <h2>
               <span className="input-badge decode">{client.id}</span>
-              <span>{name.trim() || `Decode ${client.id}`}</span>
+              <span>{tcWorkflow ? `TC ${client.id}` : name.trim() || `Decode ${client.id}`}</span>
             </h2>
             <button type="button" className="modal-close" onClick={onClose} aria-label="Close" disabled={busy}>
               ×
@@ -336,13 +341,11 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
 
           {tcApplyMsg && <div className="channel-settings-note tc-apply-note">{tcApplyMsg}</div>}
 
-          {!tcOn && active && (
-            <div className="channel-settings-lock">
-              Decode is active — stop it before changing format, source, or SRT/file settings.
-            </div>
+          {!tcOn && active && !tcWorkflow && (
+            <div className="channel-settings-lock">Stop decode first.</div>
           )}
 
-          {!tcOn && (
+          {!tcOn && !tcWorkflow && (
           <div className="channel-settings-form">
             <label className="presets-field">
               <span>Name</span>
@@ -511,7 +514,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
 
           <div className={`channel-settings-srt channel-settings-tc${tcOn ? " enabled" : ""}`}>
             <div className="channel-settings-srt-head">
-              <h3>TC Burn-in</h3>
+              <h3>TC burn-in</h3>
               <span className={tcStatusPillClass(tcStatus, tcEnabled)}>
                 {tcStatusLabel(tcStatus, tcEnabled)}
               </span>
@@ -527,7 +530,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                         onChange={(e) => setTcSource(e.target.value as TcLoopSource)}
                         disabled={busy}
                       >
-                        <option value="tod">Time of day (host clock)</option>
+                        <option value="tod">Time of day</option>
                         <option value="external">External (UDP)</option>
                       </select>
                     </label>
@@ -612,7 +615,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                     onClick={() => applyTc(false)}
                     disabled={busy}
                   >
-                    {busy ? "…" : "Stop burn-in"}
+                    {busy ? "…" : "Stop"}
                   </button>
                 </>
               ) : (
@@ -622,13 +625,21 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                   onClick={() => applyTc(true)}
                   disabled={busy}
                 >
-                  {busy ? "…" : "Start burn-in"}
+                  {busy ? "…" : "Start"}
                 </button>
               )}
             </div>
           </div>
 
-          {!tcOn && (
+          {tcWorkflow && !tcOn && (
+            <div className="channel-settings-actions">
+              <button type="button" className="badge" onClick={onClose} disabled={busy}>
+                Close
+              </button>
+            </div>
+          )}
+
+          {!tcOn && !tcWorkflow && (
           <div className="channel-settings-actions">
             <button
               type="button"
@@ -655,7 +666,7 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
             </div>
           )}
 
-          {!tcOn && (
+          {!tcOn && !tcWorkflow && (
           <div className="channel-settings-logs">
             <div className="channel-settings-logs-head">
               <h3>Decode logs</h3>

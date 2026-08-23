@@ -15,11 +15,13 @@ import (
 	"time"
 
 	"github.com/roc-recording/backend/internal/api"
+	"github.com/roc-recording/backend/internal/bootstrap"
 	"github.com/roc-recording/backend/internal/capture"
 	"github.com/roc-recording/backend/internal/config"
 	hlshandler "github.com/roc-recording/backend/internal/hls"
 	"github.com/roc-recording/backend/internal/playout"
 	"github.com/roc-recording/backend/internal/recording"
+	"github.com/roc-recording/backend/internal/runtimestate"
 	"github.com/roc-recording/backend/internal/srt"
 	"github.com/roc-recording/backend/internal/sysmetrics"
 	"github.com/roc-recording/backend/internal/tcloop"
@@ -47,6 +49,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
+	configDir := filepath.Dir(cfgPath)
+	runtimeStore := runtimestate.NewStore(filepath.Join(configDir, "runtime-state.json"))
+	runtimeStore.Load()
 
 	presets := make(map[string]capture.NamedPreset, len(cfg.EncodePresets))
 	for id, p := range cfg.EncodePresets {
@@ -131,6 +136,10 @@ func main() {
 			log.Printf("Skipping encode auto-start for channel %d (TC Burn-in enabled)", ch.ID)
 			continue
 		}
+		if !runtimeStore.WantCapture(ch.ID) {
+			log.Printf("Skipping encode auto-start for channel %d (runtime state off)", ch.ID)
+			continue
+		}
 		if err := mgr.Start(ch.ID); err != nil {
 			log.Printf("Failed to auto-start channel %d: %v", ch.ID, err)
 		}
@@ -142,8 +151,8 @@ func main() {
 		cfg.RecordingsDir,
 		cfg.FFmpegBin,
 		mgr,
-		filepath.Join(filepath.Dir(cfgPath), "channel-categories.json"),
-		filepath.Join(filepath.Dir(cfgPath), "recordings-path.json"),
+		filepath.Join(configDir, "channel-categories.json"),
+		filepath.Join(configDir, "recordings-path.json"),
 	)
 	for _, ch := range cfg.Channels {
 		recMgr.Register(ch.ID, ch.Name)
@@ -156,13 +165,15 @@ func main() {
 	srtMgr := srt.NewManager(
 		cfg.FFmpegBin,
 		mgr,
-		filepath.Join(filepath.Dir(cfgPath), "srt-settings.json"),
+		filepath.Join(configDir, "srt-settings.json"),
 		publicSRTHost,
 	)
 	for _, ch := range cfg.Channels {
 		srtMgr.Register(ch.ID)
 	}
 	srtMgr.LoadSettings()
+
+	bootstrap.RestoreRuntime(runtimeStore, playMgr, srtMgr, recMgr, tcMgr)
 
 	tslIndexByID := make(map[int]int, len(cfg.Channels))
 	channelIDs := make([]int, 0, len(cfg.Channels))
@@ -177,13 +188,13 @@ func main() {
 		log.Printf("TSL listener disabled: %v", err)
 	}
 
-	wfStore := workflow.NewStore(filepath.Join(filepath.Dir(cfgPath), "channel-workflows.json"))
+	wfStore := workflow.NewStore(filepath.Join(configDir, "channel-workflows.json"))
 	wfStore.Load()
 	wfStore.Ensure(channelIDs)
 
 	hlsH := hlshandler.NewHandler(cfg.HLSDir, cfg.AllowedOrigins)
 	metrics := sysmetrics.NewCollector(recMgr.RecordingDir())
-	router := api.NewRouter(mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, wfStore, hlsH, cfg.APIKey, cfg.AllowedOrigins, hlsBase, metrics)
+	router := api.NewRouter(mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, wfStore, runtimeStore, hlsH, cfg.APIKey, cfg.AllowedOrigins, hlsBase, metrics)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,

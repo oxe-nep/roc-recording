@@ -8,10 +8,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/roc-recording/backend/internal/playout"
+	"github.com/roc-recording/backend/internal/runtimestate"
 	"github.com/roc-recording/backend/internal/tcloop"
 )
 
-func registerPlayoutRoutes(r chi.Router, playMgr *playout.Manager, tcMgr *tcloop.Manager) {
+func registerPlayoutRoutes(r chi.Router, playMgr *playout.Manager, tcMgr *tcloop.Manager, runtimeStore *runtimestate.Store) {
 	r.Get("/api/playout/devices", func(w http.ResponseWriter, r *http.Request) {
 		refresh := r.URL.Query().Get("refresh") == "1" || r.URL.Query().Get("refresh") == "true"
 		devs, err := playMgr.Devices(refresh)
@@ -138,6 +139,9 @@ func registerPlayoutRoutes(r chi.Router, playMgr *playout.Manager, tcMgr *tcloop
 			jsonError(w, err.Error(), http.StatusConflict)
 			return
 		}
+		if runtimeStore != nil {
+			runtimeStore.SetPlayout(id, true)
+		}
 		jsonOK(w, info)
 	})
 
@@ -151,6 +155,9 @@ func registerPlayoutRoutes(r chi.Router, playMgr *playout.Manager, tcMgr *tcloop
 		if err != nil {
 			jsonError(w, err.Error(), http.StatusConflict)
 			return
+		}
+		if runtimeStore != nil {
+			runtimeStore.SetPlayout(id, false)
 		}
 		jsonOK(w, info)
 	})

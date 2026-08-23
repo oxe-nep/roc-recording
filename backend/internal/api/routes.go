@@ -17,6 +17,7 @@ import (
 	hlshandler "github.com/roc-recording/backend/internal/hls"
 	"github.com/roc-recording/backend/internal/playout"
 	"github.com/roc-recording/backend/internal/recording"
+	"github.com/roc-recording/backend/internal/runtimestate"
 	"github.com/roc-recording/backend/internal/srt"
 	"github.com/roc-recording/backend/internal/sysmetrics"
 	"github.com/roc-recording/backend/internal/tcloop"
@@ -56,7 +57,7 @@ type recordingFileResponse struct {
 	URL     string    `json:"url"`
 }
 
-func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Manager, playMgr *playout.Manager, tcMgr *tcloop.Manager, tslMgr *tsl.Manager, wfStore *workflow.Store, hlsHandler *hlshandler.Handler, apiKey, allowedOrigins, hlsBaseURL string, metrics *sysmetrics.Collector) http.Handler {
+func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Manager, playMgr *playout.Manager, tcMgr *tcloop.Manager, tslMgr *tsl.Manager, wfStore *workflow.Store, runtimeStore *runtimestate.Store, hlsHandler *hlshandler.Handler, apiKey, allowedOrigins, hlsBaseURL string, metrics *sysmetrics.Collector) http.Handler {
 	r := chi.NewRouter()
 	r.Use(quietRequestLogger())
 	r.Use(middleware.Recoverer)
@@ -188,7 +189,7 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 	r.Group(func(r chi.Router) {
 		r.Use(apiKeyMiddleware(apiKey))
 
-		registerPlayoutRoutes(r, playMgr, tcMgr)
+		registerPlayoutRoutes(r, playMgr, tcMgr, runtimeStore)
 		registerDashboardHTTP(r, mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, wfStore, hlsBaseURL)
 
 		r.Get("/api/streams", func(w http.ResponseWriter, r *http.Request) {
@@ -213,6 +214,9 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 				jsonError(w, err.Error(), http.StatusConflict)
 				return
 			}
+			if runtimeStore != nil {
+				runtimeStore.SetCapture(id, true)
+			}
 			jsonOK(w, map[string]string{"status": "started"})
 		})
 
@@ -226,6 +230,10 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 			if err := mgr.Stop(id); err != nil {
 				jsonError(w, err.Error(), http.StatusConflict)
 				return
+			}
+			if runtimeStore != nil {
+				runtimeStore.SetCapture(id, false)
+				runtimeStore.SetSRT(id, false)
 			}
 			jsonOK(w, map[string]string{"status": "stopped"})
 		})
@@ -294,6 +302,9 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 				jsonError(w, err.Error(), http.StatusConflict)
 				return
 			}
+			if runtimeStore != nil {
+				runtimeStore.SetSRT(id, true)
+			}
 			jsonOK(w, info)
 		})
 
@@ -307,6 +318,9 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 			if err != nil {
 				jsonError(w, err.Error(), http.StatusConflict)
 				return
+			}
+			if runtimeStore != nil {
+				runtimeStore.SetSRT(id, false)
 			}
 			jsonOK(w, info)
 		})
@@ -639,6 +653,8 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 						log.Printf("[workflow] channel %d: stop TC on pair mode: %v", id, err)
 					} else if err := mgr.Start(id); err != nil {
 						log.Printf("[workflow] channel %d: restart encode after TC off: %v", id, err)
+					} else if runtimeStore != nil {
+						runtimeStore.SetCapture(id, true)
 					}
 				}
 				if cfg.Mode == workflow.ModeTC && prev.Mode != workflow.ModeTC {
@@ -672,6 +688,9 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 				jsonError(w, err.Error(), http.StatusConflict)
 				return
 			}
+			if runtimeStore != nil {
+				runtimeStore.SetRecording(id, true)
+			}
 			jsonOK(w, info)
 		})
 
@@ -686,11 +705,19 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 				jsonError(w, err.Error(), http.StatusConflict)
 				return
 			}
+			if runtimeStore != nil {
+				runtimeStore.SetRecording(id, false)
+			}
 			jsonOK(w, info)
 		})
 
 		r.Post("/api/recordings/start-all", func(w http.ResponseWriter, r *http.Request) {
 			errs := recMgr.StartAll()
+			if runtimeStore != nil {
+				for _, info := range recMgr.ListAll() {
+					runtimeStore.SetRecording(info.ID, recMgr.IsRecording(info.ID))
+				}
+			}
 			if len(errs) > 0 {
 				msgs := make([]string, len(errs))
 				for i, e := range errs {
@@ -704,6 +731,11 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 
 		r.Post("/api/recordings/stop-all", func(w http.ResponseWriter, r *http.Request) {
 			errs := recMgr.StopAll()
+			if runtimeStore != nil {
+				for _, info := range recMgr.ListAll() {
+					runtimeStore.SetRecording(info.ID, false)
+				}
+			}
 			if len(errs) > 0 {
 				msgs := make([]string, len(errs))
 				for i, e := range errs {

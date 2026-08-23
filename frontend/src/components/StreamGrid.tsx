@@ -3,7 +3,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import {
   fetchStreams,
-  startStream,
   fetchRecordings,
   fetchAudioLevels,
   fetchEncodePresets,
@@ -219,16 +218,6 @@ export default function StreamGrid() {
       clearInterval(interval);
     };
   }, []);
-
-  const startPreview = async (s: Stream) => {
-    setBusy((b) => ({ ...b, [s.id]: true }));
-    try {
-      await startStream(s.id);
-      await load();
-    } finally {
-      setBusy((b) => ({ ...b, [s.id]: false }));
-    }
-  };
 
   const toggleRecording = async (id: number) => {
     setRecBusy((b) => ({ ...b, [id]: true }));
@@ -486,15 +475,6 @@ export default function StreamGrid() {
                         >
                           {srtBusy[s.id] ? "…" : "STREAM"}
                         </button>
-                        {!captureOn && (
-                          <button
-                            className={`badge ${s.status}`}
-                            onClick={() => startPreview(s)}
-                            disabled={busy[s.id]}
-                          >
-                            {busy[s.id] ? "…" : "Start"}
-                          </button>
-                        )}
                       </>
                     )}
                     {(hasSignal || tcLive) && (

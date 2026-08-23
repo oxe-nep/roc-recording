@@ -78,16 +78,19 @@ type PlayoutBridge interface {
 	Stop(id int) error
 	Sink(id int) (device, formatCode string, err error)
 	ResolveOpenDevice(device string) string
+	LookupDeviceOpen(device string) string
+	LookupDeviceLabel(device string) string
 	OutputTiming(formatCode string) (w, h int, fps float64, interlaced bool, err error)
 }
 
 type channelState struct {
-	mu       sync.Mutex
-	settings Settings
-	status   Status
-	lastErr  string
-	cmd      *exec.Cmd
-	stopCh   chan struct{}
+	mu         sync.Mutex
+	settings   Settings
+	status     Status
+	lastErr    string
+	cmd        *exec.Cmd
+	stopCh     chan struct{}
+	deviceAlt  bool // next open uses label ↔ unique-id alternate
 }
 
 type Manager struct {
@@ -417,7 +420,7 @@ func (m *Manager) StartEnabled() {
 }
 
 func (m *Manager) runLoop(id int, st *channelState, stopCh <-chan struct{}, cfg Settings) {
-	const restartDelay = 2 * time.Second
+	const restartDelay = 5 * time.Second
 	defer func() {
 		st.mu.Lock()
 		if st.cmd != nil && st.cmd.Process != nil {
@@ -500,7 +503,14 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 	if strings.TrimSpace(device) == "" || strings.TrimSpace(formatCode) == "" {
 		return fmt.Errorf("decode %d needs a DeckLink device and output format", id)
 	}
-	openDevice := m.playout.ResolveOpenDevice(device)
+	openPrimary, openAlt := m.resolveDeckLinkOpen(device)
+	st.mu.Lock()
+	tryAlt := st.deviceAlt
+	st.mu.Unlock()
+	openDevice := openPrimary
+	if tryAlt && openAlt != "" && openAlt != openPrimary {
+		openDevice = openAlt
+	}
 	w, h, fps, interlaced, err := m.playout.OutputTiming(formatCode)
 	if err != nil {
 		return err
@@ -523,14 +533,16 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 			draw, w, h, w, h, fps,
 		)
 	}
+	// Use generated silence so missing DeckLink audio does not kill the graph.
 	filter := vchain + ";" + fmt.Sprintf(
-		"[0:a]pan=stereo|c0=c0|c1=c1,aresample=48000:async=1:first_pts=0,aformat=channel_layouts=stereo,asetnsamples=n=%d:p=0[a]",
+		"[1:a]aformat=channel_layouts=stereo,asetnsamples=n=%d:p=0[a]",
 		samplesPerFrame,
 	)
 
 	args := []string{"-hide_banner", "-loglevel", "info", "-fflags", "+genpts+discardcorrupt"}
 	args = append(args, inputArgs...)
 	args = append(args,
+		"-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
 		"-filter_complex", filter,
 		"-map", "[v]",
 		"-map", "[a]",
@@ -541,6 +553,7 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		"-fps_mode", "cfr",
 		"-r", fmt.Sprintf("%g", fps),
 		"-s", fmt.Sprintf("%dx%d", w, h),
+		"-shortest",
 	)
 	if interlaced {
 		args = append(args, "-flags", "+ilme+ildct", "-field_order", "tt")
@@ -548,7 +561,7 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 	if formatCode != "" && !isAllDigits(formatCode) {
 		args = append(args, "-format_code", strings.TrimSpace(formatCode))
 	}
-	args = append(args, "-preroll", "0.1", "-f", "decklink", openDevice)
+	args = append(args, "-preroll", "0.5", "-f", "decklink", openDevice)
 
 	cmd := exec.Command(m.ffmpegBin, args...)
 	stderr, err := cmd.StderrPipe()
@@ -559,14 +572,15 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 	st.cmd = cmd
 	st.mu.Unlock()
 
-	log.Printf("[tcloop %d] starting TOD burn-in → decklink %q format=%s", id, openDevice, formatCode)
+	log.Printf("[tcloop %d] starting TOD burn-in → decklink %q format=%s (alt=%q tryAlt=%v)", id, openDevice, formatCode, openAlt, tryAlt)
 	if err := cmd.Start(); err != nil {
 		st.mu.Lock()
 		st.cmd = nil
 		st.mu.Unlock()
 		return err
 	}
-	go drain(stderr)
+	errLines := make(chan []string, 1)
+	go func() { errLines <- collectStderr(stderr) }()
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -577,16 +591,53 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 			_ = cmd.Process.Kill()
 		}
 		<-done
+		<-errLines
 		st.mu.Lock()
 		st.cmd = nil
 		st.mu.Unlock()
 		return nil
 	case err := <-done:
+		lines := <-errLines
 		st.mu.Lock()
 		st.cmd = nil
+		if err != nil && openAlt != "" && openAlt != openPrimary {
+			next := openAlt
+			if tryAlt {
+				next = openPrimary
+			}
+			st.deviceAlt = !tryAlt
+			log.Printf("[tcloop %d] DeckLink open with %q failed – next retry will use %q", id, openDevice, next)
+		}
 		st.mu.Unlock()
+		if err != nil {
+			if msg := summarizeFFmpegErr(lines); msg != "" {
+				return fmt.Errorf("%v: %s", err, msg)
+			}
+		}
 		return err
 	}
+}
+
+// resolveDeckLinkOpen prefers the display label for DeckLink IP write_header;
+// unique BMD handles often fail even when -sinks lists them.
+func (m *Manager) resolveDeckLinkOpen(device string) (primary, alt string) {
+	resolved := strings.TrimSpace(m.playout.ResolveOpenDevice(device))
+	openName := strings.TrimSpace(m.playout.LookupDeviceOpen(device))
+	label := strings.TrimSpace(m.playout.LookupDeviceLabel(device))
+	primary = openName
+	if primary == "" {
+		primary = resolved
+	}
+	if primary == "" {
+		primary = strings.TrimSpace(device)
+	}
+	if label != "" && !strings.EqualFold(label, primary) {
+		return label, primary
+	}
+	if resolved != "" && !strings.EqualFold(resolved, primary) {
+		return primary, resolved
+	}
+	return primary, ""
 }
 
 func buildDrawtext(cfg Settings) string {
@@ -595,9 +646,9 @@ func buildDrawtext(cfg Settings) string {
 	if boxA < 0.2 {
 		boxA = 0.2
 	}
-	// Time of day from host clock (NTP). Escaping for filtergraph argv (no shell).
+	// Time of day from host clock. Prefer fontconfig family; escape : for filtergraph.
 	return fmt.Sprintf(
-		"drawtext=fontsize=%d:fontcolor=white@%.2f:box=1:boxcolor=black@%.2f:boxborderw=10:x=%s:y=%s:text='%%{localtime\\:%%T}'",
+		"drawtext=font=Sans:fontsize=%d:fontcolor=white@%.2f:box=1:boxcolor=black@%.2f:boxborderw=10:x=%s:y=%s:text=%%{localtime\\:%%T}",
 		cfg.FontSize, cfg.Opacity, boxA, x, y,
 	)
 }
@@ -618,11 +669,41 @@ func positionXY(pos Position) (x, y string) {
 	}
 }
 
-func drain(r io.Reader) {
+func collectStderr(r io.Reader) []string {
+	var lines []string
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
+		line := sc.Text()
+		log.Printf("[tcloop] %s", line)
+		lines = append(lines, line)
+		if len(lines) > 40 {
+			lines = lines[len(lines)-40:]
+		}
 	}
+	return lines
+}
+
+func summarizeFFmpegErr(lines []string) string {
+	var picks []string
+	for _, line := range lines {
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "error") ||
+			strings.Contains(lower, "failed") ||
+			strings.Contains(lower, "no such") ||
+			strings.Contains(lower, "invalid") ||
+			strings.Contains(lower, "unable") ||
+			strings.Contains(lower, "cannot") {
+			picks = append(picks, strings.TrimSpace(line))
+		}
+	}
+	if len(picks) == 0 && len(lines) > 0 {
+		picks = lines[len(lines)-3:]
+	}
+	if len(picks) > 3 {
+		picks = picks[len(picks)-3:]
+	}
+	return strings.Join(picks, " | ")
 }
 
 func isAllDigits(s string) bool {

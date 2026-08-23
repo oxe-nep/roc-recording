@@ -8,14 +8,12 @@ import (
 	"sync"
 )
 
-// Mode selects which dashboard workflow a channel uses.
+// Mode selects which dashboard workflow a channel pair uses.
 type Mode string
 
 const (
-	ModePair   Mode = "pair"   // encode + decode
-	ModeEncode Mode = "encode" // encode only
-	ModeDecode Mode = "decode" // decode only
-	ModeTC     Mode = "tc"     // TC burn-in
+	ModePair Mode = "pair" // encode + decode
+	ModeTC   Mode = "tc"   // TC burn-in
 )
 
 // Config is persisted per channel.
@@ -29,15 +27,12 @@ func DefaultConfig() Config {
 
 func NormalizeConfig(c Config) Config {
 	switch c.Mode {
-	case ModeTC, ModeEncode, ModeDecode, ModePair:
-		return Config{Mode: c.Mode}
+	case ModeTC:
+		return Config{Mode: ModeTC}
 	default:
+		// Map transitional encode/decode-only modes back to the pair workflow.
 		return Config{Mode: ModePair}
 	}
-}
-
-func NeedsEncode(m Mode) bool {
-	return m == ModePair || m == ModeEncode
 }
 
 type Store struct {
@@ -64,7 +59,7 @@ func (s *Store) Load() {
 		return
 	}
 
-	// Current format: { "1": { "mode": "pair" | "encode" | "decode" | "tc" } }
+	// Current format: { "1": { "mode": "pair" | "tc" } }
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(data, &obj); err == nil {
 		next := make(map[int]Config, len(obj))
@@ -116,29 +111,16 @@ func parseConfigRaw(raw json.RawMessage) Config {
 }
 
 func migrateBoolConfig(encode, decode bool) Config {
-	if encode && decode {
-		return Config{Mode: ModePair}
-	}
-	if encode {
-		return Config{Mode: ModeEncode}
-	}
-	if decode {
-		return Config{Mode: ModeDecode}
-	}
+	_ = encode
+	_ = decode
 	return DefaultConfig()
 }
 
 func migrateLegacyMode(mode string) Config {
-	switch mode {
-	case "tc":
+	if mode == "tc" {
 		return Config{Mode: ModeTC}
-	case "record", "encode":
-		return Config{Mode: ModeEncode}
-	case "playout", "decode":
-		return Config{Mode: ModeDecode}
-	default:
-		return DefaultConfig()
 	}
+	return DefaultConfig()
 }
 
 func (s *Store) saveLocked() error {

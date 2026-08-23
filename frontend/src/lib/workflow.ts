@@ -1,4 +1,4 @@
-export type ChannelWorkflowMode = "pair" | "encode" | "decode" | "tc";
+export type ChannelWorkflowMode = "pair" | "tc";
 
 export interface ChannelWorkflowConfig {
   mode: ChannelWorkflowMode;
@@ -11,32 +11,23 @@ export const WORKFLOW_OPTIONS: {
   label: string;
   hint: string;
 }[] = [
-  { mode: "pair", label: "I/O", hint: "Encode + decode" },
-  { mode: "encode", label: "In", hint: "Record / ingest" },
-  { mode: "decode", label: "Out", hint: "Playout" },
-  { mode: "tc", label: "TC", hint: "Timecode burn-in" },
+  { mode: "pair", label: "Encode + Decode", hint: "Record / ingest and playout" },
+  { mode: "tc", label: "TC Burn-In", hint: "Timecode overlay loop" },
 ];
 
-const VALID_MODES = new Set<ChannelWorkflowMode>(["pair", "encode", "decode", "tc"]);
+const VALID_MODES = new Set<ChannelWorkflowMode>(["pair", "tc"]);
 
 export function normalizeWorkflowConfig(
   value?: Partial<ChannelWorkflowConfig> | { encode?: boolean; decode?: boolean } | string,
 ): ChannelWorkflowConfig {
   if (typeof value === "string") {
-    if (value === "tc") return { mode: "tc" };
-    if (value === "record" || value === "encode") return { mode: "encode" };
-    if (value === "playout" || value === "decode") return { mode: "decode" };
-    return { ...DEFAULT_WORKFLOW };
+    return value === "tc" ? { mode: "tc" } : { ...DEFAULT_WORKFLOW };
   }
   if (value && "mode" in value && value.mode && VALID_MODES.has(value.mode)) {
     return { mode: value.mode };
   }
+  // Transitional encode/decode booleans from older builds.
   if (value && ("encode" in value || "decode" in value)) {
-    const encode = value.encode !== false;
-    const decode = value.decode !== false;
-    if (encode && decode) return { mode: "pair" };
-    if (encode) return { mode: "encode" };
-    if (decode) return { mode: "decode" };
     return { ...DEFAULT_WORKFLOW };
   }
   return { ...DEFAULT_WORKFLOW };
@@ -60,16 +51,14 @@ export function showEncodeCard(
   workflows: Record<number, ChannelWorkflowConfig>,
   channelId: number,
 ): boolean {
-  const mode = workflowMode(workflows, channelId);
-  return mode === "pair" || mode === "encode";
+  return workflowMode(workflows, channelId) === "pair";
 }
 
 export function showDecodeCard(
   workflows: Record<number, ChannelWorkflowConfig>,
   channelId: number,
 ): boolean {
-  const mode = workflowMode(workflows, channelId);
-  return mode === "pair" || mode === "decode";
+  return workflowMode(workflows, channelId) === "pair";
 }
 
 export function showTcCard(

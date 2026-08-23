@@ -655,17 +655,10 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 					disabled := false
 					if _, err := tcMgr.Update(id, tcloop.UpdateInput{Enabled: &disabled}); err != nil {
 						log.Printf("[workflow] channel %d: stop TC: %v", id, err)
-					} else if workflow.NeedsEncode(cfg.Mode) {
-						if err := mgr.Start(id); err != nil {
-							log.Printf("[workflow] channel %d: restart encode after TC: %v", id, err)
-						} else if runtimeStore != nil {
-							runtimeStore.SetCapture(id, true)
-						}
-					} else {
-						_ = mgr.Stop(id)
-						if runtimeStore != nil {
-							runtimeStore.SetCapture(id, false)
-						}
+					} else if err := mgr.Start(id); err != nil {
+						log.Printf("[workflow] channel %d: restart encode after TC: %v", id, err)
+					} else if runtimeStore != nil {
+						runtimeStore.SetCapture(id, true)
 					}
 				} else if enteringTC {
 					_ = mgr.Stop(id)
@@ -676,17 +669,6 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 					enabled := true
 					if _, err := tcMgr.Update(id, tcloop.UpdateInput{Enabled: &enabled}); err != nil {
 						log.Printf("[workflow] channel %d: auto-start TC: %v", id, err)
-					}
-				} else if workflow.NeedsEncode(cfg.Mode) && !workflow.NeedsEncode(prev.Mode) {
-					if err := mgr.Start(id); err != nil {
-						log.Printf("[workflow] channel %d: start encode: %v", id, err)
-					} else if runtimeStore != nil {
-						runtimeStore.SetCapture(id, true)
-					}
-				} else if !workflow.NeedsEncode(cfg.Mode) && workflow.NeedsEncode(prev.Mode) && cfg.Mode != workflow.ModeTC {
-					_ = mgr.Stop(id)
-					if runtimeStore != nil {
-						runtimeStore.SetCapture(id, false)
 					}
 				}
 			}

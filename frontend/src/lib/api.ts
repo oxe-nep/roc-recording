@@ -249,7 +249,7 @@ export async function setRecordingsPath(path: string): Promise<string> {
 }
 
 export interface ChannelWorkflowConfig {
-  mode: "pair" | "encode" | "decode" | "tc";
+  mode: "pair" | "tc";
 }
 
 export async function fetchWorkflows(): Promise<Record<string, ChannelWorkflowConfig>> {

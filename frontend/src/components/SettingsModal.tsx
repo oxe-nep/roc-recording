@@ -192,7 +192,7 @@ export default function SettingsModal({
                     <div className="workflow-row-head">
                       <span className="input-badge">{id}</span>
                     </div>
-                    <div className="workflow-options workflow-options-4">
+                    <div className="workflow-options">
                       {WORKFLOW_OPTIONS.map((opt) => (
                         <label
                           key={opt.mode}

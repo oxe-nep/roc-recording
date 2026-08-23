@@ -2045,10 +2045,6 @@ html {
   gap: 8px;
 }
 
-.workflow-options-4 {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
 .tc-source-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

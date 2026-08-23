@@ -864,7 +864,11 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 	}
 	st.mu.Unlock()
 	errLines := make(chan []string, 1)
-	go func() { errLines <- collectStderr(stderr, st) }()
+	go func() {
+		errLines <- collectStderr(stderr, st, cmd, func() {
+			_ = os.RemoveAll(playoutOutDir)
+		})
+	}()
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
@@ -1050,7 +1054,7 @@ func tailAstatsMeta(path string, st *channelState, stop <-chan struct{}) {
 	}
 }
 
-func collectStderr(r io.Reader, st *channelState) []string {
+func collectStderr(r io.Reader, st *channelState, cmd *exec.Cmd, onSignalLoss func()) []string {
 	var lines []string
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -1074,6 +1078,21 @@ func collectStderr(r io.Reader, st *channelState) []string {
 				st.AudioR = val
 			}
 			st.mu.Unlock()
+		}
+		// Match encode: drop freeze-frame behavior by killing on signal loss so
+		// runLoop restarts and re-acquires when the router brings the source back.
+		if strings.Contains(line, "No input signal detected") {
+			st.mu.Lock()
+			st.status = StatusRestarting
+			st.AudioL = audioSilence
+			st.AudioR = audioSilence
+			st.mu.Unlock()
+			if onSignalLoss != nil {
+				onSignalLoss()
+			}
+			if cmd != nil && cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
 		}
 	}
 	return lines

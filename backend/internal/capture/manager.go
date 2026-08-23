@@ -491,13 +491,15 @@ func (m *Manager) InputArgs(id int) ([]string, error) {
 	return sanitizeInputArgs(args), nil
 }
 
-// InputArgsForTC returns DeckLink input args for TC passthrough (keeps signal_loss_action repeat).
+// InputArgsForTC returns DeckLink input args for TC.
+// Same as encode: no signal_loss_action repeat, so loss exits FFmpeg and the
+// TC loop can restart when the router brings signal back (no freeze-frame).
 func (m *Manager) InputArgsForTC(id int) ([]string, error) {
 	args, err := m.rawInputArgs(id)
 	if err != nil {
 		return nil, err
 	}
-	return ensureSignalLossRepeat(args), nil
+	return sanitizeInputArgs(args), nil
 }
 
 func (m *Manager) rawInputArgs(id int) ([]string, error) {

@@ -245,8 +245,9 @@ func (m *Manager) AudioLevels(id int) (l, r float64, ok bool) {
 	return st.AudioL, st.AudioR, true
 }
 
+// EncodeThumbPath is kept for API compatibility; TC preview lives under playout/.
 func (m *Manager) EncodeThumbPath(id int) string {
-	return filepath.Join(m.hlsDir, strconv.Itoa(id), "thumb.jpg")
+	return m.PlayoutThumbPath(id)
 }
 
 func (m *Manager) PlayoutThumbPath(id int) string {
@@ -681,15 +682,11 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		samplesPerFrame = 1920
 	}
 
-	encodeOutDir := filepath.Join(m.hlsDir, strconv.Itoa(id))
+	// Preview is output-only (TC section cards). Skip encode-side thumb/HLS.
 	playoutOutDir := filepath.Join(m.hlsDir, "playout", strconv.Itoa(id))
-	_ = os.MkdirAll(encodeOutDir, 0o755)
 	_ = os.MkdirAll(playoutOutDir, 0o755)
-	encodeThumb := filepath.Join(encodeOutDir, "thumb.jpg")
 	playoutThumb := filepath.Join(playoutOutDir, "thumb.jpg")
-	encodeAudioPlaylist := filepath.Join(encodeOutDir, "audio.m3u8")
 	playoutAudioPlaylist := filepath.Join(playoutOutDir, "audio.m3u8")
-	encodeAudioSeg := filepath.Join(encodeOutDir, "audio_%03d.ts")
 	playoutAudioSeg := filepath.Join(playoutOutDir, "audio_%03d.ts")
 
 	textPath := filepath.Join(os.TempDir(), fmt.Sprintf("roc-tcloop-%d-tc.txt", id))
@@ -720,9 +717,9 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		)
 	}
 	filter := vbase + ",split=2[vdl][vthumbsrc];" +
-		"[vthumbsrc]scale=640:360,format=yuv420p,split=2[vthumbenc][vthumbplay];" +
+		"[vthumbsrc]scale=640:360,format=yuv420p[vthumb];" +
 		fmt.Sprintf(
-			"[0:a]aformat=channel_layouts=stereo,asplit=4[adeck][ameter][ahlse][ahlsd];"+
+			"[0:a]aformat=channel_layouts=stereo,asplit=3[adeck][ameter][ahls];"+
 				"[adeck]asetnsamples=n=%d:p=0[aout];"+
 				"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none,"+
 				"ametadata=print:file=%s,anullsink",
@@ -751,34 +748,15 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		args = append(args, "-format_code", strings.TrimSpace(formatCode))
 	}
 	args = append(args, "-preroll", "0.5", "-f", "decklink", openDevice,
-		// Output #2: encode-side thumbnail
-		"-map", "[vthumbenc]",
-		"-r", "1",
-		"-q:v", "4",
-		"-update", "1",
-		"-f", "image2",
-		encodeThumb,
-		// Output #3: decode-side thumbnail
-		"-map", "[vthumbplay]",
+		// Output #2: output preview thumbnail
+		"-map", "[vthumb]",
 		"-r", "1",
 		"-q:v", "4",
 		"-update", "1",
 		"-f", "image2",
 		playoutThumb,
-		// Output #4: encode-side HLS audio
-		"-map", "[ahlse]",
-		"-c:a", "aac",
-		"-b:a", "128k",
-		"-ar", "48000",
-		"-ac", "2",
-		"-f", "hls",
-		"-hls_time", "1",
-		"-hls_list_size", "4",
-		"-hls_flags", "delete_segments+independent_segments+omit_endlist",
-		"-hls_segment_filename", encodeAudioSeg,
-		encodeAudioPlaylist,
-		// Output #5: decode-side HLS audio
-		"-map", "[ahlsd]",
+		// Output #3: output preview HLS audio (monitor)
+		"-map", "[ahls]",
 		"-c:a", "aac",
 		"-b:a", "128k",
 		"-ar", "48000",

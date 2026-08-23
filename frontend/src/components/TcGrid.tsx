@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  fetchAudioLevels,
+  fetchPlayoutAudioLevels,
   fetchPlayoutClients,
   fetchStreams,
   fetchTcLoop,
@@ -131,7 +131,7 @@ export default function TcGrid() {
       await Promise.all(
         active.map(async (id) => {
           try {
-            updates[id] = await fetchAudioLevels(id);
+            updates[id] = await fetchPlayoutAudioLevels(id);
           } catch {
             updates[id] = silence;
           }
@@ -204,14 +204,14 @@ export default function TcGrid() {
                     id={s.id}
                     active={tcLive || tcOn}
                     listening={isListening}
-                    playlistPath={`/hls/${s.id}/audio.m3u8`}
+                    playlistPath={`/hls/playout/${s.id}/audio.m3u8`}
                   />
                   <div className="card-stage">
                     <div className="card-thumb">
                       <Thumbnail
                         id={s.id}
                         active={tcLive || hasSignal}
-                        path={tcLive ? `/hls/playout/${s.id}/thumb.jpg` : undefined}
+                        path={`/hls/playout/${s.id}/thumb.jpg`}
                       />
                       {tslText && (hasSignal || tcOn) && (
                         <div className="thumb-tsl-overlay">

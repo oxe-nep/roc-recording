@@ -51,9 +51,9 @@ type Settings struct {
 	Enabled  bool     `json:"enabled"`
 	Source   Source   `json:"source"`    // tod | external, default tod
 	UDPPort  int      `json:"udp_port"`  // external TC listen port; default 9300+N
-	FontSize int      `json:"fontsize"`  // px, default 48
+	FontSize int      `json:"fontsize"`  // px, default 120
 	Opacity  float64  `json:"opacity"`  // 0..1 text opacity, default 0.9
-	Position Position `json:"position"` // default bottom_right
+	Position Position `json:"position"` // default top_left
 }
 
 // Info is the API view for one channel.
@@ -142,9 +142,9 @@ func defaultSettings() Settings {
 		Enabled:  false,
 		Source:   SourceTOD,
 		UDPPort:  0,
-		FontSize: 48,
+		FontSize: 120,
 		Opacity:  0.9,
-		Position: PosBottomRight,
+		Position: PosTopLeft,
 	}
 }
 

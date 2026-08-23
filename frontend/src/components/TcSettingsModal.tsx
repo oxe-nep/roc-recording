@@ -24,9 +24,9 @@ export default function TcSettingsModal({ open, channelId, onClose, onSaved }: P
   const [tcStatus, setTcStatus] = useState<"off" | "running" | "restarting" | "error">("off");
   const [tcSource, setTcSource] = useState<TcLoopSource>("tod");
   const [tcUdpPort, setTcUdpPort] = useState(0);
-  const [tcFontSize, setTcFontSize] = useState(48);
+  const [tcFontSize, setTcFontSize] = useState(120);
   const [tcOpacity, setTcOpacity] = useState(0.9);
-  const [tcPosition, setTcPosition] = useState<TcLoopPosition>("bottom_right");
+  const [tcPosition, setTcPosition] = useState<TcLoopPosition>("top_left");
   const [tcError, setTcError] = useState("");
   const [tcApplyMsg, setTcApplyMsg] = useState<string | null>(null);
 
@@ -45,9 +45,9 @@ export default function TcSettingsModal({ open, channelId, onClose, onSaved }: P
         setTcStatus(tc.status);
         setTcSource(tc.source === "external" ? "external" : "tod");
         setTcUdpPort(tc.udp_port || defaultTcUdpPort(channelId));
-        setTcFontSize(tc.fontsize || 48);
+        setTcFontSize(tc.fontsize || 120);
         setTcOpacity(tc.opacity ?? 0.9);
-        setTcPosition(tc.position || "bottom_right");
+        setTcPosition(tc.position || "top_left");
         setTcError(tc.error || "");
       })
       .catch((e) => setError(String(e)));
@@ -81,9 +81,9 @@ export default function TcSettingsModal({ open, channelId, onClose, onSaved }: P
       setTcStatus(tc.status);
       setTcSource(tc.source === "external" ? "external" : "tod");
       setTcUdpPort(tc.udp_port || defaultTcUdpPort(channelId));
-      setTcFontSize(tc.fontsize || 48);
+      setTcFontSize(tc.fontsize || 120);
       setTcOpacity(tc.opacity ?? 0.9);
-      setTcPosition(tc.position || "bottom_right");
+      setTcPosition(tc.position || "top_left");
       setTcError(tc.error || "");
 
       if (tc.enabled) {
@@ -179,7 +179,7 @@ export default function TcSettingsModal({ open, channelId, onClose, onSaved }: P
                       min={12}
                       max={200}
                       value={tcFontSize}
-                      onChange={(e) => setTcFontSize(Number(e.target.value) || 48)}
+                      onChange={(e) => setTcFontSize(Number(e.target.value) || 120)}
                       disabled={busy}
                     />
                   </label>

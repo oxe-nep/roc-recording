@@ -19,15 +19,9 @@ func (m *Manager) runFFmpegOutbound(ctx context.Context, channelID int, router *
 		log.Printf("[commentator %d] no playout bridge — DeckLink OUT disabled", channelID)
 		return
 	}
-	device, formatCode, err := m.playout.Sink(channelID)
+	device, formatCode, err := m.OutputSink(channelID)
 	if err != nil {
-		log.Printf("[commentator %d] playout sink: %v", channelID, err)
-		return
-	}
-	device = strings.TrimSpace(device)
-	formatCode = strings.TrimSpace(formatCode)
-	if device == "" || formatCode == "" {
-		log.Printf("[commentator %d] playout device/format not configured", channelID)
+		log.Printf("[commentator %d] output sink: %v", channelID, err)
 		return
 	}
 	openDevice := m.playout.ResolveOpenDevice(device)

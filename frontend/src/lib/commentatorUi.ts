@@ -36,6 +36,7 @@ export function commentatorCardMeta(info?: CommentatorInfo): string {
   if (!info || !info.enabled) return "Off";
   const intercomCount = info.intercom?.filter((s) => s.enabled).length ?? 0;
   const parts: string[] = [];
+  if (info.output_format) parts.push(info.output_format);
   if (intercomCount > 0) parts.push(`${intercomCount} intercom`);
   if (info.connected) parts.push("Live");
   else if (info.session_active) parts.push("Invite active");

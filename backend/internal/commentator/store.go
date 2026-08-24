@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -19,7 +20,8 @@ type IntercomSlot struct {
 
 // ChannelSettings is persisted per channel id.
 type ChannelSettings struct {
-	Intercom [intercomSlots]IntercomSlot `json:"intercom"`
+	Intercom     [intercomSlots]IntercomSlot `json:"intercom"`
+	OutputFormat string                      `json:"output_format,omitempty"`
 }
 
 func defaultSlot(id int) IntercomSlot {
@@ -126,7 +128,8 @@ func (s *Store) All() map[int]ChannelSettings {
 }
 
 type SettingsUpdateInput struct {
-	Intercom *[intercomSlots]IntercomSlot `json:"intercom"`
+	Intercom     *[intercomSlots]IntercomSlot `json:"intercom"`
+	OutputFormat *string                      `json:"output_format"`
 }
 
 func (s *Store) Set(id int, in SettingsUpdateInput) (ChannelSettings, error) {
@@ -141,6 +144,9 @@ func (s *Store) Set(id int, in SettingsUpdateInput) (ChannelSettings, error) {
 	}
 	if in.Intercom != nil {
 		cfg.Intercom = normalizeSettings(ChannelSettings{Intercom: *in.Intercom}).Intercom
+	}
+	if in.OutputFormat != nil {
+		cfg.OutputFormat = strings.TrimSpace(*in.OutputFormat)
 	}
 	s.byID[id] = cfg
 	if err := s.saveLocked(); err != nil {

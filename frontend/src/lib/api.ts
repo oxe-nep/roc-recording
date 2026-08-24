@@ -763,7 +763,14 @@ export interface CommentatorInfo {
   invite_url?: string;
   session_expires_at?: string;
   intercom: CommentatorIntercomSlot[];
+  output_format?: string;
+  output_device?: string;
   error?: string;
+}
+
+export interface CommentatorSettings {
+  intercom: CommentatorIntercomSlot[];
+  output_format?: string;
 }
 
 export interface CommentatorSessionInfo {
@@ -778,7 +785,7 @@ export async function fetchCommentator(id: number): Promise<CommentatorInfo> {
   return res.json();
 }
 
-export async function fetchCommentatorSettings(id: number): Promise<{ intercom: CommentatorIntercomSlot[] }> {
+export async function fetchCommentatorSettings(id: number): Promise<CommentatorSettings> {
   const res = await apiFetch(`/api/commentator/${id}/settings`);
   if (!res.ok) throw new Error(`fetchCommentatorSettings: ${res.status}`);
   return res.json();
@@ -786,8 +793,8 @@ export async function fetchCommentatorSettings(id: number): Promise<{ intercom: 
 
 export async function updateCommentatorSettings(
   id: number,
-  body: { intercom: CommentatorIntercomSlot[] },
-): Promise<{ intercom: CommentatorIntercomSlot[] }> {
+  body: { intercom?: CommentatorIntercomSlot[]; output_format?: string },
+): Promise<CommentatorSettings> {
   const res = await apiFetch(`/api/commentator/${id}/settings`, {
     method: "PUT",
     body: JSON.stringify(body),

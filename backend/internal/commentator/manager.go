@@ -47,6 +47,8 @@ type Info struct {
 	SessionExpiresAt *time.Time     `json:"session_expires_at,omitempty"`
 	Intercom         []IntercomSlot `json:"intercom"`
 	Error            string         `json:"error,omitempty"`
+	OutputFormat     string         `json:"output_format,omitempty"`
+	OutputDevice     string         `json:"output_device,omitempty"`
 }
 
 type SessionInfo struct {
@@ -182,6 +184,27 @@ func (m *Manager) GetSettings(id int) ChannelSettings {
 	return DefaultChannelSettings()
 }
 
+// OutputSink resolves DeckLink device + format for commentator return video.
+// Device comes from the playout mapping; format from commentator settings or playout default.
+func (m *Manager) OutputSink(id int) (device, formatCode string, err error) {
+	if m.playout == nil {
+		return "", "", fmt.Errorf("playout not configured")
+	}
+	device, defaultFormat, err := m.playout.Sink(id)
+	if err != nil {
+		return "", "", err
+	}
+	device = strings.TrimSpace(device)
+	formatCode = strings.TrimSpace(m.GetSettings(id).OutputFormat)
+	if formatCode == "" {
+		formatCode = strings.TrimSpace(defaultFormat)
+	}
+	if device == "" || formatCode == "" {
+		return "", "", fmt.Errorf("decklink output device/format not configured for channel %d", id)
+	}
+	return device, formatCode, nil
+}
+
 func (m *Manager) UpdateSettings(id int, in SettingsUpdateInput) (ChannelSettings, error) {
 	if m.settings == nil {
 		return DefaultChannelSettings(), fmt.Errorf("settings store not configured")
@@ -296,13 +319,14 @@ func (m *Manager) infoLocked(ch *channel) Info {
 		settings = m.settings.Get(ch.id)
 	}
 	info := Info{
-		ID:         ch.id,
-		Enabled:    ch.enabled,
-		Status:     ch.status,
-		Connected:  ch.connected,
-		PTTChannel: ch.pttChannel,
-		Intercom:   settings.Intercom[:],
-		Error:      ch.errorText,
+		ID:             ch.id,
+		Enabled:        ch.enabled,
+		Status:         ch.status,
+		Connected:      ch.connected,
+		PTTChannel:     ch.pttChannel,
+		Intercom:       settings.Intercom[:],
+		Error:          ch.errorText,
+		OutputFormat:   strings.TrimSpace(settings.OutputFormat),
 	}
 	if !ch.enabled {
 		info.Status = StatusOff
@@ -312,6 +336,12 @@ func (m *Manager) infoLocked(ch *channel) Info {
 		exp := ch.session.expiresAt
 		info.SessionExpiresAt = &exp
 		info.InviteURL = m.inviteURLLocked(ch.session.token)
+	}
+	if device, format, err := m.OutputSink(ch.id); err == nil {
+		if info.OutputFormat == "" {
+			info.OutputFormat = format
+		}
+		info.OutputDevice = device
 	}
 	return info
 }

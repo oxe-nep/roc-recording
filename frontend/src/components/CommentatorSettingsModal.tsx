@@ -5,12 +5,15 @@ import {
   createCommentatorSession,
   fetchCommentator,
   fetchCommentatorSettings,
+  fetchPlayoutDevices,
   revokeCommentatorSession,
   updateCommentatorSettings,
   type CommentatorInfo,
   type CommentatorIntercomSlot,
+  type PlayoutDevice,
 } from "@/lib/api";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
+import { useDashboard } from "@/hooks/useDashboard";
 import { absoluteInviteURL } from "@/lib/commentatorWebRTC";
 import { commentatorIsActive, commentatorStatusLabel, commentatorStatusPillClass } from "@/lib/commentatorUi";
 
@@ -48,10 +51,20 @@ function infoFromState(
   };
 }
 
+function formatDisplay(code?: string): string {
+  const c = code?.trim();
+  if (!c) return "";
+  if (c.length <= 4) return c.toUpperCase();
+  return c;
+}
+
 export default function CommentatorSettingsModal({ open, channelId, onClose, onSaved }: Props) {
+  const { playout } = useDashboard();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [intercom, setIntercom] = useState<CommentatorIntercomSlot[]>(defaultSlots());
+  const [outputFormat, setOutputFormat] = useState("");
+  const [devices, setDevices] = useState<PlayoutDevice[]>([]);
   const [inviteURL, setInviteURL] = useState("");
   const [enabled, setEnabled] = useState(false);
   const [sessionActive, setSessionActive] = useState(false);
@@ -61,6 +74,13 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
 
   useBodyScrollLock(open);
 
+  const playoutClient = channelId != null ? playout.find((p) => p.id === channelId) : undefined;
+  const deviceName = playoutClient?.device || "";
+  const deviceLabel = playoutClient?.device_label || deviceName;
+  const selectedDevice = devices.find((d) => d.name === deviceName || d.open_name === deviceName);
+  const formats = selectedDevice?.formats ?? [];
+  const probeLog = selectedDevice?.probe_log;
+
   useEffect(() => {
     if (!open || channelId == null) {
       hydratedRef.current = false;
@@ -69,9 +89,20 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
     if (hydratedRef.current) return;
     hydratedRef.current = true;
     setError(null);
-    Promise.all([fetchCommentatorSettings(channelId), fetchCommentator(channelId)])
-      .then(([settings, info]) => {
+    Promise.all([
+      fetchCommentatorSettings(channelId),
+      fetchCommentator(channelId),
+      fetchPlayoutDevices(),
+    ])
+      .then(([settings, info, devs]) => {
         setIntercom(settings.intercom?.length ? settings.intercom : defaultSlots());
+        setOutputFormat(
+          settings.output_format?.trim() ||
+            info.output_format?.trim() ||
+            playoutClient?.format_code?.trim() ||
+            "",
+        );
+        setDevices(devs);
         setInviteURL(info.invite_url ?? "");
         setEnabled(!!info.enabled);
         setSessionActive(!!info.session_active);
@@ -79,7 +110,7 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
         setStatus(info.status);
       })
       .catch((e) => setError(String(e)));
-  }, [open, channelId]);
+  }, [open, channelId, playoutClient?.format_code]);
 
   useEffect(() => {
     if (!open) return;
@@ -94,13 +125,31 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
 
   const uiInfo = infoFromState(enabled, status, sessionActive, connected);
   const active = commentatorIsActive(uiInfo);
+  const outputLocked = connected;
+
+  const refreshDevices = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const devs = await fetchPlayoutDevices(true);
+      setDevices(devs);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const saveSettings = async () => {
     setBusy(true);
     setError(null);
     try {
-      const saved = await updateCommentatorSettings(channelId, { intercom });
+      const saved = await updateCommentatorSettings(channelId, {
+        intercom,
+        output_format: outputFormat.trim(),
+      });
       setIntercom(saved.intercom);
+      setOutputFormat(saved.output_format?.trim() ?? outputFormat.trim());
       onSaved();
     } catch (e) {
       setError(String(e));
@@ -220,6 +269,51 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
 
         <div className="channel-settings-srt">
           <div className="channel-settings-srt-head">
+            <h3>DeckLink output</h3>
+          </div>
+          <p className="channel-settings-hint">
+            Webcam return video is played out on this DeckLink output. Format applies on the next commentator
+            connection{outputLocked ? " (disconnect commentator to change)" : ""}.
+          </p>
+          <div className="channel-settings-form">
+            <label className="presets-field">
+              <span>Device</span>
+              <input value={deviceLabel || deviceName || "—"} readOnly disabled />
+            </label>
+            <label className="presets-field">
+              <span>Output format</span>
+              <div className="channel-settings-actions" style={{ marginTop: 0, marginBottom: 4 }}>
+                <select
+                  value={formats.some((f) => f.code === outputFormat) ? outputFormat : outputFormat || ""}
+                  onChange={(e) => setOutputFormat(e.target.value)}
+                  disabled={busy || outputLocked || formats.length === 0}
+                  style={{ flex: 1 }}
+                >
+                  <option value="">{formats.length ? "Format…" : "—"}</option>
+                  {formats.map((f) => (
+                    <option key={f.code} value={f.code}>
+                      {f.label || formatDisplay(f.code)}
+                    </option>
+                  ))}
+                </select>
+                <button type="button" className="badge" onClick={() => void refreshDevices()} disabled={busy || outputLocked}>
+                  Re-probe
+                </button>
+              </div>
+              {outputFormat && (
+                <span className="channel-settings-hint">Selected: {formatDisplay(outputFormat)}</span>
+              )}
+              {formats.length === 0 && probeLog && (
+                <pre className="channel-settings-logbox" style={{ marginTop: 8, maxHeight: 120 }}>
+                  {probeLog}
+                </pre>
+              )}
+            </label>
+          </div>
+        </div>
+
+        <div className="channel-settings-srt">
+          <div className="channel-settings-srt-head">
             <h3>Intercom channels</h3>
           </div>
           <p className="channel-settings-hint">
@@ -258,8 +352,8 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
             </div>
           </div>
           <div className="channel-settings-actions">
-            <button type="button" className="global-rec-btn" disabled={busy} onClick={() => void saveSettings()}>
-              {busy ? "…" : "Save intercom"}
+            <button type="button" className="global-rec-btn" disabled={busy || outputLocked} onClick={() => void saveSettings()}>
+              {busy ? "…" : "Save settings"}
             </button>
           </div>
         </div>

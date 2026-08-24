@@ -31,14 +31,35 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function preferVideoCodec(transceiver: RTCRtpTransceiver, mimeType: string) {
-  if (typeof RTCRtpSender === "undefined" || !RTCRtpSender.getCapabilities) return;
-  const caps = RTCRtpSender.getCapabilities("video");
+function preferVideoCodec(
+  transceiver: RTCRtpTransceiver,
+  mimeType: string,
+  kind: "send" | "recv" = "send",
+) {
+  const caps =
+    kind === "recv"
+      ? typeof RTCRtpReceiver !== "undefined"
+        ? RTCRtpReceiver.getCapabilities?.("video")
+        : undefined
+      : typeof RTCRtpSender !== "undefined"
+        ? RTCRtpSender.getCapabilities?.("video")
+        : undefined;
   if (!caps?.codecs?.length) return;
   const preferred = caps.codecs.filter((c) => c.mimeType.toLowerCase() === mimeType.toLowerCase());
   const rest = caps.codecs.filter((c) => c.mimeType.toLowerCase() !== mimeType.toLowerCase());
   if (preferred.length > 0) {
     transceiver.setCodecPreferences([...preferred, ...rest]);
+  }
+}
+
+/** Incoming transceivers must be declared in the offer before createOffer (Unified Plan). */
+function addReceiveTransceivers(pc: RTCPeerConnection, intercomCount: number) {
+  const recvVideo = pc.addTransceiver("video", { direction: "recvonly" });
+  preferVideoCodec(recvVideo, "video/h264", "recv");
+  // PGM + one recvonly audio transceiver per enabled intercom slot (matches backend AddTrack order).
+  pc.addTransceiver("audio", { direction: "recvonly" });
+  for (let i = 0; i < intercomCount; i++) {
+    pc.addTransceiver("audio", { direction: "recvonly" });
   }
 }
 
@@ -101,6 +122,7 @@ export class CommentatorSession {
     }
 
     this.pc = new RTCPeerConnection({ iceServers: join.ice_servers });
+    addReceiveTransceivers(this.pc, join.intercom.length);
 
     const videoTrack = this.localStream.getVideoTracks()[0];
     const audioTrack = this.localStream.getAudioTracks()[0];
@@ -109,10 +131,13 @@ export class CommentatorSession {
         direction: "sendonly",
         streams: [this.localStream],
       });
-      preferVideoCodec(tx, "video/h264");
+      preferVideoCodec(tx, "video/h264", "send");
     }
     if (audioTrack) {
-      this.pc.addTrack(audioTrack, this.localStream);
+      this.pc.addTransceiver(audioTrack, {
+        direction: "sendonly",
+        streams: [this.localStream],
+      });
     }
 
     if (!this.audioCtx) {
@@ -222,9 +247,16 @@ export class CommentatorSession {
         this.onState?.("failed");
         return;
       case "answer":
-        if (!this.pc) return;
+        if (!this.pc || this.remoteDescSet) return;
         if (msg.sdp) {
-          await this.pc.setRemoteDescription({ type: "answer", sdp: msg.sdp });
+          try {
+            await this.pc.setRemoteDescription({ type: "answer", sdp: msg.sdp });
+          } catch (e) {
+            const detail = e instanceof Error ? e.message : String(e);
+            this.onError?.(`WebRTC negotiation failed: ${detail}`);
+            this.onState?.("failed");
+            return;
+          }
           this.remoteDescSet = true;
           for (const c of this.pendingRemoteICE) {
             await this.pc.addIceCandidate(c);

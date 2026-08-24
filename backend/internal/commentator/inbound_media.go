@@ -119,8 +119,21 @@ func (m *Manager) requestPLI(ctx context.Context, pc *webrtc.PeerConnection, tr 
 	send := func() {
 		_ = pc.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: uint32(tr.SSRC())}})
 	}
+	// Burst a few PLIs so the browser emits an IDR quickly, then back off.
+	// Continuous 500ms PLI forces huge keyframes and makes the webcam path lag/jitter.
 	send()
-	ticker := time.NewTicker(500 * time.Millisecond)
+	deadline := time.Now().Add(1500 * time.Millisecond)
+	burst := time.NewTicker(250 * time.Millisecond)
+	defer burst.Stop()
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return
+		case <-burst.C:
+			send()
+		}
+	}
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
@@ -133,7 +146,7 @@ func (m *Manager) requestPLI(ctx context.Context, pc *webrtc.PeerConnection, tr 
 }
 
 func (m *Manager) consumeH264Webcam(ctx context.Context, channelID int, tr *webrtc.TrackRemote, frames chan<- []byte) {
-	builder := samplebuilder.New(20, &codecs.H264Packet{}, tr.Codec().ClockRate)
+	builder := samplebuilder.New(12, &codecs.H264Packet{}, tr.Codec().ClockRate)
 
 	// Buffer until first IDR so the annex-B decoder can start cleanly.
 	var idr []byte
@@ -230,9 +243,10 @@ func (m *Manager) runWebcamH264Decoder(ctx context.Context, channelID int, r io.
 		"-probesize", "32768", "-analyzeduration", "0",
 		"-fflags", "nobuffer+genpts+flush_packets",
 		"-flags", "low_delay",
+		"-max_delay", "0",
 		"-f", "h264", "-i", "pipe:0",
+		// No -r here: CFR is enforced when feeding DeckLink (latest-frame ticker).
 		"-vf", "scale=1280:720:flags=fast_bilinear",
-		"-r", "25",
 		"-pix_fmt", "yuv420p",
 		"-f", "rawvideo", "pipe:1",
 	}
@@ -240,7 +254,7 @@ func (m *Manager) runWebcamH264Decoder(ctx context.Context, channelID int, r io.
 }
 
 func (m *Manager) consumeVP8Webcam(ctx context.Context, channelID int, tr *webrtc.TrackRemote, frames chan<- []byte) {
-	builder := samplebuilder.New(20, &codecs.VP8Packet{}, tr.Codec().ClockRate)
+	builder := samplebuilder.New(12, &codecs.VP8Packet{}, tr.Codec().ClockRate)
 
 	// Do not start FFmpeg until we have a real keyframe — otherwise:
 	// "Discarding interframe without a prior keyframe" and black DeckLink.
@@ -392,9 +406,9 @@ func (m *Manager) runWebcamVP8Decoder(ctx context.Context, channelID int, r io.R
 		"-probesize", "32768", "-analyzeduration", "0",
 		"-fflags", "nobuffer+flush_packets",
 		"-flags", "low_delay",
+		"-max_delay", "0",
 		"-f", "ivf", "-i", "pipe:0",
 		"-vf", "scale=1280:720:flags=fast_bilinear",
-		"-r", "25",
 		"-pix_fmt", "yuv420p",
 		"-f", "rawvideo", "pipe:1",
 	}

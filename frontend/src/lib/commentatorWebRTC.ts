@@ -65,6 +65,23 @@ function preferSendCodec(transceiver: RTCRtpTransceiver, mimeType: string) {
   }
 }
 
+/** Cap webcam bitrate — monitoring quality, lower encode latency over VPN. */
+async function constrainWebcamSender(sender: RTCRtpSender) {
+  try {
+    const params = sender.getParameters();
+    if (!params.encodings?.length) {
+      params.encodings = [{}];
+    }
+    for (const enc of params.encodings) {
+      enc.maxBitrate = 1_200_000;
+      enc.maxFramerate = 25;
+    }
+    await sender.setParameters(params);
+  } catch {
+    /* ignore — browser may not support all knobs */
+  }
+}
+
 export async function fetchCommentatorJoin(token: string): Promise<CommentatorJoinInfo> {
   const base = commentatorOrigin();
   const res = await fetch(`${base}/api/commentator/join/${encodeURIComponent(token)}`);
@@ -376,7 +393,11 @@ export class CommentatorSession {
       if (!this.localStream) {
         this.localStream = await navigator.mediaDevices.getUserMedia({
           audio: { echoCancellation: true, noiseSuppression: true },
-          video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 25, max: 30 },
+          },
         });
       }
 
@@ -407,6 +428,7 @@ export class CommentatorSession {
       for (const tx of this.pc.getTransceivers()) {
         if (tx.sender.track?.kind !== "video") continue;
         preferSendCodec(tx, "video/H264");
+        if (tx.sender) await constrainWebcamSender(tx.sender);
       }
 
       const answer = await this.pc.createAnswer();

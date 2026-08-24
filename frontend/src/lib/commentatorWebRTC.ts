@@ -170,7 +170,7 @@ export class CommentatorSession {
         }
         break;
       case "ice":
-        if (msg.candidate) void this.pc.addICECandidate(msg.candidate);
+        if (msg.candidate) void this.pc.addIceCandidate(msg.candidate);
         break;
       case "error":
         this.onError?.(msg.message || "WebRTC error");

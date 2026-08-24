@@ -232,19 +232,18 @@ export class CommentatorSession {
       await this.pc.setRemoteDescription({ type: "offer", sdp });
       this.remoteDescSet = true;
 
+      // Attach webcam/mic to the server's recvonly slots — do NOT addTransceiver
+      // (that creates extra m-lines and the server never receives OnTrack).
       const videoTrack = this.localStream.getVideoTracks()[0];
       const audioTrack = this.localStream.getAudioTracks()[0];
-      if (videoTrack) {
-        this.pc.addTransceiver(videoTrack, {
-          direction: "sendonly",
-          streams: [this.localStream],
-        });
-      }
-      if (audioTrack) {
-        this.pc.addTransceiver(audioTrack, {
-          direction: "sendonly",
-          streams: [this.localStream],
-        });
+      for (const tx of this.pc.getTransceivers()) {
+        if (tx.direction !== "sendonly" && tx.direction !== "sendrecv") continue;
+        const kind = tx.receiver.track?.kind;
+        if (kind === "video" && videoTrack) {
+          await tx.sender.replaceTrack(videoTrack);
+        } else if (kind === "audio" && audioTrack) {
+          await tx.sender.replaceTrack(audioTrack);
+        }
       }
 
       const answer = await this.pc.createAnswer();

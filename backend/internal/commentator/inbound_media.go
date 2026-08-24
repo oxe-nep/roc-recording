@@ -25,13 +25,15 @@ const (
 
 func (m *Manager) consumeCommentatorMic(ctx context.Context, channelID int, tr *webrtc.TrackRemote, router *AudioRouter) {
 	log.Printf("[commentator %d] receiving mic track %s (%s)", channelID, tr.ID(), tr.Codec().MimeType)
-	dec, err := opus.NewDecoder(sampleRate, 1)
+	// Browsers usually send stereo Opus; downmix to mono for DeckLink routing.
+	dec, err := opus.NewDecoder(sampleRate, 2)
 	if err != nil {
 		log.Printf("[commentator %d] opus decoder: %v", channelID, err)
 		return
 	}
 	builder := samplebuilder.New(10, &codecs.OpusPacket{}, tr.Codec().ClockRate)
-	pcm := make([]int16, samplesPerFrame*6)
+	pcmStereo := make([]int16, samplesPerFrame*2)
+	mono := make([]int16, samplesPerFrame)
 	idleTimer := time.NewTimer(micIdleTimeout)
 	defer idleTimer.Stop()
 	resetIdle := func() {
@@ -72,11 +74,16 @@ func (m *Manager) consumeCommentatorMic(ctx context.Context, channelID int, tr *
 			if sample == nil {
 				break
 			}
-			n, err := dec.Decode(sample.Data, pcm)
+			n, err := dec.Decode(sample.Data, pcmStereo)
 			if err != nil || n <= 0 {
 				continue
 			}
-			router.PushMic(pcm[:n])
+			for i := 0; i < n && i < samplesPerFrame; i++ {
+				l := int32(pcmStereo[i*2])
+				r := int32(pcmStereo[i*2+1])
+				mono[i] = int16((l + r) / 2)
+			}
+			router.PushMic(mono[:n])
 			resetIdle()
 		}
 	}
@@ -302,8 +309,20 @@ func (m *Manager) runWebcamVP8Decoder(ctx context.Context, channelID int, r io.R
 	}
 }
 
+func yuv420BlackFrame(w, h int) []byte {
+	frame := make([]byte, w*h*3/2)
+	// Y = 16 (limited-range black), U/V = 128 — all-zero YUV is green on DeckLink.
+	for i := 0; i < w*h; i++ {
+		frame[i] = 16
+	}
+	for i := w * h; i < len(frame); i++ {
+		frame[i] = 128
+	}
+	return frame
+}
+
 func (m *Manager) emitBlackVideo(ctx context.Context, frames chan<- []byte) {
-	frame := make([]byte, inboundFrame)
+	frame := yuv420BlackFrame(inboundVideoW, inboundVideoH)
 	ticker := time.NewTicker(40 * time.Millisecond)
 	defer ticker.Stop()
 	for {

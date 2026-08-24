@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hraban/opus"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media"
 )
@@ -37,7 +38,8 @@ func (m *Manager) runFFmpegInbound(
 	args = append(args, "-analyzeduration", "0", "-probesize", "32")
 
 	filters := []string{
-		"[0:v]scale=1280:720,fps=25,format=yuv420p[vout]",
+		// DeckLink Hi50/Hi25 are interlaced — deinterlace before scale or the browser shows striped frames.
+		"[0:v]yadif=0:-1:0,scale=1280:720,fps=25,format=yuv420p[vout]",
 		"[0:a]pan=8c|c0=c0|c1=c1|c2=c2|c3=c3|c4=c4|c5=c5|c6=c6|c7=c7[a8]",
 		"[a8]pan=stereo|c0=c0|c1=c1[pgm]",
 	}
@@ -96,22 +98,17 @@ func (m *Manager) runFFmpegInbound(
 			return
 		}
 		stereo := al.label == "pgm"
-		bitrate := "64000"
-		if stereo {
-			bitrate = "128000"
-		}
 		ch := "1"
 		if stereo {
 			ch = "2"
 		}
+		// Raw PCM → encode Opus packets in Go. FFmpeg -f opus is Ogg and unusable for WebRTC.
 		args = append(args,
 			"-map", fmt.Sprintf("[%s]", al.label),
-			"-c:a", "libopus",
-			"-application", "lowdelay",
-			"-frame_duration", "20",
+			"-c:a", "pcm_s16le",
 			"-ac", ch,
-			"-b:a", bitrate,
-			"-f", "opus",
+			"-ar", "48000",
+			"-f", "s16le",
 			fmt.Sprintf("pipe:%d", nextFD),
 		)
 		pipes = append(pipes, audioPipe{
@@ -178,7 +175,7 @@ func (m *Manager) runFFmpegInbound(
 
 	go m.pipeH264ToTrack(ctx, stdout, videoTrack)
 	for _, p := range pipes {
-		go m.pipeOpusToTrack(ctx, p.reader, p.track)
+		go m.pipePCMToOpusTrack(ctx, p.reader, p.track, p.stereo)
 	}
 
 	if err := cmd.Wait(); err != nil && ctx.Err() == nil {
@@ -324,24 +321,44 @@ func findAnnexBStart(buf []byte, from int) int {
 	return -1
 }
 
-func (m *Manager) pipeOpusToTrack(ctx context.Context, r io.Reader, track *webrtc.TrackLocalStaticSample) {
+func (m *Manager) pipePCMToOpusTrack(ctx context.Context, r io.Reader, track *webrtc.TrackLocalStaticSample, stereo bool) {
 	if r == nil {
 		return
 	}
-	buf := make([]byte, 4096)
+	channels := 1
+	if stereo {
+		channels = 2
+	}
+	enc, err := opus.NewEncoder(sampleRate, channels, opus.AppVoIP)
+	if err != nil {
+		log.Printf("[commentator] opus encoder: %v", err)
+		return
+	}
+	_ = enc.SetBitrate(64000)
+	if stereo {
+		_ = enc.SetBitrate(128000)
+	}
+	frameSamples := samplesPerFrame * channels
+	pcmBytes := make([]byte, frameSamples*2)
+	pcm := make([]int16, frameSamples)
+	out := make([]byte, 1500)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
 		}
-		n, err := r.Read(buf)
-		if n > 0 {
-			_ = track.WriteSample(media.Sample{Data: append([]byte(nil), buf[:n]...), Duration: 20 * time.Millisecond})
-		}
-		if err != nil {
+		if _, err := io.ReadFull(r, pcmBytes); err != nil {
 			return
 		}
+		for i := 0; i < frameSamples; i++ {
+			pcm[i] = int16(pcmBytes[i*2]) | int16(pcmBytes[i*2+1])<<8
+		}
+		n, err := enc.Encode(pcm, out)
+		if err != nil || n <= 0 {
+			continue
+		}
+		_ = track.WriteSample(media.Sample{Data: append([]byte(nil), out[:n]...), Duration: 20 * time.Millisecond})
 	}
 }
 

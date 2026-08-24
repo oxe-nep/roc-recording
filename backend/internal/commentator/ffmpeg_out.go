@@ -114,7 +114,7 @@ func (m *Manager) runFFmpegOutbound(ctx context.Context, channelID int, router *
 
 func (m *Manager) feedOutboundVideo(ctx context.Context, w *os.File, frames <-chan []byte) {
 	defer w.Close()
-	black := make([]byte, inboundFrame)
+	black := yuv420BlackFrame(inboundVideoW, inboundVideoH)
 	ticker := time.NewTicker(time.Duration(float64(time.Second) / inboundVideoFPS))
 	defer ticker.Stop()
 	var latest []byte

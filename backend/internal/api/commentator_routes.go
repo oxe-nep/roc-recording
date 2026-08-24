@@ -14,6 +14,10 @@ func registerCommentatorPublicRoutes(r chi.Router, commMgr *commentator.Manager)
 		return
 	}
 	r.Get("/api/commentator/join/{token}", func(w http.ResponseWriter, r *http.Request) {
+		if !commMgr.AllowJoin(r) {
+			jsonError(w, "rate limit exceeded", http.StatusTooManyRequests)
+			return
+		}
 		token := chi.URLParam(r, "token")
 		info, err := commMgr.JoinInfo(token)
 		if err != nil {

@@ -35,6 +35,13 @@ var signalingUpgrader = websocket.Upgrader{
 	},
 }
 
+func (m *Manager) AllowJoin(r *http.Request) bool {
+	if m.joinLimit == nil {
+		return true
+	}
+	return m.joinLimit.allow(clientIP(r))
+}
+
 func (m *Manager) JoinInfo(token string) (joinResponse, error) {
 	id, err := m.validateToken(token)
 	if err != nil {
@@ -78,6 +85,10 @@ func (m *Manager) validateToken(token string) (int, error) {
 }
 
 func (m *Manager) ServeSignaling(w http.ResponseWriter, r *http.Request, token string) {
+	if !m.AllowJoin(r) {
+		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
+		return
+	}
 	channelID, err := m.validateToken(token)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)

@@ -13,12 +13,17 @@ export type CommentatorConnectionState =
   | "joining"
   | "connecting"
   | "connected"
+  | "reconnecting"
   | "failed";
 
 function wsURL(path: string): string {
   const u = new URL(path, mediaBase());
   u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
   return u.toString();
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export async function fetchCommentatorJoin(token: string): Promise<CommentatorJoinInfo> {
@@ -47,6 +52,9 @@ export class CommentatorSession {
   private audioCtx: AudioContext | null = null;
   private gainNodes = new Map<string, GainNode>();
   private pttChannel = 0;
+  private stopped = false;
+  private reconnectAttempts = 0;
+  private readonly maxReconnects = 5;
 
   onState?: (state: CommentatorConnectionState) => void;
   onError?: (message: string) => void;
@@ -56,21 +64,28 @@ export class CommentatorSession {
   constructor(private readonly token: string) {}
 
   async start(): Promise<void> {
+    this.stopped = false;
     this.onState?.("joining");
     const join = await fetchCommentatorJoin(this.token);
     this.onIntercom?.(join.intercom);
 
-    this.localStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true },
-      video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-    });
+    if (!this.localStream) {
+      this.localStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true },
+        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+      });
+    }
 
     this.pc = new RTCPeerConnection({ iceServers: join.ice_servers });
     for (const track of this.localStream.getTracks()) {
       this.pc.addTrack(track, this.localStream);
     }
 
-    this.audioCtx = new AudioContext();
+    if (!this.audioCtx) {
+      this.audioCtx = new AudioContext();
+    }
+    this.gainNodes.clear();
+
     this.pc.onicecandidate = (ev) => {
       if (ev.candidate) {
         this.send({ type: "ice", candidate: ev.candidate.toJSON() });
@@ -89,12 +104,40 @@ export class CommentatorSession {
       src.connect(gain).connect(this.audioCtx!.destination);
       this.gainNodes.set(id, gain);
     };
+    this.pc.onconnectionstatechange = () => {
+      const state = this.pc?.connectionState;
+      if (state === "failed" || state === "disconnected") {
+        void this.scheduleReconnect();
+      }
+    };
 
     this.onState?.("connecting");
     await this.connectSignaling(join.ws_path);
     const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);
     this.send({ type: "offer", sdp: offer.sdp });
+  }
+
+  private async scheduleReconnect() {
+    if (this.stopped || this.reconnectAttempts >= this.maxReconnects) {
+      this.onState?.("failed");
+      this.onError?.("WebRTC-anslutningen bröts. Prova Återanslut.");
+      return;
+    }
+    this.reconnectAttempts++;
+    this.onState?.("reconnecting");
+    this.ws?.close();
+    this.pc?.close();
+    this.ws = null;
+    this.pc = null;
+    await delay(Math.min(1000 * this.reconnectAttempts, 5000));
+    if (this.stopped) return;
+    try {
+      await this.start();
+      this.reconnectAttempts = 0;
+    } catch (e) {
+      void this.scheduleReconnect();
+    }
   }
 
   private async connectSignaling(path: string): Promise<void> {
@@ -104,7 +147,11 @@ export class CommentatorSession {
       ws.onopen = () => resolve();
       ws.onerror = () => reject(new Error("signaling websocket failed"));
       ws.onmessage = (ev) => this.handleSignal(JSON.parse(String(ev.data)) as SignalMsg);
-      ws.onclose = () => this.onState?.("failed");
+      ws.onclose = () => {
+        if (!this.stopped && this.pc?.connectionState !== "connected") {
+          void this.scheduleReconnect();
+        }
+      };
     });
   }
 
@@ -117,12 +164,13 @@ export class CommentatorSession {
       case "answer":
         if (msg.sdp) {
           void this.pc.setRemoteDescription({ type: "answer", sdp: msg.sdp }).then(() => {
+            this.reconnectAttempts = 0;
             this.onState?.("connected");
           });
         }
         break;
       case "ice":
-        if (msg.candidate) void this.pc.addIceCandidate(msg.candidate);
+        if (msg.candidate) void this.pc.addICECandidate(msg.candidate);
         break;
       case "error":
         this.onError?.(msg.message || "WebRTC error");
@@ -155,6 +203,7 @@ export class CommentatorSession {
   }
 
   stop() {
+    this.stopped = true;
     this.send({ type: "ptt", channel: 0 });
     this.ws?.close();
     this.pc?.close();

@@ -18,6 +18,7 @@ const (
 	inboundVideoW = 1280
 	inboundVideoH = 720
 	inboundFrame  = inboundVideoW * inboundVideoH * 3 / 2
+	micIdleTimeout = 300 * time.Millisecond
 )
 
 func (m *Manager) consumeCommentatorMic(ctx context.Context, channelID int, tr *webrtc.TrackRemote, router *AudioRouter) {
@@ -29,6 +30,27 @@ func (m *Manager) consumeCommentatorMic(ctx context.Context, channelID int, tr *
 	}
 	builder := samplebuilder.New(10, tr.Codec().ClockRate)
 	pcm := make([]int16, samplesPerFrame*6)
+	idleTimer := time.NewTimer(micIdleTimeout)
+	defer idleTimer.Stop()
+	resetIdle := func() {
+		if !idleTimer.Stop() {
+			select {
+			case <-idleTimer.C:
+			default:
+			}
+		}
+		idleTimer.Reset(micIdleTimeout)
+	}
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-idleTimer.C:
+				router.ClearMic()
+			}
+		}
+	}()
 	for {
 		select {
 		case <-ctx.Done():
@@ -53,6 +75,7 @@ func (m *Manager) consumeCommentatorMic(ctx context.Context, channelID int, tr *
 				continue
 			}
 			router.PushMic(pcm[:n])
+			resetIdle()
 		}
 	}
 }

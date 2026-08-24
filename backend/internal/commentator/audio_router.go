@@ -31,12 +31,6 @@ func (r *AudioRouter) SetPTT(channel int) {
 	r.mu.Unlock()
 }
 
-func (r *AudioRouter) PTT() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.pttChannel
-}
-
 func (r *AudioRouter) PushMic(pcm []int16) {
 	if len(pcm) == 0 {
 		return
@@ -52,6 +46,21 @@ func (r *AudioRouter) PushMic(pcm []int16) {
 		r.mic[i] = 0
 	}
 	r.hasMic = true
+}
+
+func (r *AudioRouter) ClearMic() {
+	r.mu.Lock()
+	r.hasMic = false
+	for i := range r.mic {
+		r.mic[i] = 0
+	}
+	r.mu.Unlock()
+}
+
+func (r *AudioRouter) PTT() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.pttChannel
 }
 
 func (r *AudioRouter) Frame8ch() []byte {

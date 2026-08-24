@@ -32,6 +32,19 @@ func TestAudioRouterPTTIntercom(t *testing.T) {
 	}
 }
 
+func TestAudioRouterClearMic(t *testing.T) {
+	r := NewAudioRouter()
+	r.PushMic([]int16{1000})
+	r.ClearMic()
+	frame := r.Frame8ch()
+	samples := bytesToInt16(frame)
+	for i, s := range samples {
+		if s != 0 {
+			t.Fatalf("sample %d should be silent, got %d", i, s)
+		}
+	}
+}
+
 func bytesToInt16(b []byte) []int16 {
 	out := make([]int16, len(b)/2)
 	for i := range out {

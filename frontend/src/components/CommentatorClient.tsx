@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CommentatorIntercomSlot } from "@/lib/api";
 import {
   CommentatorSession,
@@ -21,9 +21,7 @@ export default function CommentatorClient({ token }: Props) {
   const [pttActive, setPttActive] = useState<number | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  useEffect(() => {
-    const session = new CommentatorSession(token);
-    sessionRef.current = session;
+  const bindSession = useCallback((session: CommentatorSession) => {
     session.onState = setState;
     session.onError = (msg) => setError(msg);
     session.onIntercom = (slots) => {
@@ -41,6 +39,12 @@ export default function CommentatorClient({ token }: Props) {
         videoRef.current.srcObject = stream;
       }
     };
+  }, []);
+
+  useEffect(() => {
+    const session = new CommentatorSession(token);
+    sessionRef.current = session;
+    bindSession(session);
 
     void session.start().catch((e) => {
       setError(String(e));
@@ -51,7 +55,19 @@ export default function CommentatorClient({ token }: Props) {
       session.stop();
       sessionRef.current = null;
     };
-  }, [token]);
+  }, [token, bindSession]);
+
+  const reconnect = () => {
+    sessionRef.current?.stop();
+    setError(null);
+    const session = new CommentatorSession(token);
+    sessionRef.current = session;
+    bindSession(session);
+    void session.start().catch((e) => {
+      setError(String(e));
+      setState("failed");
+    });
+  };
 
   useEffect(() => {
     sessionRef.current?.setPGMVolume(pgmVol);
@@ -90,6 +106,11 @@ export default function CommentatorClient({ token }: Props) {
       <header className="commentator-header">
         <h1>Remote Commentator</h1>
         <p className="commentator-subtitle">Status: {state}</p>
+        {(state === "failed" || state === "reconnecting") && (
+          <button type="button" className="commentator-reconnect" onClick={reconnect}>
+            Återanslut
+          </button>
+        )}
       </header>
 
       {error && <div className="error-message">{error}</div>}

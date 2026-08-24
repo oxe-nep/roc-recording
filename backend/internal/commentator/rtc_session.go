@@ -129,6 +129,10 @@ func (m *Manager) endRTCSession(channelID int, sess *rtcSession) {
 	if sess == nil {
 		return
 	}
+	if sess.router != nil {
+		sess.router.SetPTT(0)
+		sess.router.ClearMic()
+	}
 	sess.stop()
 	m.mu.Lock()
 	if cur, ok := m.rtcByChannel[channelID]; ok && cur == sess {

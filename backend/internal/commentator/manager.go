@@ -63,6 +63,7 @@ type Manager struct {
 	channelInputs map[int]string
 	ice           ICEConfig
 	playout       PlayoutBridge
+	joinLimit     *joinLimiter
 	byID          map[int]*channel
 	rtcByChannel  map[int]*rtcSession
 }
@@ -79,6 +80,7 @@ func NewManager(settings *Store, publicBaseURL string, ffmpegBin string, channel
 		channelInputs: channelInputs,
 		ice:           ice,
 		playout:       playout,
+		joinLimit:     newJoinLimiter(),
 		byID:          make(map[int]*channel),
 		rtcByChannel:  make(map[int]*rtcSession),
 	}

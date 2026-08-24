@@ -57,7 +57,7 @@ func (m *Manager) startRTCSession(channelID int, token string) (*rtcSession, err
 
 	ctx, cancel := context.WithCancel(context.Background())
 	router := NewAudioRouter()
-	videoFrames := make(chan []byte, 2)
+	videoFrames := make(chan []byte, 1)
 	sess := &rtcSession{
 		channelID:   channelID,
 		token:       token,

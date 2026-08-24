@@ -138,11 +138,11 @@ func (m *Manager) runFFmpegInboundOnce(
 		"-tune", "zerolatency",
 		"-b:v", "2500k",
 		"-maxrate", "3000k",
-		"-bufsize", "1500k",
+		"-bufsize", "500k",
 		"-g", "25",
 		"-keyint_min", "25",
 		"-bf", "0",
-		"-x264-params", "repeat-headers=1:annexb=1:scenecut=0:keyint=25:min-keyint=25",
+		"-x264-params", "repeat-headers=1:annexb=1:scenecut=0:keyint=25:min-keyint=25:rc-lookahead=0:sync-lookahead=0:sliced-threads=1",
 		"-f", "h264",
 		"pipe:1",
 	)

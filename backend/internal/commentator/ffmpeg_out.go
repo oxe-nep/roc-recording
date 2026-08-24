@@ -106,7 +106,7 @@ func (m *Manager) runFFmpegOutboundOnce(ctx context.Context, channelID int, rout
 	if formatCode != "" && !isAllDigits(formatCode) {
 		args = append(args, "-format_code", formatCode)
 	}
-	args = append(args, "-preroll", "0.5", "-f", "decklink", openDevice)
+	args = append(args, "-preroll", "0.12", "-f", "decklink", openDevice)
 
 	cmd := exec.CommandContext(ctx, m.ffmpegBin, args...)
 	cmd.Stdin = videoR

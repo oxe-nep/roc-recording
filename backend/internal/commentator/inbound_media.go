@@ -133,7 +133,7 @@ func (m *Manager) requestPLI(ctx context.Context, pc *webrtc.PeerConnection, tr 
 }
 
 func (m *Manager) consumeH264Webcam(ctx context.Context, channelID int, tr *webrtc.TrackRemote, frames chan<- []byte) {
-	builder := samplebuilder.New(60, &codecs.H264Packet{}, tr.Codec().ClockRate)
+	builder := samplebuilder.New(20, &codecs.H264Packet{}, tr.Codec().ClockRate)
 
 	// Buffer until first IDR so the annex-B decoder can start cleanly.
 	var idr []byte
@@ -227,8 +227,9 @@ func (m *Manager) runWebcamH264Decoder(ctx context.Context, channelID int, r io.
 	}
 	args := []string{
 		"-hide_banner", "-loglevel", "warning",
-		"-probesize", "1000000", "-analyzeduration", "1000000",
-		"-fflags", "nobuffer+genpts",
+		"-probesize", "32768", "-analyzeduration", "0",
+		"-fflags", "nobuffer+genpts+flush_packets",
+		"-flags", "low_delay",
 		"-f", "h264", "-i", "pipe:0",
 		"-vf", "scale=1280:720:flags=fast_bilinear",
 		"-r", "25",
@@ -239,7 +240,7 @@ func (m *Manager) runWebcamH264Decoder(ctx context.Context, channelID int, r io.
 }
 
 func (m *Manager) consumeVP8Webcam(ctx context.Context, channelID int, tr *webrtc.TrackRemote, frames chan<- []byte) {
-	builder := samplebuilder.New(60, &codecs.VP8Packet{}, tr.Codec().ClockRate)
+	builder := samplebuilder.New(20, &codecs.VP8Packet{}, tr.Codec().ClockRate)
 
 	// Do not start FFmpeg until we have a real keyframe — otherwise:
 	// "Discarding interframe without a prior keyframe" and black DeckLink.
@@ -388,8 +389,9 @@ func (m *Manager) runWebcamVP8Decoder(ctx context.Context, channelID int, r io.R
 	}
 	args := []string{
 		"-hide_banner", "-loglevel", "warning",
-		"-probesize", "1000000", "-analyzeduration", "1000000",
-		"-fflags", "nobuffer",
+		"-probesize", "32768", "-analyzeduration", "0",
+		"-fflags", "nobuffer+flush_packets",
+		"-flags", "low_delay",
 		"-f", "ivf", "-i", "pipe:0",
 		"-vf", "scale=1280:720:flags=fast_bilinear",
 		"-r", "25",

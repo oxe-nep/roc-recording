@@ -1230,8 +1230,9 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	if useDeckLink && source == SourceFile {
 		var vdl string
 		if fmtInfo.Interlaced {
+			// Progressive 50p file → 50 fields/s for Hi50 (tinterlace pairs frames).
 			vdl = fmt.Sprintf(
-				"[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,setpts=PTS-STARTPTS,fps=25,fps=%g,tinterlace=interleave_top,format=yuv422p10le[v]",
+				"[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,setpts=PTS-STARTPTS,fps=%g,tinterlace=interleave_top,format=yuv422p10le[v]",
 				w, h, w, h, fps*2,
 			)
 		} else {

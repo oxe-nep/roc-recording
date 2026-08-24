@@ -679,7 +679,7 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	}
 	filterGraph := "[0:v]yadif=mode=0:deint=interlaced,split=2[vrec][vprevsrc];" +
 		"[vprevsrc]scale=640:360,fps=10,format=yuv420p[vprev];" +
-		"[vrec]fps=25,format=yuv420p[vrecout];" +
+		"[vrec]fps=50,format=yuv420p[vrecout];" +
 		"[0:a]" + audiox.Discrete8Pan + ",asplit=3[aencsrc][ameter][aprevsrc];" +
 		audiox.PreviewPairGraph("[aprevsrc]") +
 		encodeTap +
@@ -706,7 +706,7 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"-bufsize", enc.VideoBufsize,
 		"-preset", enc.VideoPreset,
 		"-g", gop,
-		"-r", "25",
+		"-r", "50",
 		"-fps_mode", "cfr",
 		"-bf", "0",
 	)

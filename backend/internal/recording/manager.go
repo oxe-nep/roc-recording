@@ -28,9 +28,8 @@ const (
 // FFmpeg progress lines look like:
 // frame= 100 fps=50 ... time=00:00:02.00 bitrate=5120.5kbits/s speed=1.0x
 var (
-	reFFTime    = regexp.MustCompile(`(?:time|out_time)=(\d+):(\d+):(\d+(?:\.\d+)?)`)
-	reFFBitrate = regexp.MustCompile(`bitrate=\s*([0-9.]+)\s*([kKmM])?bits/s`)
-	reFFOutMS   = regexp.MustCompile(`out_time_ms=(\d+)`)
+	reFFTime  = regexp.MustCompile(`(?:time|out_time)=(\d+):(\d+):(\d+(?:\.\d+)?)`)
+	reFFOutMS = regexp.MustCompile(`out_time_ms=(\d+)`)
 )
 
 type recState struct {
@@ -42,7 +41,6 @@ type recState struct {
 	category    string // global library folder under recordings_dir
 	cmd         *exec.Cmd
 	elapsedSec  float64
-	bitrateKbps float64
 	encoding    bool // true after FFmpeg reports real progress
 
 	hasSched   bool
@@ -141,7 +139,6 @@ func (m *Manager) buildInfoAt(id int, st *recState, now time.Time) ChannelInfo {
 		info.Encoding = st.encoding
 		if st.encoding {
 			info.ElapsedSec = st.elapsedSec
-			info.BitrateKbps = st.bitrateKbps
 		}
 	}
 	return info
@@ -296,7 +293,6 @@ func (m *Manager) Start(id int) (ChannelInfo, error) {
 	st.filePath = mp4Path
 	st.cmd = cmd
 	st.elapsedSec = 0
-	st.bitrateKbps = 0
 	st.encoding = false
 
 	go m.watchProgress(id, st, stdout)
@@ -309,7 +305,6 @@ func (m *Manager) Start(id int) (ChannelInfo, error) {
 			state.cmd = nil
 			state.status = StatusIdle
 			state.elapsedSec = 0
-			state.bitrateKbps = 0
 			state.encoding = false
 		}
 		if err != nil {
@@ -335,7 +330,7 @@ func (m *Manager) watchProgress(id int, st *recState, r io.Reader) {
 	scanner := newProgressScanner(r)
 	for scanner.Scan() {
 		line := scanner.Text()
-		elapsed, bitrate, ok := parseProgress(line)
+		elapsed, ok := parseProgress(line)
 		if !ok {
 			continue
 		}
@@ -344,11 +339,7 @@ func (m *Manager) watchProgress(id int, st *recState, r io.Reader) {
 			if elapsed > 0 {
 				st.elapsedSec = elapsed
 			}
-			if bitrate > 0 {
-				st.bitrateKbps = bitrate
-			}
-			// Consider encoding active once FFmpeg reports real media progress.
-			if !st.encoding && (elapsed > 0.2 || bitrate > 0) {
+			if !st.encoding && elapsed > 0.2 {
 				st.encoding = true
 				log.Printf("[recording %d] Remux active (ffmpeg progress)", id)
 			}
@@ -391,10 +382,10 @@ func bytesIndexAny(data []byte, chars string) int {
 	return -1
 }
 
-func parseProgress(line string) (elapsedSec, bitrateKbps float64, ok bool) {
+func parseProgress(line string) (elapsedSec float64, ok bool) {
 	line = strings.TrimSpace(line)
 	if line == "" {
-		return 0, 0, false
+		return 0, false
 	}
 
 	if mm := reFFOutMS.FindStringSubmatch(line); mm != nil {
@@ -409,20 +400,7 @@ func parseProgress(line string) (elapsedSec, bitrateKbps float64, ok bool) {
 		elapsedSec = h*3600 + m*60 + s
 		ok = true
 	}
-	if br := reFFBitrate.FindStringSubmatch(line); br != nil {
-		val, _ := strconv.ParseFloat(br[1], 64)
-		unit := strings.ToLower(br[2])
-		switch unit {
-		case "m":
-			bitrateKbps = val * 1000
-		case "k", "":
-			bitrateKbps = val
-		default:
-			bitrateKbps = val
-		}
-		ok = true
-	}
-	return elapsedSec, bitrateKbps, ok
+	return elapsedSec, ok
 }
 
 func (m *Manager) Stop(id int) (ChannelInfo, error) {
@@ -485,7 +463,6 @@ func (m *Manager) stopRecording(id int) (ChannelInfo, error) {
 	st.cmd = nil
 	st.status = StatusIdle
 	st.elapsedSec = 0
-	st.bitrateKbps = 0
 	st.encoding = false
 	info := m.buildInfo(id, st)
 	st.mu.Unlock()

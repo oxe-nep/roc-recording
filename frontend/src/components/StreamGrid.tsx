@@ -178,7 +178,7 @@ export default function StreamGrid() {
                     <div className="thumb-badges">
                       {isEncoding && (
                         <div className="rec-badge">
-                          REC · {formatElapsed(rec?.elapsed_sec)} · {formatBitrate(rec?.bitrate_kbps)}
+                          REC · {formatElapsed(rec?.elapsed_sec)}
                         </div>
                       )}
                       {isRecording && !isEncoding && (

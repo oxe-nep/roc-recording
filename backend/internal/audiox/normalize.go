@@ -135,7 +135,6 @@ func FileTo8(fileIdx int, chs []int) (filter, outPad string) {
 		chs = []int{Channels}
 	}
 	if len(chs) == 1 {
-		src := fmt.Sprintf("[%d:a]", fileIdx)
 		n := chs[0]
 		if n > Channels {
 			n = Channels
@@ -143,59 +142,54 @@ func FileTo8(fileIdx int, chs []int) (filter, outPad string) {
 		if n < 1 {
 			n = 1
 		}
-		return src + "aresample=48000," + PanTo8(n) + outPad, outPad
+		src := fmt.Sprintf("[%d:a]", fileIdx)
+		return src + "aresample=48000:async=1:first_pts=0," + PanTo8(n) + outPad, outPad
 	}
 
 	var parts []string
-	var lanes []string
-	lane := 0
+	var pads []string
+	filled := 0
 	for si, ch := range chs {
-		if lane >= Channels {
+		if filled >= Channels {
 			break
 		}
-		in := fmt.Sprintf("[%d:a:%d]", fileIdx, si)
 		if ch < 1 {
 			ch = 1
 		}
-		if ch == 1 {
-			pad := fmt.Sprintf("ln%d", lane)
-			parts = append(parts, in+"aresample=48000,aformat=channel_layouts=mono["+pad+"]")
-			lanes = append(lanes, "["+pad+"]")
-			lane++
-			continue
-		}
 		take := ch
-		if take > Channels-lane {
-			take = Channels - lane
+		if take > Channels-filled {
+			take = Channels - filled
 		}
-		splitName := fmt.Sprintf("sp%d", si)
-		parts = append(parts, fmt.Sprintf("%saresample=48000,asplit=%d", in, take)+splitPads(splitName, take))
-		for c := 0; c < take; c++ {
-			pad := fmt.Sprintf("ln%d", lane)
-			parts = append(parts, fmt.Sprintf("[%s%d]pan=mono|c0=c%d[%s]", splitName, c, c, pad))
-			lanes = append(lanes, "["+pad+"]")
-			lane++
+		in := fmt.Sprintf("[%d:a:%d]", fileIdx, si)
+		name := fmt.Sprintf("s%d", si)
+		rs := "aresample=48000:async=1:first_pts=0"
+		if take < ch {
+			parts = append(parts, fmt.Sprintf("%s%s,%s[%s]", in, rs, panCopy(take), name))
+		} else {
+			parts = append(parts, fmt.Sprintf("%s%s[%s]", in, rs, name))
 		}
+		pads = append(pads, "["+name+"]")
+		filled += take
 	}
-	n := len(lanes)
+	n := len(pads)
 	if n == 0 {
 		src := fmt.Sprintf("[%d:a]", fileIdx)
-		return src + "aresample=48000," + PanTo8(2) + outPad, outPad
+		return src + "aresample=48000:async=1:first_pts=0," + PanTo8(2) + outPad, outPad
 	}
-	merged := strings.Join(lanes, "") + fmt.Sprintf("amerge=inputs=%d", n)
-	if n >= Channels {
-		return strings.Join(parts, ";") + ";" + merged + ",aformat=channel_layouts=7.1" + outPad, outPad
-	}
-	return strings.Join(parts, ";") + ";" + merged + "," + PanTo8(n) + outPad, outPad
+	merged := strings.Join(pads, "") + fmt.Sprintf("amerge=inputs=%d", n)
+	return strings.Join(parts, ";") + ";" + merged + "," + PanTo8(min(filled, Channels)) + outPad, outPad
 }
 
-func splitPads(prefix string, n int) string {
-	var b strings.Builder
-	for i := 0; i < n; i++ {
-		b.WriteByte('[')
-		b.WriteString(prefix)
-		b.WriteString(strconv.Itoa(i))
-		b.WriteByte(']')
+func panCopy(n int) string {
+	if n > Channels {
+		n = Channels
 	}
-	return b.String()
+	if n < 1 {
+		n = 1
+	}
+	parts := make([]string, n)
+	for i := 0; i < n; i++ {
+		parts[i] = fmt.Sprintf("c%d=c%d", i, i)
+	}
+	return fmt.Sprintf("pan=%dc|%s", n, strings.Join(parts, "|"))
 }

@@ -20,12 +20,6 @@ import AudioMeters from "@/components/AudioMeters";
 import ListenButton from "@/components/ListenButton";
 import DecodeSettingsModal from "@/components/DecodeSettingsModal";
 
-function formatBitrate(kbps?: number): string {
-  if (!kbps || kbps <= 0) return "--";
-  if (kbps >= 1000) return `${(kbps / 1000).toFixed(1)} Mbit/s`;
-  return `${kbps.toFixed(0)} kbit/s`;
-}
-
 function formatClock(sec?: number): string {
   if (sec == null || !Number.isFinite(sec) || sec < 0) return "--:--";
   const s = Math.floor(sec);

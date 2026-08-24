@@ -1271,6 +1271,8 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			"-hide_banner", "-loglevel", "info",
 			"-fflags", "+genpts+discardcorrupt",
 			"-nostats",
+			"-threads", "2",
+			"-filter_complex_threads", "2",
 			"-re",
 			"-stream_loop", "-1",
 		}
@@ -1455,7 +1457,7 @@ func (m *Manager) runFileDeckLinkAndPreview(
 
 	c.mu.Lock()
 	c.cmd = dlCmd
-	c.previewCmd = prevCmd
+	c.previewCmd = nil
 	c.LastError = ""
 	c.mu.Unlock()
 
@@ -1468,19 +1470,8 @@ func (m *Manager) runFileDeckLinkAndPreview(
 	if err := dlCmd.Start(); err != nil {
 		c.mu.Lock()
 		c.cmd = nil
-		c.previewCmd = nil
 		c.mu.Unlock()
 		return err
-	}
-
-	var prevDone chan error
-	if err := prevCmd.Start(); err != nil {
-		c.appendLog(fmt.Sprintf("preview ffmpeg failed to start: %v (DeckLink continues)", err))
-		prevCmd = nil
-	} else {
-		go m.watchStderr(c, prevStderr)
-		prevDone = make(chan error, 1)
-		go func() { prevDone <- prevCmd.Wait() }()
 	}
 
 	go m.watchStderr(c, dlStderr)
@@ -1490,17 +1481,47 @@ func (m *Manager) runFileDeckLinkAndPreview(
 	dlDone := make(chan error, 1)
 	go func() { dlDone <- dlCmd.Wait() }()
 
+	// DeckLink preroll first so the second decode does not starve SDI at start
+	// (especially 4×AAC / 8ch files).
+	previewDelay := time.NewTimer(500 * time.Millisecond)
+	defer previewDelay.Stop()
+
+	var prevDone chan error
+	previewLive := false
+	startPreview := func() {
+		if previewLive || prevCmd == nil {
+			return
+		}
+		previewLive = true
+		previewDelay.Stop()
+		if err := prevCmd.Start(); err != nil {
+			c.appendLog(fmt.Sprintf("preview ffmpeg failed to start: %v (DeckLink continues)", err))
+			prevCmd = nil
+			return
+		}
+		c.mu.Lock()
+		c.previewCmd = prevCmd
+		c.mu.Unlock()
+		go m.watchStderr(c, prevStderr)
+		prevDone = make(chan error, 1)
+		go func() { prevDone <- prevCmd.Wait() }()
+	}
+
 	for {
+		var prevWait <-chan error
+		if prevDone != nil {
+			prevWait = prevDone
+		}
 		select {
 		case <-stopCh:
 			killProc(dlCmd)
-			if prevCmd != nil {
+			if previewLive && prevCmd != nil {
 				killProc(prevCmd)
 			}
 			<-dlDone
-			if prevDone != nil {
+			if prevWait != nil {
 				select {
-				case <-prevDone:
+				case <-prevWait:
 				case <-time.After(2 * time.Second):
 				}
 			}
@@ -1509,13 +1530,17 @@ func (m *Manager) runFileDeckLinkAndPreview(
 			c.previewCmd = nil
 			c.mu.Unlock()
 			return nil
+		case <-previewDelay.C:
+			startPreview()
 		case err := <-dlDone:
-			if prevCmd != nil {
+			if previewLive && prevCmd != nil {
 				killProc(prevCmd)
-				select {
-				case <-prevDone:
-				case <-time.After(2 * time.Second):
-					killProc(prevCmd)
+				if prevWait != nil {
+					select {
+					case <-prevWait:
+					case <-time.After(2 * time.Second):
+						killProc(prevCmd)
+					}
 				}
 			}
 			c.mu.Lock()
@@ -1528,7 +1553,7 @@ func (m *Manager) runFileDeckLinkAndPreview(
 			}
 			c.mu.Unlock()
 			return err
-		case err := <-prevDone:
+		case err := <-prevWait:
 			if err != nil {
 				c.appendLog(fmt.Sprintf("preview ffmpeg exited: %v – DeckLink continues", err))
 			} else {
@@ -1539,6 +1564,7 @@ func (m *Manager) runFileDeckLinkAndPreview(
 			c.mu.Unlock()
 			prevDone = nil
 			prevCmd = nil
+			previewLive = false
 		}
 	}
 }

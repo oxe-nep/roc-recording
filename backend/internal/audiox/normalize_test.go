@@ -86,25 +86,31 @@ func TestFileTo8SingleStereo(t *testing.T) {
 	if pad != "[a8]" {
 		t.Fatalf("pad %q", pad)
 	}
-	if g != "[0:a]aresample=48000,pan=8c|c0=c0|c1=c1[a8]" {
+	if g != "[0:a]aresample=48000:async=1:first_pts=0,pan=8c|c0=c0|c1=c1[a8]" {
 		t.Fatalf("graph %q", g)
 	}
 }
 
 func TestFileTo8EightMonoMerges(t *testing.T) {
 	g, _ := FileTo8(0, []int{1, 1, 1, 1, 1, 1, 1, 1})
-	for _, part := range []string{"[0:a:0]", "[0:a:7]", "amerge=inputs=8", "aformat=channel_layouts=7.1[a8]"} {
+	for _, part := range []string{"[0:a:0]", "[0:a:7]", "amerge=inputs=8", "pan=8c|"} {
 		if !strings.Contains(g, part) {
 			t.Fatalf("missing %q in %q", part, g)
 		}
+	}
+	if strings.Contains(g, "7.1") || strings.Contains(g, "asplit=") {
+		t.Fatalf("unexpected heavy graph %q", g)
 	}
 }
 
 func TestFileTo8FourStereo(t *testing.T) {
 	g, _ := FileTo8(0, []int{2, 2, 2, 2})
-	for _, part := range []string{"asplit=2", "amerge=inputs=8", "[0:a:3]"} {
+	for _, part := range []string{"amerge=inputs=4", "[0:a:3]", "pan=8c|"} {
 		if !strings.Contains(g, part) {
 			t.Fatalf("missing %q in %q", part, g)
 		}
+	}
+	if strings.Contains(g, "asplit=") || strings.Contains(g, "7.1") {
+		t.Fatalf("unexpected heavy graph %q", g)
 	}
 }

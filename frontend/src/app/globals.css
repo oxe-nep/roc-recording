@@ -2559,6 +2559,34 @@ body:has(.commentator-root) .container {
   letter-spacing: 0.08em;
 }
 
+.commentator-stats-overlay {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  right: 8px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #d4f5d4;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.commentator-stats-pair {
+  color: #9ec9ff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.commentator-stats-warn {
+  color: #ffb86b;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 .commentator-controls {
   display: flex;
   flex-direction: column;

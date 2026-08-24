@@ -16,6 +16,24 @@ export type CommentatorConnectionState =
   | "reconnecting"
   | "failed";
 
+/** Live receive/send diagnostics for the program + webcam legs. */
+export type CommentatorRTCStats = {
+  videoInKbps: number;
+  videoInFps: number;
+  videoPacketsLost: number;
+  videoPacketsReceived: number;
+  videoLossPct: number;
+  videoJitterMs: number;
+  videoFramesDecoded: number;
+  videoFramesDropped: number;
+  videoFreezeCount: number;
+  videoCodec: string;
+  audioInKbps: number;
+  audioPacketsLost: number;
+  iceState: string;
+  candidatePair: string;
+};
+
 /** Commentator page always talks to backend via same origin (nginx proxy). */
 function commentatorOrigin(): string {
   if (typeof window !== "undefined") return window.location.origin;
@@ -80,13 +98,21 @@ export class CommentatorSession {
   private readonly maxReconnects = 3;
   private iceServers: RTCIceServer[] = [];
   private iceTimer: ReturnType<typeof setTimeout> | null = null;
+  private statsTimer: ReturnType<typeof setInterval> | null = null;
   private audioUnlocked = false;
+  private prevStats: {
+    ts: number;
+    bytesReceived: number;
+    audioBytes: number;
+    framesDecoded: number;
+  } | null = null;
 
   onState?: (state: CommentatorConnectionState) => void;
   onError?: (message: string) => void;
   onIntercom?: (slots: CommentatorIntercomSlot[]) => void;
   onRemoteVideo?: (stream: MediaStream) => void;
   onAudioLocked?: (locked: boolean) => void;
+  onStats?: (stats: CommentatorRTCStats) => void;
 
   constructor(private readonly token: string) {}
 
@@ -172,6 +198,97 @@ export class CommentatorSession {
     this.reconnectAttempts = 0;
     this.onState?.("connected");
     void this.unlockAudio();
+    this.startStatsPolling();
+  }
+
+  private startStatsPolling() {
+    if (this.statsTimer) clearInterval(this.statsTimer);
+    this.prevStats = null;
+    void this.pollStats();
+    this.statsTimer = setInterval(() => void this.pollStats(), 2000);
+  }
+
+  private async pollStats() {
+    if (!this.pc || !this.onStats) return;
+    try {
+      const report = await this.pc.getStats();
+      let inboundVideo: RTCInboundRtpStreamStats | undefined;
+      let inboundAudio: RTCInboundRtpStreamStats | undefined;
+      let codecMap = new Map<string, string>();
+      let pairLabel = "";
+      let iceState = this.pc.iceConnectionState;
+
+      report.forEach((r) => {
+        if (r.type === "codec") {
+          const c = r as unknown as { id: string; mimeType?: string };
+          if (c.mimeType) codecMap.set(c.id, c.mimeType);
+        }
+        if (r.type === "inbound-rtp") {
+          const s = r as RTCInboundRtpStreamStats;
+          if (s.kind === "video" || (s as { mediaType?: string }).mediaType === "video") {
+            inboundVideo = s;
+          } else if (s.kind === "audio" || (s as { mediaType?: string }).mediaType === "audio") {
+            if (!inboundAudio) inboundAudio = s;
+          }
+        }
+        if (r.type === "candidate-pair") {
+          const p = r as RTCIceCandidatePairStats;
+          if (p.state === "succeeded" && p.nominated) {
+            const local = report.get(p.localCandidateId || "") as
+              | { candidateType?: string }
+              | undefined;
+            const remote = report.get(p.remoteCandidateId || "") as
+              | { candidateType?: string; address?: string; ip?: string; port?: number }
+              | undefined;
+            const addr = remote?.address || remote?.ip || "";
+            pairLabel = `${local?.candidateType || "?"}->${remote?.candidateType || "?"} ${addr}:${remote?.port || ""}`;
+          }
+        }
+      });
+
+      const now = performance.now();
+      const bytes = inboundVideo?.bytesReceived ?? 0;
+      const audioBytes = inboundAudio?.bytesReceived ?? 0;
+      const framesDecoded = inboundVideo?.framesDecoded ?? 0;
+      let videoInKbps = 0;
+      let videoInFps = 0;
+      let audioInKbps = 0;
+      if (this.prevStats) {
+        const dt = (now - this.prevStats.ts) / 1000;
+        if (dt > 0.2) {
+          videoInKbps = ((bytes - this.prevStats.bytesReceived) * 8) / dt / 1000;
+          audioInKbps = ((audioBytes - this.prevStats.audioBytes) * 8) / dt / 1000;
+          videoInFps = (framesDecoded - this.prevStats.framesDecoded) / dt;
+        }
+      }
+      this.prevStats = { ts: now, bytesReceived: bytes, audioBytes, framesDecoded };
+
+      const lost = inboundVideo?.packetsLost ?? 0;
+      const received = inboundVideo?.packetsReceived ?? 0;
+      const total = lost + received;
+      const videoLossPct = total > 0 ? (lost / total) * 100 : 0;
+      const codecId = inboundVideo?.codecId || "";
+      const videoCodec = codecMap.get(codecId) || "—";
+
+      this.onStats({
+        videoInKbps: Math.max(0, Math.round(videoInKbps)),
+        videoInFps: Math.max(0, Math.round(videoInFps * 10) / 10),
+        videoPacketsLost: lost,
+        videoPacketsReceived: received,
+        videoLossPct: Math.round(videoLossPct * 10) / 10,
+        videoJitterMs: Math.round((inboundVideo?.jitter ?? 0) * 1000),
+        videoFramesDecoded: framesDecoded,
+        videoFramesDropped: inboundVideo?.framesDropped ?? 0,
+        videoFreezeCount: (inboundVideo as { freezeCount?: number })?.freezeCount ?? 0,
+        videoCodec,
+        audioInKbps: Math.max(0, Math.round(audioInKbps)),
+        audioPacketsLost: inboundAudio?.packetsLost ?? 0,
+        iceState,
+        candidatePair: pairLabel || "—",
+      });
+    } catch {
+      /* ignore */
+    }
   }
 
   private startIceTimeout() {
@@ -362,6 +479,10 @@ export class CommentatorSession {
     if (this.iceTimer) {
       clearTimeout(this.iceTimer);
       this.iceTimer = null;
+    }
+    if (this.statsTimer) {
+      clearInterval(this.statsTimer);
+      this.statsTimer = null;
     }
     this.send({ type: "ptt", channel: 0 });
     this.ws?.close();

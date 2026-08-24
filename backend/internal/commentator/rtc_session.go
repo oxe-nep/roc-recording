@@ -147,6 +147,7 @@ func (m *Manager) negotiateAnswer(sess *rtcSession, channelID int, answerSDP str
 func (m *Manager) startMediaPipelines(sess *rtcSession, channelID int) {
 	sess.mediaStarted.Do(func() {
 		log.Printf("[commentator %d] WebRTC connected — starting DeckLink/ffmpeg pipelines", channelID)
+		go m.logPeerStats(sess.ctx.Done(), channelID, sess.pc)
 		go m.runFFmpegInbound(sess.ctx, channelID, sess.videoTrack, sess.pgmTrack, sess.enabledIntercom, sess.intercomTracks, nil)
 		go m.runFFmpegOutbound(sess.ctx, channelID, sess.router, sess.videoFrames)
 	})

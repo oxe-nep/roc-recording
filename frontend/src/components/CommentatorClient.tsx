@@ -5,6 +5,7 @@ import type { CommentatorIntercomSlot } from "@/lib/api";
 import {
   CommentatorSession,
   type CommentatorConnectionState,
+  type CommentatorRTCStats,
 } from "@/lib/commentatorWebRTC";
 
 type Props = {
@@ -30,12 +31,14 @@ export default function CommentatorClient({ token }: Props) {
   const [intercomVol, setIntercomVol] = useState<Record<number, number>>({});
   const [pttActive, setPttActive] = useState<number | null>(null);
   const [audioLocked, setAudioLocked] = useState(false);
+  const [rtcStats, setRtcStats] = useState<CommentatorRTCStats | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const bindSession = useCallback((session: CommentatorSession) => {
     session.onState = setState;
     session.onError = (msg) => setError(msg);
     session.onAudioLocked = setAudioLocked;
+    session.onStats = setRtcStats;
     session.onIntercom = (slots) => {
       setIntercom(slots);
       setIntercomVol((prev) => {
@@ -161,8 +164,35 @@ export default function CommentatorClient({ token }: Props) {
                 <span>{STATE_LABELS[state]}</span>
               </div>
             )}
+            {state === "connected" && rtcStats && (
+              <div className="commentator-stats-overlay" title="WebRTC receive stats for program video">
+                <div>
+                  {rtcStats.videoCodec} · {rtcStats.videoInKbps} kb/s · {rtcStats.videoInFps} fps
+                </div>
+                <div>
+                  loss {rtcStats.videoLossPct}% ({rtcStats.videoPacketsLost}/{rtcStats.videoPacketsReceived}) · jitter{" "}
+                  {rtcStats.videoJitterMs} ms
+                </div>
+                <div>
+                  decoded {rtcStats.videoFramesDecoded} · dropped {rtcStats.videoFramesDropped}
+                  {rtcStats.videoFreezeCount > 0 ? ` · freezes ${rtcStats.videoFreezeCount}` : ""}
+                </div>
+                <div>
+                  audio {rtcStats.audioInKbps} kb/s · lost {rtcStats.audioPacketsLost} · {rtcStats.iceState}
+                </div>
+                <div className="commentator-stats-pair">{rtcStats.candidatePair}</div>
+              </div>
+            )}
           </div>
-          <p className="commentator-video-caption">Program feed</p>
+          <p className="commentator-video-caption">
+            Program feed
+            {rtcStats && rtcStats.videoLossPct >= 2 && (
+              <span className="commentator-stats-warn"> — high packet loss (VPN/UDP?)</span>
+            )}
+            {rtcStats && rtcStats.videoLossPct < 1 && rtcStats.videoInKbps > 0 && rtcStats.videoInKbps < 800 && (
+              <span className="commentator-stats-warn"> — low bitrate / encoder starved</span>
+            )}
+          </p>
         </section>
 
         <aside className="commentator-controls">

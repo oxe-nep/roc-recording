@@ -238,7 +238,7 @@ func (m *Manager) runFFmpegInboundOnce(
 		}
 	}()
 
-	go m.pipeH264ToTrack(pipeCtx, stdout, videoTrack)
+	go m.pipeH264ToTrack(pipeCtx, stdout, videoTrack, channelID)
 	for _, p := range pipes {
 		go m.pipePCMToOpusTrack(pipeCtx, p.reader, p.track, p.stereo)
 	}
@@ -355,7 +355,17 @@ func (m *Manager) runTestPattern(ctx context.Context, videoTrack *webrtc.TrackLo
 	}
 }
 
-func (m *Manager) pipeH264ToTrack(ctx context.Context, r io.Reader, track *webrtc.TrackLocalStaticSample) {
+func (m *Manager) pipeH264ToTrack(ctx context.Context, r io.Reader, track *webrtc.TrackLocalStaticSample, channelID int) {
+	if dump := dumpH264Path(); dump != "" {
+		path := fmt.Sprintf("%s-ch%d.h264", dump, channelID)
+		if f, err := os.Create(path); err != nil {
+			log.Printf("[commentator %d] h264 dump open: %v", channelID, err)
+		} else {
+			log.Printf("[commentator %d] dumping program H264 → %s  (ffplay -f h264 %s)", channelID, path, path)
+			defer f.Close()
+			r = io.TeeReader(r, f)
+		}
+	}
 	writer := newH264TrackWriter(track)
 	tmp := make([]byte, 32*1024)
 	for {

@@ -410,6 +410,7 @@ func (m *Manager) pipePCMToOpusTrack(ctx context.Context, r io.Reader, track *we
 	}
 	_ = enc.SetBitrate(64000)
 	_ = enc.SetInBandFEC(true)
+	_ = enc.SetPacketLossPerc(20)
 	frameSamples := samplesPerFrame * channels
 	pcmBytes := make([]byte, frameSamples*2)
 	pcm := make([]int16, frameSamples)

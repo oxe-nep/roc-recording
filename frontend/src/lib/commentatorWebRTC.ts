@@ -403,10 +403,10 @@ export class CommentatorSession {
       if (videoTrack) this.pc.addTrack(videoTrack, this.localStream);
       if (audioTrack) this.pc.addTrack(audioTrack, this.localStream);
 
-      // Prefer VP8 for webcam — we IVF-mux it for FFmpeg; H264 annex-B is also supported.
+      // Prefer H264 for webcam — VP8 is supported but needs a clean keyframe start.
       for (const tx of this.pc.getTransceivers()) {
         if (tx.sender.track?.kind !== "video") continue;
-        preferSendCodec(tx, "video/VP8");
+        preferSendCodec(tx, "video/H264");
       }
 
       const answer = await this.pc.createAnswer();

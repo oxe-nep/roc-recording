@@ -135,9 +135,13 @@ func (m *Manager) runFFmpegInboundOnce(
 		"-level", "3.1",
 		"-preset", "veryfast",
 		"-tune", "zerolatency",
+		"-b:v", "2500k",
+		"-maxrate", "3000k",
+		"-bufsize", "1500k",
 		"-g", "25",
+		"-keyint_min", "25",
 		"-bf", "0",
-		"-x264-params", "repeat-headers=1:annexb=1:scenecut=0",
+		"-x264-params", "repeat-headers=1:annexb=1:scenecut=0:keyint=25:min-keyint=25",
 		"-f", "h264",
 		"pipe:1",
 	)
@@ -390,10 +394,12 @@ func (m *Manager) pipePCMToOpusTrack(ctx context.Context, r io.Reader, track *we
 		return
 	}
 	channels := 1
+	app := opus.AppVoIP
 	if stereo {
 		channels = 2
+		app = opus.AppAudio
 	}
-	enc, err := opus.NewEncoder(sampleRate, channels, opus.AppVoIP)
+	enc, err := opus.NewEncoder(sampleRate, channels, app)
 	if err != nil {
 		log.Printf("[commentator] opus encoder: %v", err)
 		return
@@ -406,6 +412,7 @@ func (m *Manager) pipePCMToOpusTrack(ctx context.Context, r io.Reader, track *we
 	pcmBytes := make([]byte, frameSamples*2)
 	pcm := make([]int16, frameSamples)
 	out := make([]byte, 1500)
+	logged := false
 	for {
 		select {
 		case <-ctx.Done():
@@ -413,6 +420,9 @@ func (m *Manager) pipePCMToOpusTrack(ctx context.Context, r io.Reader, track *we
 		default:
 		}
 		if _, err := io.ReadFull(r, pcmBytes); err != nil {
+			if !logged {
+				log.Printf("[commentator] pcm→opus reader closed: %v", err)
+			}
 			return
 		}
 		for i := 0; i < frameSamples; i++ {
@@ -422,7 +432,13 @@ func (m *Manager) pipePCMToOpusTrack(ctx context.Context, r io.Reader, track *we
 		if err != nil || n <= 0 {
 			continue
 		}
-		_ = track.WriteSample(media.Sample{Data: append([]byte(nil), out[:n]...), Duration: 20 * time.Millisecond})
+		if err := track.WriteSample(media.Sample{Data: append([]byte(nil), out[:n]...), Duration: 20 * time.Millisecond}); err != nil {
+			return
+		}
+		if !logged {
+			logged = true
+			log.Printf("[commentator] opus audio flowing on track %s/%s (%d ch)", track.ID(), track.StreamID(), channels)
+		}
 	}
 }
 

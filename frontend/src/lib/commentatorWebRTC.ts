@@ -56,8 +56,7 @@ export class CommentatorSession {
   private pc: RTCPeerConnection | null = null;
   private ws: WebSocket | null = null;
   private localStream: MediaStream | null = null;
-  private audioCtx: AudioContext | null = null;
-  private gainNodes = new Map<string, GainNode>();
+  private audioEls = new Map<string, HTMLAudioElement>();
   private pendingRemoteICE: RTCIceCandidateInit[] = [];
   private remoteDescSet = false;
   private answering = false;
@@ -66,11 +65,13 @@ export class CommentatorSession {
   private readonly maxReconnects = 3;
   private iceServers: RTCIceServer[] = [];
   private iceTimer: ReturnType<typeof setTimeout> | null = null;
+  private audioUnlocked = false;
 
   onState?: (state: CommentatorConnectionState) => void;
   onError?: (message: string) => void;
   onIntercom?: (slots: CommentatorIntercomSlot[]) => void;
   onRemoteVideo?: (stream: MediaStream) => void;
+  onAudioLocked?: (locked: boolean) => void;
 
   constructor(private readonly token: string) {}
 
@@ -155,6 +156,7 @@ export class CommentatorSession {
     }
     this.reconnectAttempts = 0;
     this.onState?.("connected");
+    void this.unlockAudio();
   }
 
   private startIceTimeout() {
@@ -168,6 +170,47 @@ export class CommentatorSession {
       );
       this.onState?.("failed");
     }, 25000);
+  }
+
+  /** Browsers block unmuted autoplay until a user gesture — call from UI clicks too. */
+  async unlockAudio(): Promise<void> {
+    const plays: Promise<void>[] = [];
+    for (const el of this.audioEls.values()) {
+      plays.push(
+        el.play().then(() => {
+          this.audioUnlocked = true;
+        }),
+      );
+    }
+    await Promise.allSettled(plays);
+    this.onAudioLocked?.(!this.audioUnlocked && this.audioEls.size > 0);
+  }
+
+  private bindRemoteAudio(track: MediaStreamTrack, stream: MediaStream) {
+    // Prefer MSID from server (pgm / intercomN) — track.id is a random UUID in Chrome.
+    const id = stream.id || track.id || track.label || `audio-${this.audioEls.size}`;
+    const existing = this.audioEls.get(id);
+    if (existing) {
+      existing.srcObject = new MediaStream([track]);
+      void existing.play().catch(() => this.onAudioLocked?.(true));
+      return;
+    }
+    const el = document.createElement("audio");
+    el.autoplay = true;
+    el.setAttribute("playsinline", "true");
+    el.srcObject = new MediaStream([track]);
+    const isPgm = id.includes("pgm") || id === "audio";
+    el.volume = isPgm ? 1 : 0.8;
+    el.style.display = "none";
+    document.body.appendChild(el);
+    this.audioEls.set(id, el);
+    void el.play().then(
+      () => {
+        this.audioUnlocked = true;
+        this.onAudioLocked?.(false);
+      },
+      () => this.onAudioLocked?.(true),
+    );
   }
 
   private bindPeerConnectionHandlers() {
@@ -205,11 +248,6 @@ export class CommentatorSession {
         });
       }
 
-      if (!this.audioCtx) {
-        this.audioCtx = new AudioContext();
-      }
-      this.gainNodes.clear();
-
       this.pc.onicecandidate = (ev) => {
         if (ev.candidate) {
           this.send({ type: "ice", candidate: ev.candidate.toJSON() });
@@ -221,12 +259,7 @@ export class CommentatorSession {
           return;
         }
         const stream = ev.streams[0] ?? new MediaStream([ev.track]);
-        const id = ev.track.id || ev.track.label || "track";
-        const gain = this.audioCtx!.createGain();
-        gain.gain.value = id.includes("pgm") || id.includes("audio") ? 1 : 0.8;
-        const src = this.audioCtx!.createMediaStreamSource(stream);
-        src.connect(gain).connect(this.audioCtx!.destination);
-        this.gainNodes.set(id, gain);
+        this.bindRemoteAudio(ev.track, stream);
       };
 
       await this.pc.setRemoteDescription({ type: "offer", sdp });
@@ -287,18 +320,21 @@ export class CommentatorSession {
   }
 
   setPGMVolume(value: number) {
-    for (const [id, gain] of this.gainNodes) {
-      if (id.includes("pgm") || id === "audio") gain.gain.value = value;
+    void this.unlockAudio();
+    for (const [id, el] of this.audioEls) {
+      if (id.includes("pgm") || id === "audio") el.volume = value;
     }
   }
 
   setIntercomVolume(slotId: number, value: number) {
-    for (const [id, gain] of this.gainNodes) {
-      if (id.includes(`intercom${slotId}`)) gain.gain.value = value;
+    void this.unlockAudio();
+    for (const [id, el] of this.audioEls) {
+      if (id.includes(`intercom${slotId}`)) el.volume = value;
     }
   }
 
   setPTT(channel: number) {
+    void this.unlockAudio();
     this.send({ type: "ptt", channel });
   }
 
@@ -318,12 +354,15 @@ export class CommentatorSession {
     this.ws?.close();
     this.pc?.close();
     this.localStream?.getTracks().forEach((t) => t.stop());
-    void this.audioCtx?.close();
+    for (const el of this.audioEls.values()) {
+      el.pause();
+      el.srcObject = null;
+      el.remove();
+    }
+    this.audioEls.clear();
     this.ws = null;
     this.pc = null;
     this.localStream = null;
-    this.audioCtx = null;
-    this.gainNodes.clear();
   }
 }
 

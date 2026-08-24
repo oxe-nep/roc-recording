@@ -34,6 +34,7 @@ func (m *Manager) consumeCommentatorMic(ctx context.Context, channelID int, tr *
 	builder := samplebuilder.New(10, &codecs.OpusPacket{}, tr.Codec().ClockRate)
 	pcmStereo := make([]int16, samplesPerFrame*2)
 	mono := make([]int16, samplesPerFrame)
+	loggedMic := false
 	idleTimer := time.NewTimer(micIdleTimeout)
 	defer idleTimer.Stop()
 	resetIdle := func() {
@@ -85,6 +86,10 @@ func (m *Manager) consumeCommentatorMic(ctx context.Context, channelID int, tr *
 			}
 			router.PushMic(mono[:n])
 			resetIdle()
+			if !loggedMic {
+				loggedMic = true
+				log.Printf("[commentator %d] mic audio flowing (%d samples/frame)", channelID, n)
+			}
 		}
 	}
 }

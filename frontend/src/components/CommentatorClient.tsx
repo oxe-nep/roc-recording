@@ -29,11 +29,13 @@ export default function CommentatorClient({ token }: Props) {
   const [pgmVol, setPgmVol] = useState(1);
   const [intercomVol, setIntercomVol] = useState<Record<number, number>>({});
   const [pttActive, setPttActive] = useState<number | null>(null);
+  const [audioLocked, setAudioLocked] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   const bindSession = useCallback((session: CommentatorSession) => {
     session.onState = setState;
     session.onError = (msg) => setError(msg);
+    session.onAudioLocked = setAudioLocked;
     session.onIntercom = (slots) => {
       setIntercom(slots);
       setIntercomVol((prev) => {
@@ -139,6 +141,16 @@ export default function CommentatorClient({ token }: Props) {
       </header>
 
       {error && <div className="commentator-alert">{error}</div>}
+      {audioLocked && (
+        <button
+          type="button"
+          className="commentator-alert"
+          style={{ cursor: "pointer", border: "none", width: "100%", textAlign: "left" }}
+          onClick={() => void sessionRef.current?.unlockAudio()}
+        >
+          Click here to enable program audio (browser blocked autoplay)
+        </button>
+      )}
 
       <div className="commentator-main">
         <section className="commentator-video-panel">

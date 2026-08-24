@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hraban/opus"
+	"github.com/pion/rtp/codecs"
 	"github.com/pion/webrtc/v4"
 	"github.com/pion/webrtc/v4/pkg/media/samplebuilder"
 )
@@ -23,12 +24,12 @@ const (
 
 func (m *Manager) consumeCommentatorMic(ctx context.Context, channelID int, tr *webrtc.TrackRemote, router *AudioRouter) {
 	log.Printf("[commentator %d] receiving mic track %s (%s)", channelID, tr.ID(), tr.Codec().MimeType)
-	dec, err := opus.NewDecoder(sampleRate, opus.ChannelsMono)
+	dec, err := opus.NewDecoder(sampleRate, 1)
 	if err != nil {
 		log.Printf("[commentator %d] opus decoder: %v", channelID, err)
 		return
 	}
-	builder := samplebuilder.New(10, tr.Codec().ClockRate)
+	builder := samplebuilder.New(10, &codecs.OpusPacket{}, tr.Codec().ClockRate)
 	pcm := make([]int16, samplesPerFrame*6)
 	idleTimer := time.NewTimer(micIdleTimeout)
 	defer idleTimer.Stop()
@@ -93,7 +94,7 @@ func (m *Manager) consumeCommentatorWebcam(ctx context.Context, channelID int, t
 }
 
 func (m *Manager) consumeH264Webcam(ctx context.Context, channelID int, tr *webrtc.TrackRemote, frames chan<- []byte) {
-	builder := samplebuilder.New(10, tr.Codec().ClockRate)
+	builder := samplebuilder.New(10, &codecs.H264Packet{}, tr.Codec().ClockRate)
 	decCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 

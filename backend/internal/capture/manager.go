@@ -845,7 +845,41 @@ func sanitizeInputArgs(args []string) []string {
 		clean = append(clean, args[i])
 		i++
 	}
-	return clean
+	return ensureDeckLinkChannels(clean, 8)
+}
+
+func decklinkInput(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-f" && i+1 < len(args) && strings.EqualFold(args[i+1], "decklink") {
+			return true
+		}
+	}
+	return false
+}
+
+// ensureDeckLinkChannels opens 8 audio channels on DeckLink (FFmpeg default is 2).
+func ensureDeckLinkChannels(args []string, n int) []string {
+	if n != 2 && n != 8 && n != 16 {
+		n = 8
+	}
+	if !decklinkInput(args) {
+		return args
+	}
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-channels" || args[i] == "-audio_channels" {
+			return args
+		}
+	}
+	val := strconv.Itoa(n)
+	for i := 0; i < len(args); i++ {
+		if args[i] == "-i" {
+			out := append([]string{}, args[:i]...)
+			out = append(out, "-channels", val)
+			out = append(out, args[i:]...)
+			return out
+		}
+	}
+	return append(append([]string{}, args...), "-channels", val)
 }
 
 func (m *Manager) killStream(s *Stream) {

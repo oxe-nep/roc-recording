@@ -14,10 +14,56 @@ type Props = {
   sessionKey?: string | number;
 };
 
-/** Low-latency HLS video+audio preview for dashboard cards. */
+function listenPlaylist(previewPath: string, pair: number): string {
+  return previewPath.replace(/preview\.m3u8$/, `listen_${pair}.m3u8`);
+}
+
+function attachHls(
+  el: HTMLMediaElement,
+  src: string,
+  onFatal: () => void,
+): Hls | null {
+  if (Hls.isSupported()) {
+    const hls = new Hls({
+      enableWorker: true,
+      lowLatencyMode: true,
+      liveSyncDurationCount: 2,
+      liveMaxLatencyDurationCount: 4,
+      maxLiveSyncPlaybackRate: 1.5,
+    });
+    hls.loadSource(src);
+    hls.attachMedia(el);
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      void el.play().catch(() => {});
+    });
+    hls.on(Hls.Events.ERROR, (_ev, data) => {
+      if (!data.fatal) return;
+      hls.destroy();
+      onFatal();
+    });
+    return hls;
+  }
+  if (el.canPlayType("application/vnd.apple.mpegurl")) {
+    el.src = src;
+    void el.play().catch(() => {});
+  }
+  return null;
+}
+
+function stopMedia(el: HTMLMediaElement | null, hls: Hls | null) {
+  hls?.destroy();
+  if (!el) return;
+  el.pause();
+  el.removeAttribute("src");
+  el.load();
+}
+
+/** Low-latency HLS video preview; listen audio is a separate stereo playlist per pair. */
 export default function HlsPreview({ active, listenPair, playlistPath, sessionKey }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const hlsRef = useRef<Hls | null>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const videoHls = useRef<Hls | null>(null);
+  const audioHls = useRef<Hls | null>(null);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -31,11 +77,8 @@ export default function HlsPreview({ active, listenPair, playlistPath, sessionKe
         clearTimeout(retryTimer);
         retryTimer = null;
       }
-      hlsRef.current?.destroy();
-      hlsRef.current = null;
-      video.pause();
-      video.removeAttribute("src");
-      video.load();
+      stopMedia(video, videoHls.current);
+      videoHls.current = null;
     };
 
     if (!active) {
@@ -46,38 +89,11 @@ export default function HlsPreview({ active, listenPair, playlistPath, sessionKe
     const src = mediaURL(playlistPath);
 
     const attach = () => {
-      if (cancelled) return;
+      if (cancelled || !videoRef.current) return;
       stop();
-      if (!videoRef.current) return;
-      const el = videoRef.current;
-
-      if (Hls.isSupported()) {
-        const hls = new Hls({
-          enableWorker: true,
-          lowLatencyMode: true,
-          liveSyncDurationCount: 2,
-          liveMaxLatencyDurationCount: 4,
-          maxLiveSyncPlaybackRate: 1.5,
-        });
-        hlsRef.current = hls;
-        hls.loadSource(src);
-        hls.attachMedia(el);
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          applyListen(hls, el, listenPair);
-          void el.play().catch(() => {});
-        });
-        hls.on(Hls.Events.ERROR, (_ev, data) => {
-          if (!data.fatal || cancelled) return;
-          // Playlist often appears a second after TC/ffmpeg starts — retry.
-          hls.destroy();
-          hlsRef.current = null;
-          retryTimer = setTimeout(attach, 1000);
-        });
-      } else if (el.canPlayType("application/vnd.apple.mpegurl")) {
-        el.src = src;
-        applyNativeListen(el, listenPair);
-        void el.play().catch(() => {});
-      }
+      videoHls.current = attachHls(videoRef.current, src, () => {
+        if (!cancelled) retryTimer = setTimeout(attach, 1000);
+      });
     };
 
     attach();
@@ -86,19 +102,46 @@ export default function HlsPreview({ active, listenPair, playlistPath, sessionKe
       cancelled = true;
       stop();
     };
-    // listenPair is applied in a separate effect; omit to avoid full remount on mute/pair toggle
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, playlistPath, sessionKey]);
 
   useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-    applyListen(hlsRef.current, video, listenPair);
-    applyNativeListen(video, listenPair);
-    if (listenPair != null && active) {
-      void video.play().catch(() => {});
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const stop = () => {
+      if (retryTimer != null) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      stopMedia(audio, audioHls.current);
+      audioHls.current = null;
+    };
+
+    if (!active || listenPair == null) {
+      stop();
+      return;
     }
-  }, [listenPair, active]);
+
+    const src = mediaURL(listenPlaylist(playlistPath, listenPair));
+
+    const attach = () => {
+      if (cancelled || !audioRef.current) return;
+      stop();
+      audioHls.current = attachHls(audioRef.current, src, () => {
+        if (!cancelled) retryTimer = setTimeout(attach, 1000);
+      });
+    };
+
+    attach();
+
+    return () => {
+      cancelled = true;
+      stop();
+    };
+  }, [active, listenPair, playlistPath, sessionKey]);
 
   return (
     <>
@@ -107,26 +150,10 @@ export default function HlsPreview({ active, listenPair, playlistPath, sessionKe
         ref={videoRef}
         className={`hls-preview${active ? "" : " hls-preview-off"}`}
         playsInline
-        muted={listenPair == null}
+        muted
         autoPlay
       />
+      <audio ref={audioRef} className="audio-monitor" preload="none" />
     </>
   );
-}
-
-function applyListen(hls: Hls | null, el: HTMLVideoElement, pair: number | null) {
-  el.muted = pair == null;
-  if (!hls || pair == null) return;
-  if (hls.audioTracks.length > pair) {
-    hls.audioTrack = pair;
-  }
-}
-
-function applyNativeListen(el: HTMLVideoElement, pair: number | null) {
-  el.muted = pair == null;
-  const tracks = (el as HTMLVideoElement & { audioTracks?: { length: number; [i: number]: { enabled: boolean } } }).audioTracks;
-  if (!tracks || tracks.length === 0) return;
-  for (let i = 0; i < tracks.length; i++) {
-    tracks[i].enabled = pair != null && i === pair;
-  }
 }

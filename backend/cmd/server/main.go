@@ -40,6 +40,27 @@ func (b tcPlayoutBridge) Stop(id int) error {
 	return err
 }
 
+// commentatorPlayoutBridge adapts playout.Manager for commentator.PlayoutBridge.
+type commentatorPlayoutBridge struct {
+	*playout.Manager
+}
+
+func (b commentatorPlayoutBridge) Sink(id int) (device, formatCode string, err error) {
+	return b.Manager.Sink(id)
+}
+
+func (b commentatorPlayoutBridge) ResolveOpenDevice(device string) string {
+	return b.Manager.ResolveOpenDevice(device)
+}
+
+func (b commentatorPlayoutBridge) LookupDeviceOpen(device string) string {
+	return b.Manager.LookupDeviceOpen(device)
+}
+
+func (b commentatorPlayoutBridge) OutputTiming(formatCode string) (w, h int, fps float64, interlaced bool, err error) {
+	return b.Manager.OutputTiming(formatCode)
+}
+
 func main() {
 	cfgPath := "config.yaml"
 	if len(os.Args) > 1 {
@@ -146,7 +167,7 @@ func main() {
 		channelInputs[ch.ID] = ch.FFmpegInput
 	}
 	iceCfg := commentator.ICEConfigFromEnv(hlsBase)
-	commMgr := commentator.NewManager(commSettings, commentatorPublicURL, cfg.FFmpegBin, channelInputs, iceCfg)
+	commMgr := commentator.NewManager(commSettings, commentatorPublicURL, cfg.FFmpegBin, channelInputs, iceCfg, commentatorPlayoutBridge{playMgr})
 	for _, ch := range cfg.Channels {
 		commMgr.EnsureChannel(ch.ID)
 		if wfStore.Get(ch.ID).Mode == workflow.ModeRemoteCommentator {

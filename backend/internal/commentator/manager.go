@@ -62,11 +62,12 @@ type Manager struct {
 	ffmpegBin     string
 	channelInputs map[int]string
 	ice           ICEConfig
+	playout       PlayoutBridge
 	byID          map[int]*channel
 	rtcByChannel  map[int]*rtcSession
 }
 
-func NewManager(settings *Store, publicBaseURL string, ffmpegBin string, channelInputs map[int]string, ice ICEConfig) *Manager {
+func NewManager(settings *Store, publicBaseURL string, ffmpegBin string, channelInputs map[int]string, ice ICEConfig, playout PlayoutBridge) *Manager {
 	publicBaseURL = strings.TrimRight(strings.TrimSpace(publicBaseURL), "/")
 	if channelInputs == nil {
 		channelInputs = make(map[int]string)
@@ -77,6 +78,7 @@ func NewManager(settings *Store, publicBaseURL string, ffmpegBin string, channel
 		ffmpegBin:     ffmpegBin,
 		channelInputs: channelInputs,
 		ice:           ice,
+		playout:       playout,
 		byID:          make(map[int]*channel),
 		rtcByChannel:  make(map[int]*rtcSession),
 	}
@@ -228,15 +230,20 @@ func (m *Manager) RevokeSession(id int) {
 
 func (m *Manager) SetPTT(id int, channel int) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	ch, ok := m.byID[id]
 	if !ok {
+		m.mu.Unlock()
 		return
 	}
 	if channel < 0 || channel > intercomSlots {
 		channel = 0
 	}
 	ch.pttChannel = channel
+	sess := m.rtcByChannel[id]
+	m.mu.Unlock()
+	if sess != nil && sess.router != nil {
+		sess.router.SetPTT(channel)
+	}
 }
 
 func (m *Manager) SetConnected(id int, connected bool) {

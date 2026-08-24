@@ -3,21 +3,19 @@ package commentator
 import (
 	"context"
 	"fmt"
-	"io"
-	"log"
 	"sync"
-	"time"
 
 	"github.com/pion/webrtc/v4"
-	"github.com/pion/webrtc/v4/pkg/media"
 )
 
 type rtcSession struct {
-	channelID int
-	token     string
-	pc        *webrtc.PeerConnection
-	cancel    context.CancelFunc
-	stopOnce  sync.Once
+	channelID   int
+	token       string
+	pc          *webrtc.PeerConnection
+	cancel      context.CancelFunc
+	router      *AudioRouter
+	videoFrames chan []byte
+	stopOnce    sync.Once
 }
 
 func (m *Manager) startRTCSession(channelID int, token string) (*rtcSession, error) {
@@ -39,11 +37,15 @@ func (m *Manager) startRTCSession(channelID int, token string) (*rtcSession, err
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	router := NewAudioRouter()
+	videoFrames := make(chan []byte, 2)
 	sess := &rtcSession{
-		channelID: channelID,
-		token:     token,
-		pc:        pc,
-		cancel:    cancel,
+		channelID:   channelID,
+		token:       token,
+		pc:          pc,
+		cancel:      cancel,
+		router:      router,
+		videoFrames: videoFrames,
 	}
 
 	videoTrack, err := webrtc.NewTrackLocalStaticSample(
@@ -79,11 +81,9 @@ func (m *Manager) startRTCSession(channelID int, token string) (*rtcSession, err
 	}
 
 	settings := m.GetSettings(channelID)
-	intercomTracks := make([]*webrtc.TrackLocalStaticSample, 0, intercomSlots)
-	for _, slot := range settings.Intercom {
-		if !slot.Enabled {
-			continue
-		}
+	enabled := enabledIntercom(settings)
+	intercomTracks := make([]*webrtc.TrackLocalStaticSample, 0, len(enabled))
+	for _, slot := range enabled {
 		t, err := webrtc.NewTrackLocalStaticSample(
 			webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus},
 			fmt.Sprintf("intercom%d", slot.ID),
@@ -104,19 +104,23 @@ func (m *Manager) startRTCSession(channelID int, token string) (*rtcSession, err
 
 	pc.OnTrack(func(tr *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 		if tr.Kind() == webrtc.RTPCodecTypeAudio {
-			go m.consumeCommentatorMic(ctx, channelID, tr)
+			go m.consumeCommentatorMic(ctx, channelID, tr, router)
 		}
 		if tr.Kind() == webrtc.RTPCodecTypeVideo {
-			go m.consumeCommentatorWebcam(ctx, channelID, tr)
+			go m.consumeCommentatorWebcam(ctx, channelID, tr, videoFrames)
 		}
 	})
 
 	m.mu.Lock()
+	ch := m.channelLocked(channelID)
+	router.SetPTT(ch.pttChannel)
 	m.rtcByChannel[channelID] = sess
 	m.mu.Unlock()
 
-	go m.runFFmpegInbound(ctx, channelID, videoTrack, pgmTrack, intercomTracks)
-	go m.runSilenceFallback(ctx, pgmTrack, intercomTracks)
+	silenceCtx, silenceCancel := context.WithCancel(ctx)
+	go m.runSilenceFallback(silenceCtx, pgmTrack, intercomTracks)
+	go m.runFFmpegInbound(ctx, channelID, videoTrack, pgmTrack, enabled, intercomTracks, silenceCancel)
+	go m.runFFmpegOutbound(ctx, channelID, router, videoFrames)
 
 	return sess, nil
 }
@@ -140,56 +144,4 @@ func (s *rtcSession) stop() {
 			_ = s.pc.Close()
 		}
 	})
-}
-
-func (m *Manager) consumeCommentatorMic(ctx context.Context, channelID int, tr *webrtc.TrackRemote) {
-	log.Printf("[commentator %d] receiving mic track %s", channelID, tr.ID())
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		if _, _, err := tr.ReadRTP(); err != nil {
-			if err != io.EOF {
-				log.Printf("[commentator %d] mic rtp: %v", channelID, err)
-			}
-			return
-		}
-	}
-}
-
-func (m *Manager) consumeCommentatorWebcam(ctx context.Context, channelID int, tr *webrtc.TrackRemote) {
-	log.Printf("[commentator %d] receiving webcam track %s", channelID, tr.ID())
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		if _, _, err := tr.ReadRTP(); err != nil {
-			if err != io.EOF {
-				log.Printf("[commentator %d] webcam rtp: %v", channelID, err)
-			}
-			return
-		}
-	}
-}
-
-// runSilenceFallback keeps opus tracks alive until FFmpeg supplies real PCM.
-func (m *Manager) runSilenceFallback(ctx context.Context, pgm *webrtc.TrackLocalStaticSample, intercom []*webrtc.TrackLocalStaticSample) {
-	ticker := time.NewTicker(20 * time.Millisecond)
-	defer ticker.Stop()
-	silent := media.Sample{Data: []byte{0xf8, 0xff, 0xfe}, Duration: 20 * time.Millisecond}
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			_ = pgm.WriteSample(silent)
-			for _, t := range intercom {
-				_ = t.WriteSample(silent)
-			}
-		}
-	}
 }

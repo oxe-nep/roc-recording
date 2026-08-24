@@ -1,4 +1,4 @@
-export type ChannelWorkflowMode = "pair" | "tc";
+export type ChannelWorkflowMode = "pair" | "tc" | "remote_commentator";
 
 export interface ChannelWorkflowConfig {
   mode: ChannelWorkflowMode;
@@ -13,15 +13,22 @@ export const WORKFLOW_OPTIONS: {
 }[] = [
   { mode: "pair", label: "Encode + Decode", hint: "Record / ingest and playout" },
   { mode: "tc", label: "TC Burn-In", hint: "Timecode overlay loop" },
+  {
+    mode: "remote_commentator",
+    label: "Remote Commentator",
+    hint: "WebRTC commentator bridge via DeckLink pair",
+  },
 ];
 
-const VALID_MODES = new Set<ChannelWorkflowMode>(["pair", "tc"]);
+const VALID_MODES = new Set<ChannelWorkflowMode>(["pair", "tc", "remote_commentator"]);
 
 export function normalizeWorkflowConfig(
   value?: Partial<ChannelWorkflowConfig> | { encode?: boolean; decode?: boolean } | string,
 ): ChannelWorkflowConfig {
   if (typeof value === "string") {
-    return value === "tc" ? { mode: "tc" } : { ...DEFAULT_WORKFLOW };
+    if (value === "tc") return { mode: "tc" };
+    if (value === "remote_commentator") return { mode: "remote_commentator" };
+    return { ...DEFAULT_WORKFLOW };
   }
   if (value && "mode" in value && value.mode && VALID_MODES.has(value.mode)) {
     return { mode: value.mode };
@@ -59,6 +66,13 @@ export function showDecodeCard(
   channelId: number,
 ): boolean {
   return workflowMode(workflows, channelId) === "pair";
+}
+
+export function showCommentatorCard(
+  workflows: Record<number, ChannelWorkflowConfig>,
+  channelId: number,
+): boolean {
+  return workflowMode(workflows, channelId) === "remote_commentator";
 }
 
 export function showTcCard(

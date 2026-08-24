@@ -4,6 +4,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/roc-recording/backend/internal/commentator"
 	"github.com/roc-recording/backend/internal/playout"
 	"github.com/roc-recording/backend/internal/recording"
 	"github.com/roc-recording/backend/internal/runtimestate"
@@ -18,12 +19,17 @@ func RestoreRuntime(
 	srtMgr *srt.Manager,
 	recMgr *recording.Manager,
 	tcMgr *tcloop.Manager,
+	commMgr *commentator.Manager,
 ) {
 	if store == nil {
 		return
 	}
 
 	for _, id := range store.PlayoutIDs() {
+		if commMgr != nil && commMgr.IsActive(id) {
+			log.Printf("[runtime] skip playout restore ch %d (remote commentator active)", id)
+			continue
+		}
 		if tcMgr != nil && (tcMgr.IsEnabled(id) || tcMgr.IsRunning(id)) {
 			log.Printf("[runtime] skip playout restore ch %d (TC burn-in active)", id)
 			continue

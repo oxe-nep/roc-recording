@@ -19,6 +19,8 @@ Optional **SRT** output per channel remuxes the same UDP master (`-c copy`) as l
 
 **Decode (playout)** clients receive SRT and output to a DeckLink device (`playout-clients.json`). Devices/formats are probed via FFmpeg. Each client has its own output mode, SRT listener/caller settings, JPEG preview, and audio meters. UI sections: **Encode** (capture) and **Decode** (playout).
 
+**Remote commentator** (in progress on branch `feature/remote-commentator`): workflow mode that dedicates a DeckLink channel pair to a WebRTC commentator bridge. Settings → Workflows → *Remote Commentator*. Restore point before this work: git tag `pre-remote-commentator` on `main`.
+
 Encode presets are defined in `config.yaml` (and live-edited via the UI into `encode-presets.json`). Per-channel selection is persisted to `encode-assignments.json`. Encode settings are applied when that channel’s capture starts — editing a preset or switching assignment does not restart a running channel.
 
 Recordings land in global category folders under a configurable storage root

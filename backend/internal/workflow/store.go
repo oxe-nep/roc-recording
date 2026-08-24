@@ -12,8 +12,9 @@ import (
 type Mode string
 
 const (
-	ModePair Mode = "pair" // encode + decode
-	ModeTC   Mode = "tc"   // TC burn-in
+	ModePair              Mode = "pair"               // encode + decode
+	ModeTC                Mode = "tc"                 // TC burn-in
+	ModeRemoteCommentator Mode = "remote_commentator" // remote commentator WebRTC bridge
 )
 
 // Config is persisted per channel.
@@ -29,6 +30,8 @@ func NormalizeConfig(c Config) Config {
 	switch c.Mode {
 	case ModeTC:
 		return Config{Mode: ModeTC}
+	case ModeRemoteCommentator:
+		return Config{Mode: ModeRemoteCommentator}
 	default:
 		// Map transitional encode/decode-only modes back to the pair workflow.
 		return Config{Mode: ModePair}

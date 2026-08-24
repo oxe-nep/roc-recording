@@ -10,6 +10,7 @@ import (
 
 	"github.com/roc-recording/backend/internal/audiox"
 	"github.com/roc-recording/backend/internal/capture"
+	"github.com/roc-recording/backend/internal/commentator"
 	"github.com/roc-recording/backend/internal/playout"
 	"github.com/roc-recording/backend/internal/recording"
 	"github.com/roc-recording/backend/internal/srt"
@@ -30,6 +31,7 @@ type dashboardSnapshot struct {
 	Streams       []streamResponse           `json:"streams"`
 	Playout       []playout.ClientInfo       `json:"playout"`
 	TC            []tcloop.Info              `json:"tc"`
+	Commentator   []commentator.Info         `json:"commentator"`
 	Recordings    []recording.ChannelInfo    `json:"recordings"`
 	SRT           []srt.ChannelInfo          `json:"srt"`
 	Workflows     map[string]workflow.Config `json:"workflows"`
@@ -76,12 +78,13 @@ func startDashboardWS(
 	srtMgr *srt.Manager,
 	playMgr *playout.Manager,
 	tcMgr *tcloop.Manager,
+	commMgr *commentator.Manager,
 	tslMgr *tsl.Manager,
 	wfStore *workflow.Store,
 	hlsBaseURL string,
 ) {
 	snapshot := func() dashboardSnapshot {
-		snap := buildDashboardSnapshot(mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, wfStore, hlsBaseURL)
+		snap := buildDashboardSnapshot(mgr, recMgr, srtMgr, playMgr, tcMgr, commMgr, tslMgr, wfStore, hlsBaseURL)
 		sortDashboardSnapshot(&snap)
 		return snap
 	}
@@ -157,6 +160,7 @@ func buildDashboardSnapshot(
 	srtMgr *srt.Manager,
 	playMgr *playout.Manager,
 	tcMgr *tcloop.Manager,
+	commMgr *commentator.Manager,
 	tslMgr *tsl.Manager,
 	wfStore *workflow.Store,
 	hlsBaseURL string,
@@ -179,6 +183,10 @@ func buildDashboardSnapshot(
 	if tcMgr != nil {
 		tcList = tcMgr.List(ids)
 	}
+	var commList []commentator.Info
+	if commMgr != nil {
+		commList = commMgr.List(ids)
+	}
 	var recList []recording.ChannelInfo
 	if recMgr != nil {
 		recList = recMgr.ListAll()
@@ -193,6 +201,7 @@ func buildDashboardSnapshot(
 		Streams:       streamResp,
 		Playout:       playList,
 		TC:            tcList,
+		Commentator:   commList,
 		Recordings:    recList,
 		SRT:           srtList,
 		Workflows:     buildWorkflowsMap(wfStore, mgr),
@@ -232,12 +241,13 @@ func registerDashboardHTTP(
 	srtMgr *srt.Manager,
 	playMgr *playout.Manager,
 	tcMgr *tcloop.Manager,
+	commMgr *commentator.Manager,
 	tslMgr *tsl.Manager,
 	wfStore *workflow.Store,
 	hlsBaseURL string,
 ) {
 	r.Get("/api/dashboard", func(w http.ResponseWriter, req *http.Request) {
-		snap := buildDashboardSnapshot(mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, wfStore, hlsBaseURL)
+		snap := buildDashboardSnapshot(mgr, recMgr, srtMgr, playMgr, tcMgr, commMgr, tslMgr, wfStore, hlsBaseURL)
 		sortDashboardSnapshot(&snap)
 		jsonOK(w, snap)
 	})

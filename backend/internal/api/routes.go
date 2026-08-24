@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/roc-recording/backend/internal/audiox"
 	"github.com/roc-recording/backend/internal/capture"
+	"github.com/roc-recording/backend/internal/commentator"
 	hlshandler "github.com/roc-recording/backend/internal/hls"
 	"github.com/roc-recording/backend/internal/playout"
 	"github.com/roc-recording/backend/internal/recording"
@@ -59,14 +60,14 @@ type recordingFileResponse struct {
 	URL     string    `json:"url"`
 }
 
-func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Manager, playMgr *playout.Manager, tcMgr *tcloop.Manager, tslMgr *tsl.Manager, wfStore *workflow.Store, runtimeStore *runtimestate.Store, hlsHandler *hlshandler.Handler, apiKey, allowedOrigins, hlsBaseURL string, metrics *sysmetrics.Collector) http.Handler {
+func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Manager, playMgr *playout.Manager, tcMgr *tcloop.Manager, commMgr *commentator.Manager, tslMgr *tsl.Manager, wfStore *workflow.Store, runtimeStore *runtimestate.Store, hlsHandler *hlshandler.Handler, apiKey, allowedOrigins, hlsBaseURL string, metrics *sysmetrics.Collector) http.Handler {
 	r := chi.NewRouter()
 	r.Use(quietRequestLogger())
 	r.Use(middleware.Recoverer)
 	r.Use(corsMiddleware(allowedOrigins))
 
 	hub := ws.NewHub(allowedOrigins)
-	startDashboardWS(hub, mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, wfStore, hlsBaseURL)
+	startDashboardWS(hub, mgr, recMgr, srtMgr, playMgr, tcMgr, commMgr, tslMgr, wfStore, hlsBaseURL)
 	registerDashboardWS(r, hub, apiKey)
 	r.Mount("/hls/", hlsHandler)
 	r.Get("/audio/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -192,7 +193,8 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 		r.Use(apiKeyMiddleware(apiKey))
 
 		registerPlayoutRoutes(r, playMgr, tcMgr, runtimeStore)
-		registerDashboardHTTP(r, mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, wfStore, hlsBaseURL)
+		registerCommentatorRoutes(r, commMgr)
+		registerDashboardHTTP(r, mgr, recMgr, srtMgr, playMgr, tcMgr, commMgr, tslMgr, wfStore, hlsBaseURL)
 
 		r.Get("/api/streams", func(w http.ResponseWriter, r *http.Request) {
 			streams := mgr.List()
@@ -707,51 +709,7 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 				jsonError(w, err.Error(), http.StatusConflict)
 				return
 			}
-			if tcMgr != nil {
-				leavingTC := prev.Mode == workflow.ModeTC && cfg.Mode != workflow.ModeTC
-				enteringTC := cfg.Mode == workflow.ModeTC && prev.Mode != workflow.ModeTC
-
-				if leavingTC {
-					if tcMgr.IsEnabled(id) || tcMgr.IsRunning(id) {
-						disabled := false
-						if _, err := tcMgr.Update(id, tcloop.UpdateInput{Enabled: &disabled}); err != nil {
-							log.Printf("[workflow] channel %d: stop TC: %v", id, err)
-						}
-					}
-					// Always restore encode for pair mode. Previously we only started
-					// when TC was still active — if TC was already Off, capture stayed
-					// stopped with no UI path to recover.
-					var startErr error
-					for attempt := 0; attempt < 3; attempt++ {
-						if mgr.IsActive(id) {
-							startErr = nil
-							break
-						}
-						startErr = mgr.Start(id)
-						if startErr == nil {
-							break
-						}
-						log.Printf("[workflow] channel %d: start encode after TC (attempt %d): %v",
-							id, attempt+1, startErr)
-						time.Sleep(2 * time.Second)
-					}
-					if startErr != nil {
-						log.Printf("[workflow] channel %d: failed to restart encode after TC: %v", id, startErr)
-					} else if runtimeStore != nil {
-						runtimeStore.SetCapture(id, true)
-					}
-				} else if enteringTC {
-					_ = mgr.Stop(id)
-					if runtimeStore != nil {
-						runtimeStore.SetCapture(id, false)
-					}
-					tcMgr.EnsureChannel(id)
-					enabled := true
-					if _, err := tcMgr.Update(id, tcloop.UpdateInput{Enabled: &enabled}); err != nil {
-						log.Printf("[workflow] channel %d: auto-start TC: %v", id, err)
-					}
-				}
-			}
+			applyWorkflowChange(id, prev, cfg, mgr, playMgr, srtMgr, tcMgr, commMgr, runtimeStore)
 			jsonOK(w, map[string]any{"id": id, "mode": cfg.Mode})
 		})
 

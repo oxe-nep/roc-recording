@@ -17,6 +17,7 @@ import (
 	"github.com/roc-recording/backend/internal/api"
 	"github.com/roc-recording/backend/internal/bootstrap"
 	"github.com/roc-recording/backend/internal/capture"
+	"github.com/roc-recording/backend/internal/commentator"
 	"github.com/roc-recording/backend/internal/config"
 	hlshandler "github.com/roc-recording/backend/internal/hls"
 	"github.com/roc-recording/backend/internal/playout"
@@ -84,6 +85,10 @@ func main() {
 	if v := os.Getenv("PUBLIC_URL"); v != "" {
 		hlsBase = v
 	}
+	commentatorPublicURL := strings.TrimSpace(os.Getenv("COMMENTATOR_PUBLIC_URL"))
+	if commentatorPublicURL == "" {
+		commentatorPublicURL = hlsBase
+	}
 
 	publicSRTHost := strings.TrimSpace(os.Getenv("PUBLIC_SRT_HOST"))
 	if publicSRTHost == "" {
@@ -112,6 +117,11 @@ func main() {
 	playMgr.WarmProbe()
 	playMgr.EnsureDefaultChannels()
 
+	channelIDs := make([]int, 0, len(cfg.Channels))
+	for _, ch := range cfg.Channels {
+		channelIDs = append(channelIDs, ch.ID)
+	}
+
 	tcMgr := tcloop.NewManager(
 		cfg.FFmpegBin,
 		cfg.HLSDir,
@@ -123,9 +133,28 @@ func main() {
 	for _, ch := range cfg.Channels {
 		tcMgr.EnsureChannel(ch.ID)
 	}
+
+	wfStore := workflow.NewStore(filepath.Join(configDir, "channel-workflows.json"))
+	wfStore.Load()
+	wfStore.Ensure(channelIDs)
+
+	commSettings := commentator.NewStore(filepath.Join(configDir, "commentator-settings.json"))
+	commSettings.Load()
+	commSettings.Ensure(channelIDs)
+	commMgr := commentator.NewManager(commSettings, commentatorPublicURL)
+	for _, ch := range cfg.Channels {
+		commMgr.EnsureChannel(ch.ID)
+		if wfStore.Get(ch.ID).Mode == workflow.ModeRemoteCommentator {
+			commMgr.Enable(ch.ID)
+		}
+	}
+
 	guard := func(id int) error {
 		if tcMgr.IsEnabled(id) || tcMgr.IsRunning(id) {
 			return fmt.Errorf("TC Burn-in is exclusive on channel %d — disable it first", id)
+		}
+		if commMgr.IsActive(id) {
+			return fmt.Errorf("Remote commentator is exclusive on channel %d — disable it first", id)
 		}
 		return nil
 	}
@@ -133,6 +162,10 @@ func main() {
 	playMgr.SetStartGuard(guard)
 
 	for _, ch := range cfg.Channels {
+		if wfStore.Get(ch.ID).Mode == workflow.ModeRemoteCommentator {
+			log.Printf("Skipping encode auto-start for channel %d (remote commentator)", ch.ID)
+			continue
+		}
 		if tcMgr.IsEnabled(ch.ID) {
 			log.Printf("Skipping encode auto-start for channel %d (TC Burn-in enabled)", ch.ID)
 			continue
@@ -183,12 +216,10 @@ func main() {
 	}
 	srtMgr.LoadSettings()
 
-	bootstrap.RestoreRuntime(runtimeStore, playMgr, srtMgr, recMgr, tcMgr)
+	bootstrap.RestoreRuntime(runtimeStore, playMgr, srtMgr, recMgr, tcMgr, commMgr)
 
 	tslIndexByID := make(map[int]int, len(cfg.Channels))
-	channelIDs := make([]int, 0, len(cfg.Channels))
 	for _, ch := range cfg.Channels {
-		channelIDs = append(channelIDs, ch.ID)
 		if ch.TSLIndex > 0 {
 			tslIndexByID[ch.ID] = ch.TSLIndex
 		}
@@ -198,13 +229,9 @@ func main() {
 		log.Printf("TSL listener disabled: %v", err)
 	}
 
-	wfStore := workflow.NewStore(filepath.Join(configDir, "channel-workflows.json"))
-	wfStore.Load()
-	wfStore.Ensure(channelIDs)
-
 	hlsH := hlshandler.NewHandler(cfg.HLSDir, cfg.AllowedOrigins)
 	metrics := sysmetrics.NewCollector(recMgr.RecordingDir())
-	router := api.NewRouter(mgr, recMgr, srtMgr, playMgr, tcMgr, tslMgr, wfStore, runtimeStore, hlsH, cfg.APIKey, cfg.AllowedOrigins, hlsBase, metrics)
+	router := api.NewRouter(mgr, recMgr, srtMgr, playMgr, tcMgr, commMgr, tslMgr, wfStore, runtimeStore, hlsH, cfg.APIKey, cfg.AllowedOrigins, hlsBase, metrics)
 
 	srv := &http.Server{
 		Addr:    ":" + cfg.Port,
@@ -225,6 +252,7 @@ func main() {
 
 	log.Println("Shutting down...")
 	tslMgr.Stop()
+	commMgr.StopAll()
 	tcMgr.StopAll()
 	playMgr.StopAll()
 	srtMgr.StopAll()

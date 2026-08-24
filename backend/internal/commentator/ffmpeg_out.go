@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+const inboundVideoFPS = 25.0
+
 func (m *Manager) runFFmpegOutbound(ctx context.Context, channelID int, router *AudioRouter, videoFrames <-chan []byte) {
 	if m.playout == nil {
 		log.Printf("[commentator %d] no playout bridge — DeckLink OUT disabled", channelID)
@@ -51,21 +53,21 @@ func (m *Manager) runFFmpegOutbound(ctx context.Context, channelID int, router *
 		return
 	}
 
-	vfilter := fmt.Sprintf(
-		"[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,format=yuv422p10le[vout]",
-		w, h, w, h,
-	)
-	args := []string{"-hide_banner", "-loglevel", "warning", "-y"}
+	vfilter := deckLinkVideoFilter(w, h, fps, interlaced)
+	afilter := fmt.Sprintf("[1:a]asetpts=PTS-STARTPTS,asetnsamples=n=%d:p=0[aout]", samplesPerFrame)
+	filter := vfilter + ";" + afilter
+
+	args := []string{"-hide_banner", "-loglevel", "warning", "-y", "-fflags", "+genpts"}
 	args = append(args,
 		"-f", "rawvideo", "-pix_fmt", "yuv420p",
 		"-s", fmt.Sprintf("%dx%d", inboundVideoW, inboundVideoH),
-		"-r", fmt.Sprintf("%g", fps),
+		"-r", fmt.Sprintf("%g", inboundVideoFPS),
 		"-i", "pipe:0",
 		"-f", "s16le", "-ac", "8", "-ar", strconv.Itoa(sampleRate),
 		"-i", "pipe:3",
-		"-filter_complex", vfilter,
+		"-filter_complex", filter,
 		"-map", "[vout]",
-		"-map", "1:a",
+		"-map", "[aout]",
 		"-c:v", "v210",
 		"-c:a", "pcm_s16le",
 		"-ar", strconv.Itoa(sampleRate),
@@ -96,7 +98,7 @@ func (m *Manager) runFFmpegOutbound(ctx context.Context, channelID int, router *
 		log.Printf("[commentator %d] decklink start: %v", channelID, err)
 		return
 	}
-	log.Printf("[commentator %d] DeckLink OUT → %q format=%s (%dx%d @ %g)", channelID, openDevice, formatCode, w, h, fps)
+	log.Printf("[commentator %d] DeckLink OUT → %q format=%s (%dx%d @ %g interlaced=%v)", channelID, openDevice, formatCode, w, h, fps, interlaced)
 
 	go func() {
 		sc := bufio.NewScanner(stderr)
@@ -120,7 +122,7 @@ func (m *Manager) runFFmpegOutbound(ctx context.Context, channelID int, router *
 func (m *Manager) feedOutboundVideo(ctx context.Context, w *os.File, frames <-chan []byte) {
 	defer w.Close()
 	black := make([]byte, inboundFrame)
-	ticker := time.NewTicker(40 * time.Millisecond)
+	ticker := time.NewTicker(time.Duration(float64(time.Second) / inboundVideoFPS))
 	defer ticker.Stop()
 	var latest []byte
 	for {
@@ -177,4 +179,18 @@ func isAllDigits(s string) bool {
 		}
 	}
 	return true
+}
+
+// deckLinkVideoFilter matches playout decode: Hi50/Hi25 need tinterlace + field rate.
+func deckLinkVideoFilter(w, h int, fps float64, interlaced bool) string {
+	if interlaced {
+		return fmt.Sprintf(
+			"[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,setpts=PTS-STARTPTS,fps=%g,tinterlace=interleave_top,format=yuv422p10le[vout]",
+			w, h, w, h, fps*2,
+		)
+	}
+	return fmt.Sprintf(
+		"[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,setpts=PTS-STARTPTS,fps=%g,format=yuv422p10le[vout]",
+		w, h, w, h, fps,
+	)
 }

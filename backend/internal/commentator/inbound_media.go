@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -83,14 +84,14 @@ func (m *Manager) consumeCommentatorMic(ctx context.Context, channelID int, tr *
 
 func (m *Manager) consumeCommentatorWebcam(ctx context.Context, channelID int, tr *webrtc.TrackRemote, frames chan<- []byte) {
 	log.Printf("[commentator %d] receiving webcam track %s (%s)", channelID, tr.ID(), tr.Codec().MimeType)
-	mime := tr.Codec().MimeType
-	switch mime {
-	case webrtc.MimeTypeH264:
+	mime := strings.ToLower(tr.Codec().MimeType)
+	switch {
+	case strings.Contains(mime, "h264"):
 		m.consumeH264Webcam(ctx, channelID, tr, frames)
-	case webrtc.MimeTypeVP8:
+	case strings.Contains(mime, "vp8"):
 		m.consumeVP8Webcam(ctx, channelID, tr, frames)
 	default:
-		log.Printf("[commentator %d] unsupported webcam codec %s — black frames only", channelID, mime)
+		log.Printf("[commentator %d] unsupported webcam codec %s — black frames only", channelID, tr.Codec().MimeType)
 		m.emitBlackVideo(ctx, frames)
 	}
 }

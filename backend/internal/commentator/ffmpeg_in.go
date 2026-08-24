@@ -17,6 +17,12 @@ import (
 	"github.com/pion/webrtc/v4/pkg/media"
 )
 
+const (
+	ffmpegRestartDelay = 3 * time.Second
+	ffmpegStableAfter  = 30 * time.Second
+)
+
+// runFFmpegInbound keeps DeckLink → WebRTC alive across signal loss / re-routes.
 func (m *Manager) runFFmpegInbound(
 	ctx context.Context,
 	channelID int,
@@ -24,7 +30,7 @@ func (m *Manager) runFFmpegInbound(
 	pgmTrack *webrtc.TrackLocalStaticSample,
 	intercom []IntercomSlot,
 	intercomTracks []*webrtc.TrackLocalStaticSample,
-	stopSilence context.CancelFunc,
+	_ context.CancelFunc, // legacy; silence is owned by this loop
 ) {
 	input := strings.TrimSpace(m.channelInput(channelID))
 	if input == "" || m.ffmpegBin == "" {
@@ -33,6 +39,65 @@ func (m *Manager) runFFmpegInbound(
 		return
 	}
 
+	var silenceCancel context.CancelFunc
+	startSilence := func() {
+		if silenceCancel != nil {
+			return
+		}
+		sctx, cancel := context.WithCancel(ctx)
+		silenceCancel = cancel
+		go m.runSilenceFallback(sctx, pgmTrack, intercomTracks)
+	}
+	stopSilence := func() {
+		if silenceCancel != nil {
+			silenceCancel()
+			silenceCancel = nil
+		}
+	}
+	startSilence()
+	defer stopSilence()
+
+	fails := 0
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		start := time.Now()
+		err := m.runFFmpegInboundOnce(ctx, channelID, input, videoTrack, pgmTrack, intercom, intercomTracks, stopSilence)
+		if ctx.Err() != nil {
+			return
+		}
+		startSilence()
+		uptime := time.Since(start)
+		if uptime >= ffmpegStableAfter {
+			fails = 0
+		} else {
+			fails++
+		}
+		delay := ffmpegRestartDelay
+		if fails > 5 {
+			delay = 15 * time.Second
+		}
+		log.Printf("[commentator %d] ffmpeg inbound exited after %s: %v (fail #%d) – retry in %s",
+			channelID, uptime.Round(time.Millisecond), err, fails, delay)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+	}
+}
+
+func (m *Manager) runFFmpegInboundOnce(
+	ctx context.Context,
+	channelID int,
+	input string,
+	videoTrack *webrtc.TrackLocalStaticSample,
+	pgmTrack *webrtc.TrackLocalStaticSample,
+	intercom []IntercomSlot,
+	intercomTracks []*webrtc.TrackLocalStaticSample,
+	onStarted func(),
+) error {
 	args := []string{"-hide_banner", "-loglevel", "warning", "-y"}
 	args = append(args, ensureDeckLinkChannels(shellSplit(input), 8)...)
 	args = append(args, "-analyzeduration", "0", "-probesize", "32")
@@ -93,9 +158,7 @@ func (m *Manager) runFFmpegInbound(
 				_ = p.writer.Close()
 				_ = p.reader.Close()
 			}
-			log.Printf("[commentator %d] audio pipe: %v", channelID, err)
-			m.runTestPattern(ctx, videoTrack)
-			return
+			return fmt.Errorf("audio pipe: %w", err)
 		}
 		stereo := al.label == "pgm"
 		ch := "1"
@@ -128,13 +191,11 @@ func (m *Manager) runFFmpegInbound(
 			_ = p.writer.Close()
 			_ = p.reader.Close()
 		}
-		log.Printf("[commentator %d] ffmpeg stdout: %v", channelID, err)
-		m.runTestPattern(ctx, videoTrack)
-		return
+		return fmt.Errorf("stdout: %w", err)
 	}
 	extra := make([]*os.File, len(pipes))
 	for i, p := range pipes {
-		// FFmpeg writes encoded opus to pipe:N — pass the write end (not the reader).
+		// FFmpeg writes PCM to pipe:N — pass the write end (not the reader).
 		extra[i] = p.writer
 	}
 	cmd.ExtraFiles = extra
@@ -145,26 +206,26 @@ func (m *Manager) runFFmpegInbound(
 			_ = p.writer.Close()
 			_ = p.reader.Close()
 		}
-		log.Printf("[commentator %d] ffmpeg stderr: %v", channelID, err)
-		m.runTestPattern(ctx, videoTrack)
-		return
+		return fmt.Errorf("stderr: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
 		for _, p := range pipes {
 			_ = p.writer.Close()
 			_ = p.reader.Close()
 		}
-		log.Printf("[commentator %d] ffmpeg start: %v", channelID, err)
-		m.runTestPattern(ctx, videoTrack)
-		return
+		return fmt.Errorf("start: %w", err)
 	}
 	for _, p := range pipes {
 		_ = p.writer.Close()
 	}
 
-	if stopSilence != nil {
-		stopSilence()
+	if onStarted != nil {
+		onStarted()
 	}
+	log.Printf("[commentator %d] ffmpeg inbound started", channelID)
+
+	pipeCtx, pipeCancel := context.WithCancel(ctx)
+	defer pipeCancel()
 
 	go func() {
 		sc := bufio.NewScanner(stderr)
@@ -173,17 +234,20 @@ func (m *Manager) runFFmpegInbound(
 		}
 	}()
 
-	go m.pipeH264ToTrack(ctx, stdout, videoTrack)
+	go m.pipeH264ToTrack(pipeCtx, stdout, videoTrack)
 	for _, p := range pipes {
-		go m.pipePCMToOpusTrack(ctx, p.reader, p.track, p.stereo)
+		go m.pipePCMToOpusTrack(pipeCtx, p.reader, p.track, p.stereo)
 	}
 
-	if err := cmd.Wait(); err != nil && ctx.Err() == nil {
-		log.Printf("[commentator %d] ffmpeg inbound exited: %v", channelID, err)
-	}
+	err = cmd.Wait()
+	pipeCancel()
 	for _, p := range pipes {
 		_ = p.reader.Close()
 	}
+	if err != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
 }
 
 func ensureDeckLinkChannels(args []string, n int) []string {

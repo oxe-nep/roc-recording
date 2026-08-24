@@ -13,15 +13,50 @@ import (
 
 const inboundVideoFPS = 25.0
 
+// runFFmpegOutbound keeps webcam → DeckLink alive across device/format blips.
 func (m *Manager) runFFmpegOutbound(ctx context.Context, channelID int, router *AudioRouter, videoFrames <-chan []byte) {
 	if m.playout == nil {
 		log.Printf("[commentator %d] no playout bridge — DeckLink OUT disabled", channelID)
 		return
 	}
+	if m.ffmpegBin == "" {
+		return
+	}
+
+	fails := 0
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		start := time.Now()
+		err := m.runFFmpegOutboundOnce(ctx, channelID, router, videoFrames)
+		if ctx.Err() != nil {
+			return
+		}
+		uptime := time.Since(start)
+		if uptime >= ffmpegStableAfter {
+			fails = 0
+		} else {
+			fails++
+		}
+		delay := ffmpegRestartDelay
+		if fails > 5 {
+			delay = 15 * time.Second
+		}
+		log.Printf("[commentator %d] decklink out exited after %s: %v (fail #%d) – retry in %s",
+			channelID, uptime.Round(time.Millisecond), err, fails, delay)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+	}
+}
+
+func (m *Manager) runFFmpegOutboundOnce(ctx context.Context, channelID int, router *AudioRouter, videoFrames <-chan []byte) error {
 	device, formatCode, err := m.OutputSink(channelID)
 	if err != nil {
-		log.Printf("[commentator %d] output sink: %v", channelID, err)
-		return
+		return err
 	}
 	openDevice := m.playout.ResolveOpenDevice(device)
 	if alt := m.playout.LookupDeviceOpen(device); alt != "" {
@@ -29,21 +64,17 @@ func (m *Manager) runFFmpegOutbound(ctx context.Context, channelID int, router *
 	}
 	w, h, fps, interlaced, err := m.playout.OutputTiming(formatCode)
 	if err != nil || w <= 0 || h <= 0 || fps <= 0 {
-		log.Printf("[commentator %d] output timing: %v", channelID, err)
-		return
+		return fmt.Errorf("output timing: %w", err)
 	}
 
 	videoR, videoW, err := os.Pipe()
 	if err != nil {
-		log.Printf("[commentator %d] video pipe: %v", channelID, err)
-		return
+		return fmt.Errorf("video pipe: %w", err)
 	}
 	audioR, audioW, err := os.Pipe()
 	if err != nil {
-		_ = videoW.Close()
-		_ = videoR.Close()
-		log.Printf("[commentator %d] audio pipe: %v", channelID, err)
-		return
+		closePipes(videoW, videoR, nil, nil)
+		return fmt.Errorf("audio pipe: %w", err)
 	}
 
 	vfilter := deckLinkVideoFilter(w, h, fps, interlaced)
@@ -83,13 +114,11 @@ func (m *Manager) runFFmpegOutbound(ctx context.Context, channelID int, router *
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		closePipes(videoW, videoR, audioW, audioR)
-		log.Printf("[commentator %d] decklink stderr: %v", channelID, err)
-		return
+		return fmt.Errorf("stderr: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
 		closePipes(videoW, videoR, audioW, audioR)
-		log.Printf("[commentator %d] decklink start: %v", channelID, err)
-		return
+		return fmt.Errorf("start: %w", err)
 	}
 	log.Printf("[commentator %d] DeckLink OUT → %q format=%s (%dx%d @ %g interlaced=%v)", channelID, openDevice, formatCode, w, h, fps, interlaced)
 
@@ -105,11 +134,13 @@ func (m *Manager) runFFmpegOutbound(ctx context.Context, channelID int, router *
 	go m.feedOutboundVideo(outCtx, videoW, videoFrames)
 	go m.feedOutboundAudio(outCtx, audioW, router)
 
-	if err := cmd.Wait(); err != nil && ctx.Err() == nil {
-		log.Printf("[commentator %d] decklink exited: %v", channelID, err)
-	}
+	err = cmd.Wait()
 	cancel()
 	closePipes(nil, videoR, nil, audioR)
+	if err != nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
 }
 
 func (m *Manager) feedOutboundVideo(ctx context.Context, w *os.File, frames <-chan []byte) {

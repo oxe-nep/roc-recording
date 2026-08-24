@@ -21,7 +21,6 @@ type rtcSession struct {
 	pgmTrack        *webrtc.TrackLocalStaticSample
 	intercomTracks  []*webrtc.TrackLocalStaticSample
 	enabledIntercom []IntercomSlot
-	silenceCancel   context.CancelFunc
 	stopOnce        sync.Once
 	negotiated      bool
 	mediaStarted    sync.Once
@@ -141,10 +140,6 @@ func (m *Manager) negotiateAnswer(sess *rtcSession, channelID int, answerSDP str
 		return err
 	}
 
-	silenceCtx, silenceCancel := context.WithCancel(sess.ctx)
-	sess.silenceCancel = silenceCancel
-	go m.runSilenceFallback(silenceCtx, sess.pgmTrack, sess.intercomTracks)
-
 	sess.negotiated = true
 	return nil
 }
@@ -152,7 +147,7 @@ func (m *Manager) negotiateAnswer(sess *rtcSession, channelID int, answerSDP str
 func (m *Manager) startMediaPipelines(sess *rtcSession, channelID int) {
 	sess.mediaStarted.Do(func() {
 		log.Printf("[commentator %d] WebRTC connected — starting DeckLink/ffmpeg pipelines", channelID)
-		go m.runFFmpegInbound(sess.ctx, channelID, sess.videoTrack, sess.pgmTrack, sess.enabledIntercom, sess.intercomTracks, sess.silenceCancel)
+		go m.runFFmpegInbound(sess.ctx, channelID, sess.videoTrack, sess.pgmTrack, sess.enabledIntercom, sess.intercomTracks, nil)
 		go m.runFFmpegOutbound(sess.ctx, channelID, sess.router, sess.videoFrames)
 	})
 }

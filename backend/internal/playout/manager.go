@@ -1201,9 +1201,9 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	silenceInput := false
 	fileAudioTo8 := ""
 	if source == SourceFile {
-		args = append(args, "-hwaccel", "cuda")
-		// Always loop at demuxer level; when Loop is false we stop at end-of-pass
-		// ourselves so LOOP can be toggled without restarting playback.
+		// Software decode: NVDEC + -stream_loop stalls HEVC at each wrap (audio
+		// keeps going, DeckLink underruns, then video bursts to catch up).
+		args = append(args, "-re")
 		args = append(args, "-stream_loop", "-1")
 		args = append(args, "-i", filePath)
 		chs, dump := probeAudioChannelsDetailed(m.ffmpegBin, filePath)
@@ -1233,23 +1233,24 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		var vdl string
 		if fmtInfo.Interlaced {
 			vdl = fmt.Sprintf(
-				"[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,tinterlace=interleave_top,format=yuv422p10le[v]",
+				"[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,setpts=PTS-STARTPTS,fps=%g,tinterlace=interleave_top,format=yuv422p10le[v]",
 				w, h, w, h, fps*2,
 			)
 		} else {
 			vdl = fmt.Sprintf(
-				"[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,fps=%g,format=yuv422p10le[v]",
+				"[0:v]scale=%d:%d:force_original_aspect_ratio=decrease,pad=%d:%d:(ow-iw)/2:(oh-ih)/2,setpts=PTS-STARTPTS,fps=%g,format=yuv422p10le[v]",
 				w, h, w, h, fps,
 			)
 		}
 		filter := vdl + ";" + fileAudioTo8 + ";" + audiox.LinkPad(audioSrc, fmt.Sprintf(
-			"aresample=48000:async=1:first_pts=0,asetnsamples=n=%d:p=0[a]",
+			"aresample=48000:async=1,asetnsamples=n=%d:p=0[a]",
 			samplesPerFrame,
 		))
 		c.appendLog("file audio graph: " + fileAudioTo8)
 		dlArgs := append([]string{}, args...)
 		dlArgs = append(dlArgs,
 			"-filter_complex", filter,
+			"-filter_complex_threads", "1",
 			"-map", "[v]",
 			"-map", "[a]",
 			"-c:v", "v210",
@@ -1259,6 +1260,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			"-fps_mode", "cfr",
 			"-r", fmt.Sprintf("%g", fps),
 			"-s", fmt.Sprintf("%dx%d", w, h),
+			"-max_interleave_delta", "0",
 		)
 		if fmtInfo.Interlaced {
 			dlArgs = append(dlArgs, "-flags", "+ilme+ildct", "-field_order", "tt")
@@ -1266,7 +1268,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		if formatCode != "" && !isAllDigits(formatCode) {
 			dlArgs = append(dlArgs, "-format_code", strings.TrimSpace(formatCode))
 		}
-		dlArgs = append(dlArgs, "-preroll", "0.5", "-f", "decklink", openDevice)
+		dlArgs = append(dlArgs, "-preroll", "1.5", "-f", "decklink", openDevice)
 
 		previewArgs := []string{
 			"-hide_banner", "-loglevel", "info",
@@ -1277,7 +1279,6 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			"-re",
 			"-stream_loop", "-1",
 		}
-		// Soft decode for UI preview — NVDEC reserved for the DeckLink process.
 		previewArgs = append(previewArgs, "-i", filePath)
 		prevTo8, prevPad := fileAudioTo8, audioSrc
 		if silenceInput {

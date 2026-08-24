@@ -86,7 +86,7 @@ func TestFileTo8SingleStereo(t *testing.T) {
 	if pad != "[a8]" {
 		t.Fatalf("pad %q", pad)
 	}
-	if g != "[0:a]aresample=48000:async=1:first_pts=0,pan=8c|c0=c0|c1=c1[a8]" {
+	if g != "[0:a]aresample=48000:async=1,pan=8c|c0=c0|c1=c1[a8]" {
 		t.Fatalf("graph %q", g)
 	}
 }

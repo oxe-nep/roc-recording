@@ -137,7 +137,7 @@ func FileTo8(fileIdx int, chs []int) (filter, outPad string) {
 	if len(chs) == 0 {
 		chs = []int{Channels}
 	}
-	rs := "aresample=48000:async=1:first_pts=0"
+	rs := "aresample=48000:async=1"
 	if len(chs) == 1 {
 		n := chs[0]
 		if n > Channels {

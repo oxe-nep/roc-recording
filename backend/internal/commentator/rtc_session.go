@@ -173,11 +173,13 @@ func (m *Manager) addCommentatorOutgoingTracks(
 		return nil, nil, nil, nil, err
 	}
 
-	pgmTrack, err := webrtc.NewTrackLocalStaticSample(
-		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus},
-		"audio",
-		"pgm",
-	)
+	opusCaps := webrtc.RTPCodecCapability{
+		MimeType:    webrtc.MimeTypeOpus,
+		ClockRate:   48000,
+		Channels:    2, // RFC 7587: Opus always uses 2 in SDP; we still send mono frames
+		SDPFmtpLine: "minptime=10;useinbandfec=1",
+	}
+	pgmTrack, err := webrtc.NewTrackLocalStaticSample(opusCaps, "audio", "pgm")
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -190,7 +192,7 @@ func (m *Manager) addCommentatorOutgoingTracks(
 	intercomTracks := make([]*webrtc.TrackLocalStaticSample, 0, len(enabled))
 	for _, slot := range enabled {
 		t, err := webrtc.NewTrackLocalStaticSample(
-			webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus},
+			opusCaps,
 			fmt.Sprintf("intercom%d", slot.ID),
 			fmt.Sprintf("intercom%d", slot.ID),
 		)

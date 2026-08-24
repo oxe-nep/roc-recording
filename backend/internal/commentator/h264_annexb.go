@@ -49,16 +49,18 @@ func (w *h264TrackWriter) feed(data []byte) {
 func (w *h264TrackWriter) writeNAL(nal []byte) {
 	nalType := h264NALType(nal)
 	switch nalType {
-	case 7, 8: // SPS, PPS
+	case 7: // SPS — start a fresh parameter set
+		w.spsPps = append([]byte(nil), nal...)
+	case 8: // PPS
 		w.spsPps = append(w.spsPps, nal...)
-	case 5: // IDR
+	case 5: // IDR — one sample per frame (include SPS/PPS)
 		payload := append([]byte(nil), w.spsPps...)
 		payload = append(payload, nal...)
 		_ = w.track.WriteSample(media.Sample{Data: payload, Duration: h264FrameDuration})
-	case 1: // non-IDR slice
+	case 1: // non-IDR coded slice — one sample per frame
 		_ = w.track.WriteSample(media.Sample{Data: nal, Duration: h264FrameDuration})
 	default:
-		// AUD / SEI — ignore for WebRTC decode
+		// AUD / SEI / filler — ignore (do not advance RTP timestamp)
 	}
 }
 

@@ -106,7 +106,8 @@ func (m *Manager) runFFmpegInboundOnce(
 		// DeckLink Hi50/Hi25 are interlaced — deinterlace before scale or the browser shows striped frames.
 		"[0:v]yadif=0:-1:0,scale=1280:720,fps=25,format=yuv420p[vout]",
 		"[0:a]pan=8c|c0=c0|c1=c1|c2=c2|c3=c3|c4=c4|c5=c5|c6=c6|c7=c7[a8]",
-		"[a8]pan=stereo|c0=c0|c1=c1[pgm]",
+		// Mono PGM — stereo Opus without matching SDP stereo flags sounds wrong in Chrome.
+		"[a8]pan=mono|c0=0.5*c0+0.5*c1[pgm]",
 	}
 	audioLabels := []struct {
 		label string
@@ -164,16 +165,11 @@ func (m *Manager) runFFmpegInboundOnce(
 			}
 			return fmt.Errorf("audio pipe: %w", err)
 		}
-		stereo := al.label == "pgm"
-		ch := "1"
-		if stereo {
-			ch = "2"
-		}
-		// Raw PCM → encode Opus packets in Go. FFmpeg -f opus is Ogg and unusable for WebRTC.
+		stereo := false // all WebRTC audio tracks are mono Opus
 		args = append(args,
 			"-map", fmt.Sprintf("[%s]", al.label),
 			"-c:a", "pcm_s16le",
-			"-ac", ch,
+			"-ac", "1",
 			"-ar", "48000",
 			"-f", "s16le",
 			fmt.Sprintf("pipe:%d", nextFD),
@@ -404,20 +400,16 @@ func (m *Manager) pipePCMToOpusTrack(ctx context.Context, r io.Reader, track *we
 		return
 	}
 	channels := 1
-	app := opus.AppVoIP
 	if stereo {
 		channels = 2
-		app = opus.AppAudio
 	}
-	enc, err := opus.NewEncoder(sampleRate, channels, app)
+	enc, err := opus.NewEncoder(sampleRate, channels, opus.AppAudio)
 	if err != nil {
 		log.Printf("[commentator] opus encoder: %v", err)
 		return
 	}
 	_ = enc.SetBitrate(64000)
-	if stereo {
-		_ = enc.SetBitrate(128000)
-	}
+	_ = enc.SetInBandFEC(true)
 	frameSamples := samplesPerFrame * channels
 	pcmBytes := make([]byte, frameSamples*2)
 	pcm := make([]int16, frameSamples)

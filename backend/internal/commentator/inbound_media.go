@@ -369,15 +369,7 @@ func (m *Manager) runWebcamRawDecoder(ctx context.Context, channelID int, label 
 		case <-ctx.Done():
 			return
 		default:
-			// Drop if outbound consumer is behind — keep latest by non-blocking send retry
-			select {
-			case <-frames:
-			default:
-			}
-			select {
-			case frames <- frame:
-			default:
-			}
+			// Drop frame if DeckLink consumer is behind (channel buffer full).
 		}
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"unicode"
+
+	"github.com/roc-recording/backend/internal/audiox"
 )
 
 type presetFile struct {
@@ -15,27 +17,29 @@ type presetFile struct {
 }
 
 type presetEntry struct {
-	Label        string `json:"label"`
-	VideoCodec   string `json:"video_codec"`
-	VideoBitrate string `json:"video_bitrate"`
-	VideoMaxrate string `json:"video_maxrate"`
-	VideoBufsize string `json:"video_bufsize"`
-	VideoPreset  string `json:"video_preset"`
-	VideoGOP     int    `json:"video_gop"`
-	AudioBitrate string `json:"audio_bitrate"`
+	Label         string `json:"label"`
+	VideoCodec    string `json:"video_codec"`
+	VideoBitrate  string `json:"video_bitrate"`
+	VideoMaxrate  string `json:"video_maxrate"`
+	VideoBufsize  string `json:"video_bufsize"`
+	VideoPreset   string `json:"video_preset"`
+	VideoGOP      int    `json:"video_gop"`
+	AudioBitrate  string `json:"audio_bitrate"`
+	AudioChannels int    `json:"audio_channels,omitempty"`
 }
 
 // PresetInput is the API payload for create/update.
 type PresetInput struct {
-	ID           string `json:"id"`
-	Label        string `json:"label"`
-	VideoCodec   string `json:"video_codec"`
-	VideoBitrate string `json:"video_bitrate"`
-	VideoMaxrate string `json:"video_maxrate"`
-	VideoBufsize string `json:"video_bufsize"`
-	VideoPreset  string `json:"video_preset"`
-	VideoGOP     int    `json:"video_gop"`
-	AudioBitrate string `json:"audio_bitrate"`
+	ID            string `json:"id"`
+	Label         string `json:"label"`
+	VideoCodec    string `json:"video_codec"`
+	VideoBitrate  string `json:"video_bitrate"`
+	VideoMaxrate  string `json:"video_maxrate"`
+	VideoBufsize  string `json:"video_bufsize"`
+	VideoPreset   string `json:"video_preset"`
+	VideoGOP      int    `json:"video_gop"`
+	AudioBitrate  string `json:"audio_bitrate"`
+	AudioChannels int    `json:"audio_channels"`
 }
 
 func (m *Manager) LoadPresetsFile() {
@@ -91,14 +95,15 @@ func (m *Manager) savePresetsLocked() error {
 	}
 	for id, p := range m.presets {
 		file.Presets[id] = presetEntry{
-			Label:        p.Label,
-			VideoCodec:   p.Profile.VideoCodec,
-			VideoBitrate: p.Profile.VideoBitrate,
-			VideoMaxrate: p.Profile.VideoMaxrate,
-			VideoBufsize: p.Profile.VideoBufsize,
-			VideoPreset:  p.Profile.VideoPreset,
-			VideoGOP:     p.Profile.VideoGOP,
-			AudioBitrate: p.Profile.AudioBitrate,
+			Label:         p.Label,
+			VideoCodec:    p.Profile.VideoCodec,
+			VideoBitrate:  p.Profile.VideoBitrate,
+			VideoMaxrate:  p.Profile.VideoMaxrate,
+			VideoBufsize:  p.Profile.VideoBufsize,
+			VideoPreset:   p.Profile.VideoPreset,
+			VideoGOP:      p.Profile.VideoGOP,
+			AudioBitrate:  p.Profile.AudioBitrate,
+			AudioChannels: audiox.NormalizeCount(p.Profile.AudioChannels),
 		}
 	}
 	data, err := json.MarshalIndent(file, "", "  ")
@@ -133,17 +138,19 @@ func namedFromEntry(id string, e presetEntry) NamedPreset {
 	if e.AudioBitrate == "" {
 		e.AudioBitrate = "192k"
 	}
+	e.AudioChannels = audiox.NormalizeCount(e.AudioChannels)
 	return NamedPreset{
 		ID:    id,
 		Label: e.Label,
 		Profile: EncodeProfile{
-			VideoCodec:   e.VideoCodec,
-			VideoBitrate: e.VideoBitrate,
-			VideoMaxrate: e.VideoMaxrate,
-			VideoBufsize: e.VideoBufsize,
-			VideoPreset:  e.VideoPreset,
-			VideoGOP:     e.VideoGOP,
-			AudioBitrate: e.AudioBitrate,
+			VideoCodec:    e.VideoCodec,
+			VideoBitrate:  e.VideoBitrate,
+			VideoMaxrate:  e.VideoMaxrate,
+			VideoBufsize:  e.VideoBufsize,
+			VideoPreset:   e.VideoPreset,
+			VideoGOP:      e.VideoGOP,
+			AudioBitrate:  e.AudioBitrate,
+			AudioChannels: e.AudioChannels,
 		},
 	}
 }
@@ -154,14 +161,15 @@ func (m *Manager) UpsertPreset(in PresetInput, create bool) (NamedPreset, error)
 		return NamedPreset{}, fmt.Errorf("invalid preset id")
 	}
 	entry := presetEntry{
-		Label:        strings.TrimSpace(in.Label),
-		VideoCodec:   strings.TrimSpace(in.VideoCodec),
-		VideoBitrate: strings.TrimSpace(in.VideoBitrate),
-		VideoMaxrate: strings.TrimSpace(in.VideoMaxrate),
-		VideoBufsize: strings.TrimSpace(in.VideoBufsize),
-		VideoPreset:  strings.TrimSpace(in.VideoPreset),
-		VideoGOP:     in.VideoGOP,
-		AudioBitrate: strings.TrimSpace(in.AudioBitrate),
+		Label:         strings.TrimSpace(in.Label),
+		VideoCodec:    strings.TrimSpace(in.VideoCodec),
+		VideoBitrate:  strings.TrimSpace(in.VideoBitrate),
+		VideoMaxrate:  strings.TrimSpace(in.VideoMaxrate),
+		VideoBufsize:  strings.TrimSpace(in.VideoBufsize),
+		VideoPreset:   strings.TrimSpace(in.VideoPreset),
+		VideoGOP:      in.VideoGOP,
+		AudioBitrate:  strings.TrimSpace(in.AudioBitrate),
+		AudioChannels: in.AudioChannels,
 	}
 	if entry.Label == "" {
 		entry.Label = id

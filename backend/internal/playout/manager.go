@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/roc-recording/backend/internal/audiox"
 	hlsout "github.com/roc-recording/backend/internal/hls"
 )
 
@@ -47,7 +48,7 @@ const (
 )
 
 const (
-	audioSilence = -90.0
+	audioSilence = audiox.Silence
 	logCap       = 200
 )
 
@@ -74,8 +75,7 @@ type Client struct {
 	Passphrase  string
 	LatencyMS   int
 
-	AudioL      float64
-	AudioR      float64
+	Audio       [audiox.Channels]float64
 	BitrateKbps float64
 	DurationSec float64 // file length; 0 if unknown / SRT
 	ElapsedSec  float64 // display position within current loop
@@ -242,8 +242,7 @@ func (m *Manager) Load() {
 			Target:      strings.TrimSpace(cfg.Target),
 			Passphrase:  cfg.Passphrase,
 			LatencyMS:   lat,
-			AudioL:      audioSilence,
-			AudioR:      audioSilence,
+			Audio:       audiox.SilencePeaks(),
 			logLines:    make([]string, 0, 32),
 		}
 		if id >= m.nextID {
@@ -359,8 +358,7 @@ func (m *Manager) Create(in CreateInput) (ClientInfo, error) {
 		Target:      strings.TrimSpace(in.Target),
 		Passphrase:  in.Passphrase,
 		LatencyMS:   lat,
-		AudioL:      audioSilence,
-		AudioR:      audioSilence,
+		Audio:       audiox.SilencePeaks(),
 		logLines:    make([]string, 0, 32),
 	}
 	if strings.EqualFold(strings.TrimSpace(in.Source), string(SourceFile)) {
@@ -550,14 +548,14 @@ func (m *Manager) Logs(id int) ([]string, error) {
 	return out, nil
 }
 
-func (m *Manager) AudioLevels(id int) (l, r float64, ok bool) {
+func (m *Manager) AudioLevels(id int) (ch []float64, ok bool) {
 	c, err := m.get(id)
 	if err != nil {
-		return 0, 0, false
+		return nil, false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.AudioL, c.AudioR, c.Status == StatusRunning || c.Status == StatusWaiting || c.Status == StatusPaused
+	return audiox.Slice(c.Audio), c.Status == StatusRunning || c.Status == StatusWaiting || c.Status == StatusPaused
 }
 
 func (m *Manager) StatusByID(id int) (Status, bool) {
@@ -801,8 +799,7 @@ func (m *Manager) Start(id int) (ClientInfo, error) {
 	c.pauseBegan = time.Time{}
 	c.pausedTotal = 0
 	c.fileArmed = false
-	c.AudioL = audioSilence
-	c.AudioR = audioSilence
+	c.Audio = audiox.SilencePeaks()
 	info := m.infoLocked(c)
 	c.mu.Unlock()
 
@@ -872,8 +869,7 @@ func (m *Manager) Stop(id int) (ClientInfo, error) {
 		c.mu.Lock()
 		done := c.Status == StatusStopped && c.cmd == nil && c.previewCmd == nil
 		if done {
-			c.AudioL = audioSilence
-			c.AudioR = audioSilence
+			c.Audio = audiox.SilencePeaks()
 			c.Sending = false
 			c.BitrateKbps = 0
 		}
@@ -891,8 +887,7 @@ func (m *Manager) Stop(id int) (ClientInfo, error) {
 	c.stopCh = nil
 	c.Sending = false
 	c.BitrateKbps = 0
-	c.AudioL = audioSilence
-	c.AudioR = audioSilence
+	c.Audio = audiox.SilencePeaks()
 	info := m.infoLocked(c)
 	c.mu.Unlock()
 	return info, nil
@@ -991,8 +986,7 @@ func (m *Manager) runLoop(c *Client) {
 		c.stopCh = nil
 		c.BitrateKbps = 0
 		c.Sending = false
-		c.AudioL = audioSilence
-		c.AudioR = audioSilence
+		c.Audio = audiox.SilencePeaks()
 		c.mu.Unlock()
 		_ = os.Remove(m.ThumbPath(c.ID))
 		c.appendLog("stopped")
@@ -1015,8 +1009,7 @@ func (m *Manager) runLoop(c *Client) {
 		c.Status = StatusWaiting
 		c.Sending = false
 		c.BitrateKbps = 0
-		c.AudioL = audioSilence
-		c.AudioR = audioSilence
+		c.Audio = audiox.SilencePeaks()
 		c.mu.Unlock()
 		_ = os.Remove(m.ThumbPath(c.ID))
 
@@ -1240,8 +1233,8 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			)
 		}
 		filter := vdl + ";" + fmt.Sprintf(
-			"%saresample=48000:async=1:first_pts=0,aformat=channel_layouts=stereo,asetnsamples=n=%d:p=0[a]",
-			audioSrc, samplesPerFrame,
+			"%s%s,aresample=48000:async=1:first_pts=0,asetnsamples=n=%d:p=0[a]",
+			audioSrc, audiox.Discrete8Pan, samplesPerFrame,
 		)
 		dlArgs := append([]string{}, args...)
 		dlArgs = append(dlArgs,
@@ -1251,7 +1244,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			"-c:v", "v210",
 			"-c:a", "pcm_s16le",
 			"-ar", "48000",
-			"-ac", "2",
+			"-ac", "8",
 			"-fps_mode", "cfr",
 			"-r", fmt.Sprintf("%g", fps),
 			"-s", fmt.Sprintf("%dx%d", w, h),
@@ -1296,8 +1289,9 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		filter = vchain + ";" +
 			"[vt]scale=640:360,fps=10,format=yuv420p[vprev];" +
 			fmt.Sprintf(
-				"%saresample=48000:async=1:first_pts=0,aformat=channel_layouts=stereo,asetnsamples=n=%d:p=0,asplit=3[aout][aprev][ameter];",
-				audioSrc, samplesPerFrame,
+				"%s%s,aresample=48000:async=1:first_pts=0,asetnsamples=n=%d:p=0,asplit=3[aout][aprevsrc][ameter];"+
+					"[aprevsrc]pan=stereo|c0=c0|c1=c1[aprev];",
+				audioSrc, audiox.Discrete8Pan, samplesPerFrame,
 			) +
 			"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
 			"ametadata=print,anullsink"
@@ -1308,7 +1302,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			"-c:v", "v210",
 			"-c:a", "pcm_s16le",
 			"-ar", "48000",
-			"-ac", "2",
+			"-ac", "8",
 			"-fps_mode", "cfr",
 			"-r", fmt.Sprintf("%g", fps),
 			"-s", fmt.Sprintf("%dx%d", w, h),
@@ -1788,12 +1782,7 @@ func (m *Manager) watchStderr(c *Client, r io.Reader) {
 				val = 0
 			}
 			c.mu.Lock()
-			switch ch {
-			case 1:
-				c.AudioL = val
-			case 2:
-				c.AudioR = val
-			}
+			audiox.SetPeak(&c.Audio, ch, val)
 			if c.Status == StatusWaiting {
 				c.Status = StatusRunning
 			}

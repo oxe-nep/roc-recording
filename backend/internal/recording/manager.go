@@ -243,7 +243,6 @@ func (m *Manager) Start(id int) (ChannelInfo, error) {
 	baseName := fmt.Sprintf("%s_%s", label, ts.Format("2006-01-02_15-04-05"))
 	mp4Path := filepath.Join(outDir, baseName+".mp4")
 	// Remux master UDP feed (already encoded by capture). No second NVENC pass.
-	// aac_adtstoasc is required when copying AAC from MPEG-TS into MP4.
 	args := []string{
 		"-y",
 		"-fflags", "+genpts+discardcorrupt",
@@ -254,13 +253,19 @@ func (m *Manager) Start(id int) (ChannelInfo, error) {
 		"-map", "0:v:0",
 		"-map", "0:a:0?",
 		"-c", "copy",
-		"-bsf:a", "aac_adtstoasc",
+	}
+	// aac_adtstoasc is required when copying AAC from MPEG-TS into MP4.
+	// 8-channel presets write PCM — the bitstream filter would fail.
+	if !m.captureMgr.MasterAudioIsPCM(id) {
+		args = append(args, "-bsf:a", "aac_adtstoasc")
+	}
+	args = append(args,
 		"-movflags", "frag_keyframe+empty_moov+default_base_moof",
 		// Machine-readable progress on stdout (newline-delimited key=value).
 		"-progress", "pipe:1",
 		"-nostats",
 		mp4Path,
-	}
+	)
 	cmd := exec.Command(m.ffmpegBin, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

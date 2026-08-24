@@ -93,6 +93,7 @@ const emptyForm = (): EncodePreset => ({
   video_preset: "p4",
   video_gop: 50,
   audio_bitrate: "192k",
+  audio_channels: 2,
 });
 
 type Props = {
@@ -218,7 +219,7 @@ export default function EncodePresetsEditor({ open, onClose, onChanged, embedded
 
   const startEdit = (p: EncodePreset) => {
     setEditingId(p.id);
-    setForm({ ...p });
+    setForm({ ...p, audio_channels: p.audio_channels === 8 ? 8 : 2 });
   };
 
   const setVideoMbps = (mbps: number) => {
@@ -303,7 +304,7 @@ export default function EncodePresetsEditor({ open, onClose, onChanged, embedded
               <button type="button" className="presets-row-main" onClick={() => startEdit(p)}>
                 <span className="presets-row-label">{p.label}</span>
                 <span className="presets-row-meta">
-                  {p.id} · {p.video_bitrate} · {p.audio_bitrate}
+                  {p.id} · {p.video_bitrate} · {p.audio_channels === 8 ? "8ch PCM" : p.audio_bitrate}
                 </span>
               </button>
               <button type="button" className="badge delete-btn" onClick={() => remove(p.id)} disabled={busy}>
@@ -401,11 +402,25 @@ export default function EncodePresetsEditor({ open, onClose, onChanged, embedded
             </label>
 
             <label className="presets-field">
+              <span>Audio</span>
+              <select
+                value={String(form.audio_channels === 8 ? 8 : 2)}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, audio_channels: Number(e.target.value) === 8 ? 8 : 2 }))
+                }
+                disabled={busy}
+              >
+                <option value="2">Stereo — AAC 2 tracks</option>
+                <option value="8">8 tracks — PCM in MPEG-TS</option>
+              </select>
+            </label>
+
+            <label className="presets-field">
               <span>Audio bitrate</span>
               <select
                 value={form.audio_bitrate}
                 onChange={(e) => setForm((prev) => ({ ...prev, audio_bitrate: e.target.value }))}
-                disabled={busy}
+                disabled={busy || form.audio_channels === 8}
               >
                 {audioOptions.map((a) => (
                   <option key={a.value} value={a.value}>
@@ -419,7 +434,7 @@ export default function EncodePresetsEditor({ open, onClose, onChanged, embedded
           <p className="presets-derived">
             Applied encode: {form.video_codec} · {derived.video_bitrate} (max {derived.video_maxrate},
             buffer {derived.video_bufsize}) · {form.video_preset} · GOP {form.video_gop} · audio{" "}
-            {form.audio_bitrate}
+            {form.audio_channels === 8 ? "8ch PCM" : `AAC stereo ${form.audio_bitrate}`}
           </p>
 
           <p className="presets-hint">

@@ -17,6 +17,7 @@ import { sortByChannelId } from "@/lib/sortChannels";
 import { useWorkflows } from "@/hooks/useWorkflows";
 import { useDashboard } from "@/hooks/useDashboard";
 import HlsPreview from "@/components/HlsPreview";
+import AudioMeters from "@/components/AudioMeters";
 import ChannelSettingsModal from "@/components/ChannelSettingsModal";
 
 function formatElapsed(sec?: number): string {
@@ -32,50 +33,6 @@ function formatBitrate(kbps?: number): string {
   if (!kbps || kbps <= 0) return "--";
   if (kbps >= 1000) return `${(kbps / 1000).toFixed(1)} Mbit/s`;
   return `${kbps.toFixed(0)} kbit/s`;
-}
-
-const METER_SEGMENTS = 24;
-const METER_MIN_DB = -50;
-const METER_MAX_DB = 0;
-
-function hasAudioLevel(db?: number): boolean {
-  return db !== undefined && !Number.isNaN(db) && db > -89;
-}
-
-function segmentZone(index: number): "green" | "yellow" | "red" {
-  const db =
-    METER_MIN_DB + ((index + 1) / METER_SEGMENTS) * (METER_MAX_DB - METER_MIN_DB);
-  if (db <= -18) return "green";
-  if (db <= -9) return "yellow";
-  return "red";
-}
-
-function litSegmentCount(db?: number): number {
-  if (!hasAudioLevel(db)) return 0;
-  const clamped = Math.max(METER_MIN_DB, Math.min(METER_MAX_DB, db!));
-  const pct = (clamped - METER_MIN_DB) / (METER_MAX_DB - METER_MIN_DB);
-  return Math.round(pct * METER_SEGMENTS);
-}
-
-function SegmentedMeter({ db, label }: { db?: number; label: string }) {
-  const lit = litSegmentCount(db);
-  const dbText = hasAudioLevel(db) ? `${db!.toFixed(1)} dBFS` : "— dBFS";
-  return (
-    <div
-      className="audio-col"
-      title={`${label}: ${dbText}. Green ≤ -18 · Yellow ≤ -9 · Red above -9`}
-    >
-      <div className="audio-segments" aria-hidden>
-        {Array.from({ length: METER_SEGMENTS }, (_, i) => (
-          <span
-            key={i}
-            className={`audio-seg ${segmentZone(i)}${i < lit ? " on" : ""}`}
-          />
-        ))}
-      </div>
-      <span className="audio-label">{label}</span>
-    </div>
-  );
 }
 
 export default function StreamGrid() {
@@ -193,6 +150,7 @@ export default function StreamGrid() {
           return (
             <div key={s.id} className={`card-panel ${s.status}`}>
               <div className="card-stage">
+                <AudioMeters levels={audio[s.id]}>
                 <div className="card-thumb">
                   <HlsPreview
                     active={captureOn}
@@ -229,10 +187,7 @@ export default function StreamGrid() {
                     </div>
                   )}
                 </div>
-                <div className="audio-meter" title="Audio levels">
-                  <SegmentedMeter label="L" db={audio[s.id]?.l} />
-                  <SegmentedMeter label="R" db={audio[s.id]?.r} />
-                </div>
+                </AudioMeters>
               </div>
 
               <div className="card-footer">

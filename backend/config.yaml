@@ -6,6 +6,7 @@ recordings_dir: "./recordings"
 ffmpeg_bin: "/usr/local/bin/ffmpeg"
 
 # Named master-encode presets (always-on UDP feed; recording remuxes with -c copy).
+# audio_channels: 2 = AAC stereo, 8 = discrete PCM in MPEG-TS (~6 Mbit extra).
 # Pick per channel via encode_preset, or change in the UI (persisted to encode-assignments.json).
 default_encode_preset: hq
 
@@ -19,6 +20,7 @@ encode_presets:
     video_preset: "p4"
     video_gop: 50
     audio_bitrate: "128k"
+    audio_channels: 2
   hq:
     label: "HQ 12 Mbit"
     video_codec: "h264_nvenc"
@@ -28,6 +30,7 @@ encode_presets:
     video_preset: "p4"
     video_gop: 50
     audio_bitrate: "192k"
+    audio_channels: 2
   mezz:
     label: "Mezz 20 Mbit"
     video_codec: "h264_nvenc"
@@ -37,6 +40,7 @@ encode_presets:
     video_preset: "p4"
     video_gop: 50
     audio_bitrate: "256k"
+    audio_channels: 2
 
 # TSL v5 UMD - source labels on encode inputs (set tsl_port: 0 to disable).
 tsl_port: 30947

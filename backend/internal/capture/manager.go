@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/roc-recording/backend/internal/audiox"
 	hlsout "github.com/roc-recording/backend/internal/hls"
 )
 
@@ -42,7 +43,7 @@ var reSignalFormat = regexp.MustCompile(`Found Decklink mode (\d+) x (\d+) with 
 // make meters read ~3 dB low on sine tones (and worse on program).
 var reAstatsPeak = regexp.MustCompile(`lavfi\.astats\.(\d+)\.Peak_level=([-\d.]+|-?inf)`)
 
-const audioSilence = -90.0 // treat -inf as this value
+const audioSilence = audiox.Silence // treat -inf as this value
 
 const streamLogCap = 200
 
@@ -51,10 +52,9 @@ type Stream struct {
 	Name         string
 	Status       Status
 	Error        string
-	Format       string  // e.g. "1080i50" or "1080p50", empty when unknown
-	AudioL       float64 // dBFS sample-peak left
-	AudioR       float64 // dBFS sample-peak right
-	EncodePreset string  // preset id applied to master UDP encode
+	Format       string // e.g. "1080i50" or "1080p50", empty when unknown
+	Audio        [audiox.Channels]float64
+	EncodePreset string // preset id applied to master UDP encode
 	ffmpegInput  string
 	feedURL      string
 	cmd          *exec.Cmd
@@ -99,13 +99,14 @@ func (m *Manager) Logs(id int) ([]string, bool) {
 // EncodeProfile is the always-on master encode written to the local UDP feed.
 // Recording remuxes that feed with -c copy (no second encode).
 type EncodeProfile struct {
-	VideoCodec   string
-	VideoBitrate string
-	VideoMaxrate string
-	VideoBufsize string
-	VideoPreset  string
-	VideoGOP     int
-	AudioBitrate string
+	VideoCodec    string
+	VideoBitrate  string
+	VideoMaxrate  string
+	VideoBufsize  string
+	VideoPreset   string
+	VideoGOP      int
+	AudioBitrate  string
+	AudioChannels int // 2 = AAC stereo (default), 8 = PCM discrete in MPEG-TS
 }
 
 // NamedPreset is a selectable encode profile (id + label + settings).
@@ -266,13 +267,14 @@ func (m *Manager) profileFor(presetID string) EncodeProfile {
 		return p.Profile
 	}
 	return EncodeProfile{
-		VideoCodec:   "h264_nvenc",
-		VideoBitrate: "12M",
-		VideoMaxrate: "14M",
-		VideoBufsize: "20M",
-		VideoPreset:  "p4",
-		VideoGOP:     50,
-		AudioBitrate: "192k",
+		VideoCodec:    "h264_nvenc",
+		VideoBitrate:  "12M",
+		VideoMaxrate:  "14M",
+		VideoBufsize:  "20M",
+		VideoPreset:   "p4",
+		VideoGOP:      50,
+		AudioBitrate:  "192k",
+		AudioChannels: 2,
 	}
 }
 
@@ -352,8 +354,7 @@ func (m *Manager) Start(id int) error {
 	s.Status = StatusWaiting
 	s.Error = ""
 	s.Format = ""
-	s.AudioL = audioSilence
-	s.AudioR = audioSilence
+	s.Audio = audiox.SilencePeaks()
 	s.mu.Unlock()
 
 	s.appendLog("channel start requested – waiting for signal")
@@ -444,16 +445,30 @@ func (m *Manager) FeedURL(id int) (string, bool) {
 	return s.feedURL, true
 }
 
-func (m *Manager) AudioLevels(id int) (l, r float64, ok bool) {
+func (m *Manager) AudioLevels(id int) (ch []float64, ok bool) {
 	m.mu.RLock()
 	s, found := m.streams[id]
 	m.mu.RUnlock()
 	if !found {
-		return 0, 0, false
+		return nil, false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.AudioL, s.AudioR, isActiveStatus(s.Status)
+	return audiox.Slice(s.Audio), isActiveStatus(s.Status)
+}
+
+// MasterAudioIsPCM reports whether the current encode preset writes PCM (8ch) on the UDP feed.
+func (m *Manager) MasterAudioIsPCM(id int) bool {
+	m.mu.RLock()
+	s, ok := m.streams[id]
+	m.mu.RUnlock()
+	if !ok {
+		return false
+	}
+	s.mu.Lock()
+	presetID := s.EncodePreset
+	s.mu.Unlock()
+	return audiox.NormalizeCount(m.profileFor(presetID).AudioChannels) == audiox.Channels
 }
 
 func (m *Manager) StatusByID(id int) (Status, bool) {
@@ -552,8 +567,7 @@ func (m *Manager) runLoop(s *Stream) {
 			s.Status = StatusStopped
 			s.Format = ""
 			s.Error = ""
-			s.AudioL = audioSilence
-			s.AudioR = audioSilence
+			s.Audio = audiox.SilencePeaks()
 			s.mu.Unlock()
 			s.appendLog("channel stopped")
 			return
@@ -570,8 +584,7 @@ func (m *Manager) runLoop(s *Stream) {
 			s.Status = StatusStopped
 			s.Format = ""
 			s.Error = ""
-			s.AudioL = audioSilence
-			s.AudioR = audioSilence
+			s.Audio = audiox.SilencePeaks()
 			s.mu.Unlock()
 			m.removePreview(s.ID)
 			s.appendLog("channel stopped")
@@ -583,8 +596,7 @@ func (m *Manager) runLoop(s *Stream) {
 		s.mu.Lock()
 		s.Format = ""
 		s.Error = ""
-		s.AudioL = audioSilence
-		s.AudioR = audioSilence
+		s.Audio = audiox.SilencePeaks()
 		s.Status = StatusWaiting
 		s.mu.Unlock()
 		m.removePreview(s.ID)
@@ -654,10 +666,18 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	enc := m.profileFor(presetID)
 	gop := strconv.Itoa(enc.VideoGOP)
 
+	audioCh := audiox.NormalizeCount(enc.AudioChannels)
+	audioBranch := "[0:a]pan=stereo|c0=c0|c1=c1,asplit=3[arec][ameter][aprev];"
+	audioEncode := []string{"-c:a", "aac", "-b:a", enc.AudioBitrate, "-ar", "48000", "-ac", "2"}
+	if audioCh == audiox.Channels {
+		audioBranch = "[0:a]" + audiox.Discrete8Pan + ",asplit=3[arec][ameter][aprevsrc];" +
+			"[aprevsrc]pan=stereo|c0=c0|c1=c1[aprev];"
+		audioEncode = []string{"-c:a", "pcm_s16le", "-ar", "48000", "-ac", "8"}
+	}
 	filterGraph := "[0:v]yadif=mode=0:deint=interlaced,split=2[vrec][vprevsrc];" +
 		"[vprevsrc]scale=640:360,fps=10,format=yuv420p[vprev];" +
 		"[vrec]format=yuv420p[vrecout];" +
-		"[0:a]pan=stereo|c0=c0|c1=c1,asplit=3[arec][ameter][aprev];" +
+		audioBranch +
 		"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
 		"ametadata=print,anullsink"
 
@@ -677,10 +697,9 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"-bufsize", enc.VideoBufsize,
 		"-preset", enc.VideoPreset,
 		"-g", gop,
-		"-c:a", "aac",
-		"-b:a", enc.AudioBitrate,
-		"-ar", "48000",
-		"-ac", "2",
+	)
+	args = append(args, audioEncode...)
+	args = append(args,
 		"-f", "mpegts",
 		"-mpegts_flags", "+resend_headers",
 		s.feedURL,
@@ -752,20 +771,14 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 					val = 0
 				}
 				s.mu.Lock()
-				switch ch {
-				case 1:
-					s.AudioL = val
-				case 2:
-					s.AudioR = val
-				}
+				audiox.SetPeak(&s.Audio, ch, val)
 				s.mu.Unlock()
 			}
 			if strings.Contains(line, "No input signal detected") {
 				s.mu.Lock()
 				s.Status = StatusWaiting
 				s.Format = ""
-				s.AudioL = audioSilence
-				s.AudioR = audioSilence
+				s.Audio = audiox.SilencePeaks()
 				s.mu.Unlock()
 				m.removePreview(s.ID)
 				if cmd.Process != nil {

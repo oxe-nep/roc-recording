@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/roc-recording/backend/internal/audiox"
 )
 
 var reSinkIndex = regexp.MustCompile(`\((\d+)\)\s*$`)
@@ -54,8 +56,7 @@ func (m *Manager) EnsureDefaultChannels() {
 				Port:        9200 + id,
 				Target:      fmt.Sprintf("127.0.0.1:%d", 9100+id),
 				LatencyMS:   120,
-				AudioL:      audioSilence,
-				AudioR:      audioSilence,
+				Audio:       audiox.SilencePeaks(),
 				logLines:    make([]string, 0, 32),
 			}
 			changed = true

@@ -16,6 +16,7 @@ import { sortByChannelId } from "@/lib/sortChannels";
 import { useWorkflows } from "@/hooks/useWorkflows";
 import { useDashboard } from "@/hooks/useDashboard";
 import HlsPreview from "@/components/HlsPreview";
+import AudioMeters from "@/components/AudioMeters";
 import DecodeSettingsModal from "@/components/DecodeSettingsModal";
 
 function formatBitrate(kbps?: number): string {
@@ -34,42 +35,6 @@ function formatClock(sec?: number): string {
     return `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
   }
   return `${m}:${String(r).padStart(2, "0")}`;
-}
-
-const METER_SEGMENTS = 24;
-const METER_MIN_DB = -50;
-const METER_MAX_DB = 0;
-
-function hasAudioLevel(db?: number): boolean {
-  return db !== undefined && !Number.isNaN(db) && db > -89;
-}
-
-function segmentZone(index: number): "green" | "yellow" | "red" {
-  const db = METER_MIN_DB + ((index + 1) / METER_SEGMENTS) * (METER_MAX_DB - METER_MIN_DB);
-  if (db <= -18) return "green";
-  if (db <= -9) return "yellow";
-  return "red";
-}
-
-function litSegmentCount(db?: number): number {
-  if (!hasAudioLevel(db)) return 0;
-  const clamped = Math.max(METER_MIN_DB, Math.min(METER_MAX_DB, db!));
-  const pct = (clamped - METER_MIN_DB) / (METER_MAX_DB - METER_MIN_DB);
-  return Math.round(pct * METER_SEGMENTS);
-}
-
-function SegmentedMeter({ db, label }: { db?: number; label: string }) {
-  const lit = litSegmentCount(db);
-  return (
-    <div className="audio-col" title={label}>
-      <div className="audio-segments" aria-hidden>
-        {Array.from({ length: METER_SEGMENTS }, (_, i) => (
-          <span key={i} className={`audio-seg ${segmentZone(i)}${i < lit ? " on" : ""}`} />
-        ))}
-      </div>
-      <span className="audio-label">{label}</span>
-    </div>
-  );
 }
 
 function formatDisplay(code?: string): string {
@@ -173,6 +138,7 @@ export default function DecodeGrid() {
             return (
               <div key={c.id} className={`card-panel ${c.status}`}>
                 <div className="card-stage">
+                  <AudioMeters levels={audio[c.id]}>
                   <div className="card-thumb">
                     <HlsPreview
                       active={on}
@@ -188,10 +154,7 @@ export default function DecodeGrid() {
                       </div>
                     )}
                   </div>
-                  <div className="audio-meter">
-                    <SegmentedMeter label="L" db={audio[c.id]?.l} />
-                    <SegmentedMeter label="R" db={audio[c.id]?.r} />
-                  </div>
+                  </AudioMeters>
                 </div>
 
                 <div className="card-footer">

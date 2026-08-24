@@ -15,15 +15,17 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/roc-recording/backend/internal/audiox"
 )
 
 type Status string
 
 const (
-	StatusOff         Status = "off"
-	StatusRunning     Status = "running"
-	StatusRestarting  Status = "restarting"
-	StatusError       Status = "error"
+	StatusOff        Status = "off"
+	StatusRunning    Status = "running"
+	StatusRestarting Status = "restarting"
+	StatusError      Status = "error"
 )
 
 type Position string
@@ -40,18 +42,18 @@ const (
 type Source string
 
 const (
-	SourceTOD        Source = "tod"        // host wall clock
-	SourceExternal   Source = "external"   // UDP timecode (see udp_port)
+	SourceTOD      Source = "tod"      // host wall clock
+	SourceExternal Source = "external" // UDP timecode (see udp_port)
 )
 
-const audioSilence = -90.0
+const audioSilence = audiox.Silence
 
 // Settings are persisted per channel id (decode N ↔ encode/input N).
 type Settings struct {
 	Enabled  bool     `json:"enabled"`
-	Source   Source   `json:"source"`    // tod | external, default tod
-	UDPPort  int      `json:"udp_port"`  // external TC listen port; default 9300+N
-	FontSize int      `json:"fontsize"`  // px, default 120
+	Source   Source   `json:"source"`   // tod | external, default tod
+	UDPPort  int      `json:"udp_port"` // external TC listen port; default 9300+N
+	FontSize int      `json:"fontsize"` // px, default 120
 	Opacity  float64  `json:"opacity"`  // 0..1 text opacity, default 0.9
 	Position Position `json:"position"` // default top_left
 }
@@ -109,8 +111,7 @@ type channelState struct {
 	settings  Settings
 	status    Status
 	lastErr   string
-	AudioL    float64
-	AudioR    float64
+	Audio     [audiox.Channels]float64
 	cmd       *exec.Cmd
 	stopCh    chan struct{}
 	runGen    uint64 // ownership token for runLoop vs stop/start races
@@ -230,20 +231,20 @@ func normalizeSettings(s Settings) Settings {
 	return s
 }
 
-func (m *Manager) AudioLevels(id int) (l, r float64, ok bool) {
+func (m *Manager) AudioLevels(id int) (ch []float64, ok bool) {
 	st := m.get(id)
 	if st == nil {
-		return 0, 0, false
+		return nil, false
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if st.status != StatusRunning && st.status != StatusRestarting {
-		return 0, 0, false
+		return nil, false
 	}
 	if st.cmd == nil {
-		return 0, 0, false
+		return nil, false
 	}
-	return st.AudioL, st.AudioR, true
+	return audiox.Slice(st.Audio), true
 }
 
 // EncodeThumbPath is kept for API compatibility; TC preview lives under playout/.
@@ -675,7 +676,7 @@ func (m *Manager) runLoop(id int, st *channelState, stopCh <-chan struct{}, cfg 
 				delay = maxBackoff
 			} else {
 				st.status = StatusRestarting
-				exp := restartDelay * time.Duration(1 << min(consecutiveFails-1, 4))
+				exp := restartDelay * time.Duration(1<<min(consecutiveFails-1, 4))
 				if exp > delay {
 					delay = exp
 				}
@@ -770,7 +771,8 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 	filter := vbase + ",split=2[vdl][vprevsrc];" +
 		"[vprevsrc]scale=640:360,fps=10,format=yuv420p[vprev];" +
 		fmt.Sprintf(
-			"[0:a]aformat=channel_layouts=stereo,asplit=3[adeck][ameter][aprev];"+
+			"[0:a]"+audiox.Discrete8Pan+",asplit=3[adeck][ameter][aprevsrc];"+
+				"[aprevsrc]pan=stereo|c0=c0|c1=c1[aprev];"+
 				"[adeck]asetnsamples=n=%d:p=0[aout];"+
 				"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none,"+
 				"ametadata=print:file=%s,anullsink",
@@ -787,7 +789,7 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		"-c:v", "v210",
 		"-c:a", "pcm_s16le",
 		"-ar", "48000",
-		"-ac", "2",
+		"-ac", "8",
 		"-fps_mode", "cfr",
 		"-r", fmt.Sprintf("%g", fps),
 		"-s", fmt.Sprintf("%dx%d", w, h),
@@ -837,8 +839,7 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		return fmt.Errorf("superseded")
 	}
 	st.cmd = cmd
-	st.AudioL = audioSilence
-	st.AudioR = audioSilence
+	st.Audio = audiox.SilencePeaks()
 	st.mu.Unlock()
 
 	srcLabel := "time of day"
@@ -1041,12 +1042,7 @@ func tailAstatsMeta(path string, st *channelState, stop <-chan struct{}) {
 					ch, _ := strconv.Atoi(mm[1])
 					val := parsePeakDB(mm[2])
 					st.mu.Lock()
-					switch ch {
-					case 1:
-						st.AudioL = val
-					case 2:
-						st.AudioR = val
-					}
+					audiox.SetPeak(&st.Audio, ch, val)
 					st.mu.Unlock()
 				}
 			}
@@ -1071,12 +1067,7 @@ func collectStderr(r io.Reader, st *channelState, cmd *exec.Cmd, onSignalLoss fu
 			ch, _ := strconv.Atoi(mm[1])
 			val := parsePeakDB(mm[2])
 			st.mu.Lock()
-			switch ch {
-			case 1:
-				st.AudioL = val
-			case 2:
-				st.AudioR = val
-			}
+			audiox.SetPeak(&st.Audio, ch, val)
 			st.mu.Unlock()
 		}
 		// Match encode: drop freeze-frame behavior by killing on signal loss so
@@ -1084,8 +1075,7 @@ func collectStderr(r io.Reader, st *channelState, cmd *exec.Cmd, onSignalLoss fu
 		if strings.Contains(line, "No input signal detected") {
 			st.mu.Lock()
 			st.status = StatusRestarting
-			st.AudioL = audioSilence
-			st.AudioR = audioSilence
+			st.Audio = audiox.SilencePeaks()
 			st.mu.Unlock()
 			if onSignalLoss != nil {
 				onSignalLoss()

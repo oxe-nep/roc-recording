@@ -32,6 +32,7 @@ export interface EncodePreset {
   video_preset: string;
   video_gop: number;
   audio_bitrate: string;
+  audio_channels: number;
 }
 
 export interface EncodeCodecOption {
@@ -164,6 +165,7 @@ export interface LibraryFile {
 export interface AudioLevels {
   l: number;
   r: number;
+  channels?: number[];
 }
 
 export interface SystemMetrics {

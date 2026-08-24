@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/roc-recording/backend/internal/audiox"
 	"github.com/roc-recording/backend/internal/capture"
 	"github.com/roc-recording/backend/internal/playout"
 	"github.com/roc-recording/backend/internal/recording"
@@ -19,20 +20,31 @@ import (
 )
 
 type meterLevels struct {
-	L float64 `json:"l"`
-	R float64 `json:"r"`
+	L        float64   `json:"l"`
+	R        float64   `json:"r"`
+	Channels []float64 `json:"channels"`
 }
 
 type dashboardSnapshot struct {
-	Type           string                        `json:"type"`
-	Streams        []streamResponse              `json:"streams"`
-	Playout        []playout.ClientInfo          `json:"playout"`
-	TC             []tcloop.Info                 `json:"tc"`
-	Recordings     []recording.ChannelInfo       `json:"recordings"`
-	SRT            []srt.ChannelInfo             `json:"srt"`
-	Workflows      map[string]workflow.Config    `json:"workflows"`
-	MetersEncode   map[string]meterLevels        `json:"meters_encode"`
-	MetersPlayout  map[string]meterLevels        `json:"meters_playout"`
+	Type          string                     `json:"type"`
+	Streams       []streamResponse           `json:"streams"`
+	Playout       []playout.ClientInfo       `json:"playout"`
+	TC            []tcloop.Info              `json:"tc"`
+	Recordings    []recording.ChannelInfo    `json:"recordings"`
+	SRT           []srt.ChannelInfo          `json:"srt"`
+	Workflows     map[string]workflow.Config `json:"workflows"`
+	MetersEncode  map[string]meterLevels     `json:"meters_encode"`
+	MetersPlayout map[string]meterLevels     `json:"meters_playout"`
+}
+
+func fromPeaks(ch []float64, ok bool) meterLevels {
+	peaks := audiox.SilencePeaks()
+	if ok {
+		for i := 0; i < audiox.Channels && i < len(ch); i++ {
+			peaks[i] = ch[i]
+		}
+	}
+	return meterLevels{L: peaks[0], R: peaks[1], Channels: audiox.Slice(peaks)}
 }
 
 func buildWorkflowsMap(wfStore *workflow.Store, mgr *capture.Manager) map[string]workflow.Config {
@@ -111,23 +123,18 @@ func buildDashboardSnapshot(
 		streamResp = append(streamResp, toResponse(s, hlsBaseURL, tslMgr, tcMgr))
 		key := strconv.Itoa(s.ID)
 		if tcMgr != nil {
-			if l, r, ok := tcMgr.AudioLevels(s.ID); ok {
-				metersEnc[key] = meterLevels{L: l, R: r}
-				metersPlay[key] = meterLevels{L: l, R: r}
+			if ch, ok := tcMgr.AudioLevels(s.ID); ok {
+				m := fromPeaks(ch, true)
+				metersEnc[key] = m
+				metersPlay[key] = m
 				continue
 			}
 		}
-		if l, r, ok := mgr.AudioLevels(s.ID); ok {
-			metersEnc[key] = meterLevels{L: l, R: r}
-		} else {
-			metersEnc[key] = meterLevels{L: -90, R: -90}
-		}
+		ch, ok := mgr.AudioLevels(s.ID)
+		metersEnc[key] = fromPeaks(ch, ok)
 		if playMgr != nil {
-			if l, r, ok := playMgr.AudioLevels(s.ID); ok {
-				metersPlay[key] = meterLevels{L: l, R: r}
-			} else {
-				metersPlay[key] = meterLevels{L: -90, R: -90}
-			}
+			pch, pok := playMgr.AudioLevels(s.ID)
+			metersPlay[key] = fromPeaks(pch, pok)
 		}
 	}
 

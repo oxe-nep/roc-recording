@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/roc-recording/backend/internal/audiox"
 	"github.com/roc-recording/backend/internal/capture"
 	hlshandler "github.com/roc-recording/backend/internal/hls"
 	"github.com/roc-recording/backend/internal/playout"
@@ -39,15 +40,16 @@ type streamResponse struct {
 }
 
 type encodePresetResponse struct {
-	ID           string `json:"id"`
-	Label        string `json:"label"`
-	VideoCodec   string `json:"video_codec"`
-	VideoBitrate string `json:"video_bitrate"`
-	VideoMaxrate string `json:"video_maxrate"`
-	VideoBufsize string `json:"video_bufsize"`
-	VideoPreset  string `json:"video_preset"`
-	VideoGOP     int    `json:"video_gop"`
-	AudioBitrate string `json:"audio_bitrate"`
+	ID            string `json:"id"`
+	Label         string `json:"label"`
+	VideoCodec    string `json:"video_codec"`
+	VideoBitrate  string `json:"video_bitrate"`
+	VideoMaxrate  string `json:"video_maxrate"`
+	VideoBufsize  string `json:"video_bufsize"`
+	VideoPreset   string `json:"video_preset"`
+	VideoGOP      int    `json:"video_gop"`
+	AudioBitrate  string `json:"audio_bitrate"`
+	AudioChannels int    `json:"audio_channels"`
 }
 
 type recordingFileResponse struct {
@@ -74,21 +76,21 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 			return
 		}
 		if tcMgr != nil {
-			if l, r2, ok := tcMgr.AudioLevels(id); ok {
+			if ch, ok := tcMgr.AudioLevels(id); ok {
 				w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
 				w.Header().Set("Cache-Control", "no-cache, no-store")
-				jsonOK(w, map[string]float64{"l": l, "r": r2})
+				jsonOK(w, meterPayload(ch))
 				return
 			}
 		}
-		l, r2, ok := mgr.AudioLevels(id)
+		ch, ok := mgr.AudioLevels(id)
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
 		w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
 		w.Header().Set("Cache-Control", "no-cache, no-store")
-		jsonOK(w, map[string]float64{"l": l, "r": r2})
+		jsonOK(w, meterPayload(ch))
 	})
 	r.Get("/audio/playout/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.Atoi(chi.URLParam(r, "id"))
@@ -97,21 +99,21 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 			return
 		}
 		if tcMgr != nil {
-			if l, r2, ok := tcMgr.AudioLevels(id); ok {
+			if ch, ok := tcMgr.AudioLevels(id); ok {
 				w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
 				w.Header().Set("Cache-Control", "no-cache, no-store")
-				jsonOK(w, map[string]float64{"l": l, "r": r2})
+				jsonOK(w, meterPayload(ch))
 				return
 			}
 		}
-		l, r2, ok := playMgr.AudioLevels(id)
+		ch, ok := playMgr.AudioLevels(id)
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
 		w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
 		w.Header().Set("Cache-Control", "no-cache, no-store")
-		jsonOK(w, map[string]float64{"l": l, "r": r2})
+		jsonOK(w, meterPayload(ch))
 	})
 	r.Get("/thumb/{id}", func(w http.ResponseWriter, r *http.Request) {
 		idParam := chi.URLParam(r, "id")
@@ -145,21 +147,21 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 			return
 		}
 		if tcMgr != nil {
-			if l, r2, ok := tcMgr.AudioLevels(id); ok {
+			if ch, ok := tcMgr.AudioLevels(id); ok {
 				w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
 				w.Header().Set("Cache-Control", "no-cache, no-store")
-				jsonOK(w, map[string]float64{"l": l, "r": r2})
+				jsonOK(w, meterPayload(ch))
 				return
 			}
 		}
-		l, r2, ok := playMgr.AudioLevels(id)
+		ch, ok := playMgr.AudioLevels(id)
 		if !ok {
 			http.NotFound(w, r)
 			return
 		}
 		w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
 		w.Header().Set("Cache-Control", "no-cache, no-store")
-		jsonOK(w, map[string]float64{"l": l, "r": r2})
+		jsonOK(w, meterPayload(ch))
 	})
 	r.Get("/playout/thumb/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.Atoi(chi.URLParam(r, "id"))
@@ -999,15 +1001,16 @@ func toResponse(s *capture.Stream, hlsBaseURL string, tslMgr *tsl.Manager, tcMgr
 
 func presetToResponse(p capture.NamedPreset) encodePresetResponse {
 	return encodePresetResponse{
-		ID:           p.ID,
-		Label:        p.Label,
-		VideoCodec:   p.Profile.VideoCodec,
-		VideoBitrate: p.Profile.VideoBitrate,
-		VideoMaxrate: p.Profile.VideoMaxrate,
-		VideoBufsize: p.Profile.VideoBufsize,
-		VideoPreset:  p.Profile.VideoPreset,
-		VideoGOP:     p.Profile.VideoGOP,
-		AudioBitrate: p.Profile.AudioBitrate,
+		ID:            p.ID,
+		Label:         p.Label,
+		VideoCodec:    p.Profile.VideoCodec,
+		VideoBitrate:  p.Profile.VideoBitrate,
+		VideoMaxrate:  p.Profile.VideoMaxrate,
+		VideoBufsize:  p.Profile.VideoBufsize,
+		VideoPreset:   p.Profile.VideoPreset,
+		VideoGOP:      p.Profile.VideoGOP,
+		AudioBitrate:  p.Profile.AudioBitrate,
+		AudioChannels: audiox.NormalizeCount(p.Profile.AudioChannels),
 	}
 }
 
@@ -1017,6 +1020,18 @@ func presetsToResponse(presets []capture.NamedPreset) []encodePresetResponse {
 		resp = append(resp, presetToResponse(p))
 	}
 	return resp
+}
+
+func meterPayload(ch []float64) map[string]any {
+	peaks := audiox.SilencePeaks()
+	for i := 0; i < audiox.Channels && i < len(ch); i++ {
+		peaks[i] = ch[i]
+	}
+	return map[string]any{
+		"l":        peaks[0],
+		"r":        peaks[1],
+		"channels": audiox.Slice(peaks),
+	}
 }
 
 func jsonOK(w http.ResponseWriter, v any) {

@@ -18,14 +18,15 @@ type ChannelConfig struct {
 
 // EncodePresetDef is one named master-encode profile (always-on UDP feed).
 type EncodePresetDef struct {
-	Label        string `yaml:"label"`
-	VideoCodec   string `yaml:"video_codec"`
-	VideoBitrate string `yaml:"video_bitrate"`
-	VideoMaxrate string `yaml:"video_maxrate"`
-	VideoBufsize string `yaml:"video_bufsize"`
-	VideoPreset  string `yaml:"video_preset"`
-	VideoGOP     int    `yaml:"video_gop"`
-	AudioBitrate string `yaml:"audio_bitrate"`
+	Label         string `yaml:"label"`
+	VideoCodec    string `yaml:"video_codec"`
+	VideoBitrate  string `yaml:"video_bitrate"`
+	VideoMaxrate  string `yaml:"video_maxrate"`
+	VideoBufsize  string `yaml:"video_bufsize"`
+	VideoPreset   string `yaml:"video_preset"`
+	VideoGOP      int    `yaml:"video_gop"`
+	AudioBitrate  string `yaml:"audio_bitrate"`
+	AudioChannels int    `yaml:"audio_channels"` // 2 = AAC stereo, 8 = PCM discrete
 }
 
 // EncodeConfig is deprecated; kept so older config.yaml still loads into a preset.
@@ -164,6 +165,9 @@ func normalizePresets(cfg *Config) {
 		if p.AudioBitrate == "" {
 			p.AudioBitrate = "192k"
 		}
+		if p.AudioChannels != 8 {
+			p.AudioChannels = 2
+		}
 		cfg.EncodePresets[id] = p
 	}
 
@@ -188,34 +192,37 @@ func normalizePresets(cfg *Config) {
 func defaultPresets() map[string]EncodePresetDef {
 	return map[string]EncodePresetDef{
 		"proxy": {
-			Label:        "Proxy 4 Mbit",
-			VideoCodec:   "h264_nvenc",
-			VideoBitrate: "4M",
-			VideoMaxrate: "5M",
-			VideoBufsize: "8M",
-			VideoPreset:  "p4",
-			VideoGOP:     50,
-			AudioBitrate: "128k",
+			Label:         "Proxy 4 Mbit",
+			VideoCodec:    "h264_nvenc",
+			VideoBitrate:  "4M",
+			VideoMaxrate:  "5M",
+			VideoBufsize:  "8M",
+			VideoPreset:   "p4",
+			VideoGOP:      50,
+			AudioBitrate:  "128k",
+			AudioChannels: 2,
 		},
 		"hq": {
-			Label:        "HQ 12 Mbit",
-			VideoCodec:   "h264_nvenc",
-			VideoBitrate: "12M",
-			VideoMaxrate: "14M",
-			VideoBufsize: "20M",
-			VideoPreset:  "p4",
-			VideoGOP:     50,
-			AudioBitrate: "192k",
+			Label:         "HQ 12 Mbit",
+			VideoCodec:    "h264_nvenc",
+			VideoBitrate:  "12M",
+			VideoMaxrate:  "14M",
+			VideoBufsize:  "20M",
+			VideoPreset:   "p4",
+			VideoGOP:      50,
+			AudioBitrate:  "192k",
+			AudioChannels: 2,
 		},
 		"mezz": {
-			Label:        "Mezz 20 Mbit",
-			VideoCodec:   "h264_nvenc",
-			VideoBitrate: "20M",
-			VideoMaxrate: "24M",
-			VideoBufsize: "40M",
-			VideoPreset:  "p4",
-			VideoGOP:     50,
-			AudioBitrate: "256k",
+			Label:         "Mezz 20 Mbit",
+			VideoCodec:    "h264_nvenc",
+			VideoBitrate:  "20M",
+			VideoMaxrate:  "24M",
+			VideoBufsize:  "40M",
+			VideoPreset:   "p4",
+			VideoGOP:      50,
+			AudioBitrate:  "256k",
+			AudioChannels: 2,
 		},
 	}
 }

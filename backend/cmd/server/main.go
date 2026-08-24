@@ -59,13 +59,14 @@ func main() {
 			ID:    id,
 			Label: p.Label,
 			Profile: capture.EncodeProfile{
-				VideoCodec:   p.VideoCodec,
-				VideoBitrate: p.VideoBitrate,
-				VideoMaxrate: p.VideoMaxrate,
-				VideoBufsize: p.VideoBufsize,
-				VideoPreset:  p.VideoPreset,
-				VideoGOP:     p.VideoGOP,
-				AudioBitrate: p.AudioBitrate,
+				VideoCodec:    p.VideoCodec,
+				VideoBitrate:  p.VideoBitrate,
+				VideoMaxrate:  p.VideoMaxrate,
+				VideoBufsize:  p.VideoBufsize,
+				VideoPreset:   p.VideoPreset,
+				VideoGOP:      p.VideoGOP,
+				AudioBitrate:  p.AudioBitrate,
+				AudioChannels: p.AudioChannels,
 			},
 		}
 	}

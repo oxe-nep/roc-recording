@@ -210,12 +210,12 @@ func registerPlayoutRoutes(r chi.Router, playMgr *playout.Manager, tcMgr *tcloop
 			jsonError(w, "invalid id", http.StatusBadRequest)
 			return
 		}
-		l, r2, ok := playMgr.AudioLevels(id)
+		ch, ok := playMgr.AudioLevels(id)
 		if !ok {
 			jsonError(w, "decode client not active", http.StatusNotFound)
 			return
 		}
-		jsonOK(w, map[string]float64{"l": l, "r": r2})
+		jsonOK(w, meterPayload(ch))
 	})
 
 	r.Get("/api/playout/{id}/tc-loop", func(w http.ResponseWriter, r *http.Request) {

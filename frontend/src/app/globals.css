@@ -1245,12 +1245,19 @@ html {
   display: flex;
   flex-direction: row;
   align-items: stretch;
-  gap: 4px;
+  gap: 3px;
   flex-shrink: 0;
   align-self: stretch;
-  padding: 6px 5px;
-  border-left: 1px solid var(--border-subtle);
+  padding: 6px 4px;
   background: rgba(0, 0, 0, 0.18);
+}
+
+.audio-meter-left {
+  border-right: 1px solid var(--border-subtle);
+}
+
+.audio-meter-right {
+  border-left: 1px solid var(--border-subtle);
 }
 
 .audio-col {
@@ -1268,7 +1275,7 @@ html {
   align-items: stretch;
   gap: 1px;
   flex: 1;
-  width: 8px;
+  width: 6px;
   min-height: 0;
 }
 

@@ -137,6 +137,12 @@ export async function fetchStreamLogs(id: number): Promise<string[]> {
   return (body.lines ?? []) as string[];
 }
 
+export interface RecordingSchedule {
+  start_at: string;
+  stop_at: string;
+  phase?: "pending" | "waiting" | "active";
+}
+
 export interface RecordingInfo {
   id: number;
   status: "idle" | "recording";
@@ -147,6 +153,7 @@ export interface RecordingInfo {
   elapsed_sec?: number;
   bitrate_kbps?: number;
   encoding?: boolean;
+  schedule?: RecordingSchedule;
 }
 
 export interface LibraryCategory {
@@ -208,6 +215,31 @@ export async function setRecordingCategory(id: number, category: string): Promis
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `setRecordingCategory: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function setRecordingSchedule(
+  id: number,
+  startAt: string,
+  stopAt: string,
+): Promise<RecordingInfo> {
+  const res = await apiFetch(`/api/recordings/${id}/schedule`, {
+    method: "PUT",
+    body: JSON.stringify({ start_at: startAt, stop_at: stopAt }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `setRecordingSchedule: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function clearRecordingSchedule(id: number): Promise<RecordingInfo> {
+  const res = await apiFetch(`/api/recordings/${id}/schedule`, { method: "DELETE" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `clearRecordingSchedule: ${res.status}`);
   }
   return res.json();
 }

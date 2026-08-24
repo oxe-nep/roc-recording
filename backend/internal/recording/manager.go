@@ -44,6 +44,10 @@ type recState struct {
 	elapsedSec  float64
 	bitrateKbps float64
 	encoding    bool // true after FFmpeg reports real progress
+
+	hasSched   bool
+	schedStart time.Time
+	schedStop  time.Time
 }
 
 type Manager struct {
@@ -54,13 +58,17 @@ type Manager struct {
 	ffmpegBin          string
 	categoryAssignPath string
 	namesAssignPath    string
+	schedulePath       string
 	pathSettingsPath   string
 }
 
 func NewManager(recordingDir, ffmpegBin string, captureMgr *capture.Manager, categoryAssignPath, pathSettingsPath string) *Manager {
 	namesPath := ""
+	schedPath := ""
 	if categoryAssignPath != "" {
-		namesPath = filepath.Join(filepath.Dir(categoryAssignPath), "channel-names.json")
+		dir := filepath.Dir(categoryAssignPath)
+		namesPath = filepath.Join(dir, "channel-names.json")
+		schedPath = filepath.Join(dir, "recording-schedules.json")
 	}
 	m := &Manager{
 		states:             make(map[int]*recState),
@@ -69,6 +77,7 @@ func NewManager(recordingDir, ffmpegBin string, captureMgr *capture.Manager, cat
 		ffmpegBin:          ffmpegBin,
 		categoryAssignPath: categoryAssignPath,
 		namesAssignPath:    namesPath,
+		schedulePath:       schedPath,
 		pathSettingsPath:   pathSettingsPath,
 	}
 	m.loadRecordingPath()
@@ -94,6 +103,7 @@ func (m *Manager) Register(id int, defaultName string) {
 func (m *Manager) LoadCategoryAssignments() {
 	m.loadChannelCategories()
 	m.loadChannelNames()
+	m.loadSchedules()
 }
 
 type ChannelInfo struct {
@@ -106,14 +116,20 @@ type ChannelInfo struct {
 	ElapsedSec  float64         `json:"elapsed_sec,omitempty"`
 	BitrateKbps float64         `json:"bitrate_kbps,omitempty"`
 	Encoding    bool            `json:"encoding"`
+	Schedule    *Schedule       `json:"schedule,omitempty"`
 }
 
 func (m *Manager) buildInfo(id int, st *recState) ChannelInfo {
+	return m.buildInfoAt(id, st, time.Now())
+}
+
+func (m *Manager) buildInfoAt(id int, st *recState, now time.Time) ChannelInfo {
 	info := ChannelInfo{
 		ID:       id,
 		Status:   st.status,
 		Name:     st.label,
 		Category: st.category,
+		Schedule: m.scheduleSnapshot(st, now),
 	}
 	if info.Category == "" {
 		info.Category = DefaultCategory
@@ -414,6 +430,22 @@ func parseProgress(line string) (elapsedSec, bitrateKbps float64, ok bool) {
 }
 
 func (m *Manager) Stop(id int) (ChannelInfo, error) {
+	info, err := m.stopRecording(id)
+	cleared, clearErr := m.ClearSchedule(id)
+	if err != nil {
+		if clearErr == nil {
+			return cleared, err
+		}
+		return info, err
+	}
+	if clearErr == nil {
+		return cleared, nil
+	}
+	info.Schedule = nil
+	return info, nil
+}
+
+func (m *Manager) stopRecording(id int) (ChannelInfo, error) {
 	m.mu.RLock()
 	st, ok := m.states[id]
 	m.mu.RUnlock()
@@ -495,7 +527,13 @@ func (m *Manager) StopAll() []error {
 	m.mu.RUnlock()
 	var errs []error
 	for _, id := range ids {
-		if _, err := m.Stop(id); err != nil {
+		if m.IsRecording(id) {
+			if _, err := m.Stop(id); err != nil {
+				errs = append(errs, fmt.Errorf("ch%d: %w", id, err))
+			}
+			continue
+		}
+		if _, err := m.ClearSchedule(id); err != nil {
 			errs = append(errs, fmt.Errorf("ch%d: %w", id, err))
 		}
 	}

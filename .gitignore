@@ -4,6 +4,8 @@ backend/hls/
 backend/encode-assignments.json
 backend/encode-presets.json
 backend/channel-categories.json
+backend/channel-names.json
+backend/recording-schedules.json
 backend/recordings-path.json
 backend/playout-clients.json
 backend/playout-media.json

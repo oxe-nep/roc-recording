@@ -10,6 +10,7 @@ import {
   stopSrt,
   type EncodePreset,
   type LibraryCategory,
+  type RecordingSchedule,
   isCaptureOn,
 } from "@/lib/api";
 import { showEncodeCard } from "@/lib/workflow";
@@ -34,6 +35,17 @@ function formatBitrate(kbps?: number): string {
   if (!kbps || kbps <= 0) return "--";
   if (kbps >= 1000) return `${(kbps / 1000).toFixed(1)} Mbit/s`;
   return `${kbps.toFixed(0)} kbit/s`;
+}
+
+function formatSchedBadge(sch: RecordingSchedule): string {
+  const hm = (iso: string) => {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "--:--";
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  };
+  const range = `${hm(sch.start_at)}–${hm(sch.stop_at)}`;
+  if (sch.phase === "waiting") return `SCHED wait · ${range}`;
+  return `SCHED ${range}`;
 }
 
 export default function StreamGrid() {
@@ -154,6 +166,13 @@ export default function StreamGrid() {
                     listenPair={isListeningPair}
                     playlistPath={`/hls/${s.id}/preview.m3u8`}
                   />
+                  {rec?.schedule && (
+                    <div className="thumb-sched" title={`Scheduled ${formatSchedBadge(rec.schedule)}`}>
+                      <div className={`sched-badge${rec.schedule.phase === "waiting" ? " waiting" : ""}`}>
+                        {formatSchedBadge(rec.schedule)}
+                      </div>
+                    </div>
+                  )}
                   {tslText && hasSignal && (
                     <div className="thumb-tsl-overlay">
                       <div className="tsl-badge" title={`TSL ${s.tsl_index ?? s.id}`}>

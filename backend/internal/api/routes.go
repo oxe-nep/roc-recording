@@ -462,6 +462,46 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 			jsonOK(w, info)
 		})
 
+		r.Put("/api/recordings/{id}/schedule", func(w http.ResponseWriter, r *http.Request) {
+			id, err := strconv.Atoi(chi.URLParam(r, "id"))
+			if err != nil {
+				jsonError(w, "invalid channel id", http.StatusBadRequest)
+				return
+			}
+			var body struct {
+				StartAt *time.Time `json:"start_at"`
+				StopAt  *time.Time `json:"stop_at"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				jsonError(w, "invalid json body", http.StatusBadRequest)
+				return
+			}
+			if body.StartAt == nil || body.StopAt == nil {
+				jsonError(w, "start_at and stop_at are required", http.StatusBadRequest)
+				return
+			}
+			info, err := recMgr.SetSchedule(id, *body.StartAt, *body.StopAt)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			jsonOK(w, info)
+		})
+
+		r.Delete("/api/recordings/{id}/schedule", func(w http.ResponseWriter, r *http.Request) {
+			id, err := strconv.Atoi(chi.URLParam(r, "id"))
+			if err != nil {
+				jsonError(w, "invalid channel id", http.StatusBadRequest)
+				return
+			}
+			info, err := recMgr.ClearSchedule(id)
+			if err != nil {
+				jsonError(w, err.Error(), http.StatusNotFound)
+				return
+			}
+			jsonOK(w, info)
+		})
+
 		// Global library: categories = folders under recordings_dir
 		r.Get("/api/library/categories", func(w http.ResponseWriter, r *http.Request) {
 			cats, err := recMgr.ListCategories()

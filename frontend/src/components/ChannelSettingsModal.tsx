@@ -7,6 +7,8 @@ import {
   setEncodePreset,
   setRecordingCategory,
   setRecordingName,
+  setRecordingSchedule,
+  clearRecordingSchedule,
   startSrt,
   startStream,
   stopSrt,
@@ -20,6 +22,24 @@ import {
   isCaptureOn,
 } from "@/lib/api";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+function toLocalInput(iso?: string, fallback?: Date): string {
+  const d = iso ? new Date(iso) : fallback ?? new Date();
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+function defaultScheduleInputs(): { start: string; stop: string } {
+  const start = new Date();
+  start.setSeconds(0, 0);
+  start.setMinutes(start.getMinutes() + 5);
+  const stop = new Date(start.getTime() + 60 * 60 * 1000);
+  return { start: toLocalInput(undefined, start), stop: toLocalInput(undefined, stop) };
+}
 
 type Props = {
   open: boolean;
@@ -53,6 +73,9 @@ export default function ChannelSettingsModal({
   const [srtLatency, setSrtLatency] = useState(120);
   const [srtPassphrase, setSrtPassphrase] = useState("");
   const [srtPassDirty, setSrtPassDirty] = useState(false);
+  const [schedStart, setSchedStart] = useState("");
+  const [schedStop, setSchedStop] = useState("");
+  const [schedBusy, setSchedBusy] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const [logsOpen, setLogsOpen] = useState(false);
   const logBoxRef = useRef<HTMLPreElement>(null);
@@ -85,6 +108,14 @@ export default function ChannelSettingsModal({
     setSrtPassDirty(false);
     setLogsOpen(false);
     setLogs([]);
+    if (recording?.schedule) {
+      setSchedStart(toLocalInput(recording.schedule.start_at));
+      setSchedStop(toLocalInput(recording.schedule.stop_at));
+    } else {
+      const d = defaultScheduleInputs();
+      setSchedStart(d.start);
+      setSchedStop(d.stop);
+    }
 
     fetchSrt(channelId)
       .then((info) => {
@@ -137,7 +168,7 @@ export default function ChannelSettingsModal({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !busy && !srtBusy) onClose();
+      if (e.key === "Escape" && !busy && !srtBusy && !schedBusy) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -240,6 +271,43 @@ export default function ChannelSettingsModal({
     }
   };
 
+  const saveSchedule = async () => {
+    setSchedBusy(true);
+    setError(null);
+    try {
+      const start = new Date(schedStart);
+      const stop = new Date(schedStop);
+      if (Number.isNaN(start.getTime()) || Number.isNaN(stop.getTime())) {
+        throw new Error("Invalid schedule time");
+      }
+      if (!(stop.getTime() > start.getTime())) {
+        throw new Error("Stop must be after start");
+      }
+      await setRecordingSchedule(stream.id, start.toISOString(), stop.toISOString());
+      onSaved();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSchedBusy(false);
+    }
+  };
+
+  const clearSchedule = async () => {
+    setSchedBusy(true);
+    setError(null);
+    try {
+      await clearRecordingSchedule(stream.id);
+      const d = defaultScheduleInputs();
+      setSchedStart(d.start);
+      setSchedStop(d.stop);
+      onSaved();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSchedBusy(false);
+    }
+  };
+
   const copyUrl = async () => {
     if (!srt?.publish_url) return;
     try {
@@ -250,7 +318,7 @@ export default function ChannelSettingsModal({
   };
 
   return (
-    <div className="modal-backdrop" onClick={() => !busy && !srtBusy && onClose()} role="presentation">
+    <div className="modal-backdrop" onClick={() => !busy && !srtBusy && !schedBusy && onClose()} role="presentation">
       <div
         className="modal-panel channel-settings-modal"
         onClick={(e) => e.stopPropagation()}
@@ -267,7 +335,7 @@ export default function ChannelSettingsModal({
             className="modal-close"
             onClick={onClose}
             aria-label="Close"
-            disabled={busy || srtBusy}
+            disabled={busy || srtBusy || schedBusy}
           >
             ×
           </button>
@@ -331,6 +399,52 @@ export default function ChannelSettingsModal({
           >
             {busy ? "…" : "Apply"}
           </button>
+        </div>
+
+        <div className="channel-settings-srt">
+          <div className="channel-settings-srt-head">
+            <h3>Schedule</h3>
+            <span className={`srt-pill ${recording?.schedule ? "on" : ""}`}>
+              {recording?.schedule
+                ? recording.schedule.phase === "waiting"
+                  ? "WAITING"
+                  : recording.schedule.phase === "active"
+                    ? "ON"
+                    : "SET"
+                : "OFF"}
+            </span>
+          </div>
+          <p className="channel-settings-hint">
+            One-shot record window. If there is no signal at start, recording waits until signal or stop.
+          </p>
+          <div className="channel-settings-form">
+            <label className="presets-field">
+              <span>Start</span>
+              <input
+                type="datetime-local"
+                value={schedStart}
+                onChange={(e) => setSchedStart(e.target.value)}
+                disabled={schedBusy}
+              />
+            </label>
+            <label className="presets-field">
+              <span>Stop</span>
+              <input
+                type="datetime-local"
+                value={schedStop}
+                onChange={(e) => setSchedStop(e.target.value)}
+                disabled={schedBusy}
+              />
+            </label>
+          </div>
+          <div className="channel-settings-actions">
+            <button type="button" className="badge" onClick={clearSchedule} disabled={schedBusy || !recording?.schedule}>
+              {schedBusy ? "…" : "Clear"}
+            </button>
+            <button type="button" className="global-rec-btn" onClick={saveSchedule} disabled={schedBusy}>
+              {schedBusy ? "…" : "Save"}
+            </button>
+          </div>
         </div>
 
         <div className="channel-settings-srt">

@@ -159,6 +159,15 @@ func main() {
 		recMgr.Register(ch.ID, ch.Name)
 	}
 	recMgr.LoadCategoryAssignments()
+	recMgr.StartScheduler(
+		func(id int) bool {
+			st, ok := mgr.StatusByID(id)
+			return ok && st == capture.StatusRunning
+		},
+		func(id int, on bool) {
+			runtimeStore.SetRecording(id, on)
+		},
+	)
 	playMgr.SetLibraryResolver(func(category, name string) (string, error) {
 		return recMgr.LibraryFilePath(category, name)
 	})

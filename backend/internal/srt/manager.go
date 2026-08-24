@@ -473,7 +473,7 @@ func (m *Manager) runLoop(id int, st *channelState) {
 			"-f", "mpegts",
 			"-i", feedURL,
 			"-map", "0:v:0",
-			"-map", "0:a:0?",
+			"-map", "0:a?",
 			"-c", "copy",
 			"-f", "mpegts",
 			"-progress", "pipe:1",

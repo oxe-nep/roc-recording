@@ -1,5 +1,7 @@
 package audiox
 
+import "fmt"
+
 const (
 	Channels = 8
 	Silence  = -90.0
@@ -37,11 +39,19 @@ func Slice(p [Channels]float64) []float64 {
 
 // PreviewPairGraph splits an 8-channel pad into four stereo preview pads [ap0]..[ap3].
 func PreviewPairGraph(srcPad string) string {
-	return srcPad + "asplit=4[a12s][a34s][a56s][a78s];" +
-		"[a12s]pan=stereo|c0=c0|c1=c1[ap0];" +
-		"[a34s]pan=stereo|c0=c2|c1=c3[ap1];" +
-		"[a56s]pan=stereo|c0=c4|c1=c5[ap2];" +
-		"[a78s]pan=stereo|c0=c6|c1=c7[ap3];"
+	return PairSplitGraph(srcPad, "pv", "ap")
+}
+
+// PairSplitGraph splits an 8-channel pad into four stereo pads [outPrefix0]..[outPrefix3].
+// tag must be unique within the same filter_complex (internal split labels).
+func PairSplitGraph(srcPad, tag, outPrefix string) string {
+	s0, s1, s2, s3 := tag+"12", tag+"34", tag+"56", tag+"78"
+	o0, o1, o2, o3 := outPrefix+"0", outPrefix+"1", outPrefix+"2", outPrefix+"3"
+	return srcPad + fmt.Sprintf("asplit=4[%s][%s][%s][%s];", s0, s1, s2, s3) +
+		fmt.Sprintf("[%s]pan=stereo|c0=c0|c1=c1[%s];", s0, o0) +
+		fmt.Sprintf("[%s]pan=stereo|c0=c2|c1=c3[%s];", s1, o1) +
+		fmt.Sprintf("[%s]pan=stereo|c0=c4|c1=c5[%s];", s2, o2) +
+		fmt.Sprintf("[%s]pan=stereo|c0=c6|c1=c7[%s];", s3, o3)
 }
 
 func PreviewPairMaps() []string {

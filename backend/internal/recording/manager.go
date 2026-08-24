@@ -267,13 +267,9 @@ func (m *Manager) Start(id int) (ChannelInfo, error) {
 		"-f", "mpegts",
 		"-i", feedURL,
 		"-map", "0:v:0",
-		"-map", "0:a:0?",
+		"-map", "0:a?",
 		"-c", "copy",
-	}
-	// aac_adtstoasc is required when copying AAC from MPEG-TS into MP4.
-	// 8-channel presets write PCM — the bitstream filter would fail.
-	if !m.captureMgr.MasterAudioIsPCM(id) {
-		args = append(args, "-bsf:a", "aac_adtstoasc")
+		"-bsf:a", "aac_adtstoasc",
 	}
 	args = append(args,
 		"-movflags", "frag_keyframe+empty_moov+default_base_moof",

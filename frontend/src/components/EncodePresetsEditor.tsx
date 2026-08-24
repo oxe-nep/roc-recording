@@ -304,7 +304,7 @@ export default function EncodePresetsEditor({ open, onClose, onChanged, embedded
               <button type="button" className="presets-row-main" onClick={() => startEdit(p)}>
                 <span className="presets-row-label">{p.label}</span>
                 <span className="presets-row-meta">
-                  {p.id} · {p.video_bitrate} · {p.audio_channels === 8 ? "8ch PCM" : p.audio_bitrate}
+                  {p.id} · {p.video_bitrate} · {p.audio_channels === 8 ? "8ch · 4×AAC" : p.audio_bitrate}
                 </span>
               </button>
               <button type="button" className="badge delete-btn" onClick={() => remove(p.id)} disabled={busy}>
@@ -410,8 +410,8 @@ export default function EncodePresetsEditor({ open, onClose, onChanged, embedded
                 }
                 disabled={busy}
               >
-                <option value="2">Stereo — AAC 2 tracks</option>
-                <option value="8">8 tracks — PCM in MPEG-TS</option>
+                <option value="2">Stereo — AAC</option>
+                <option value="8">8 tracks — 4× AAC stereo pairs</option>
               </select>
             </label>
 
@@ -420,7 +420,7 @@ export default function EncodePresetsEditor({ open, onClose, onChanged, embedded
               <select
                 value={form.audio_bitrate}
                 onChange={(e) => setForm((prev) => ({ ...prev, audio_bitrate: e.target.value }))}
-                disabled={busy || form.audio_channels === 8}
+                disabled={busy}
               >
                 {audioOptions.map((a) => (
                   <option key={a.value} value={a.value}>
@@ -434,7 +434,7 @@ export default function EncodePresetsEditor({ open, onClose, onChanged, embedded
           <p className="presets-derived">
             Applied encode: {form.video_codec} · {derived.video_bitrate} (max {derived.video_maxrate},
             buffer {derived.video_bufsize}) · {form.video_preset} · GOP {form.video_gop} · audio{" "}
-            {form.audio_channels === 8 ? "8ch PCM" : `AAC stereo ${form.audio_bitrate}`}
+            {form.audio_channels === 8 ? `4× AAC ${form.audio_bitrate} (pairs 1–2 … 7–8)` : `AAC stereo ${form.audio_bitrate}`}
           </p>
 
           <p className="presets-hint">

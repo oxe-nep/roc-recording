@@ -106,7 +106,7 @@ type EncodeProfile struct {
 	VideoPreset   string
 	VideoGOP      int
 	AudioBitrate  string
-	AudioChannels int // 2 = AAC stereo (default), 8 = PCM discrete in MPEG-TS
+	AudioChannels int // 2 = AAC stereo (default), 8 = four AAC stereo pairs in MPEG-TS
 }
 
 // NamedPreset is a selectable encode profile (id + label + settings).
@@ -648,8 +648,10 @@ func (m *Manager) runLoop(s *Stream) {
 }
 
 // runFFmpeg starts one FFmpeg per DeckLink channel with multiple outputs (fan-out):
-// 1) Low-latency HLS A/V preview for card UI
-// 2) Master H.264/AAC MPEG-TS UDP feed — recording remuxes this with -c copy
+//  1. Low-latency HLS A/V preview for card UI
+//  2. Master H.264 + AAC MPEG-TS UDP feed — recording remuxes this with -c copy
+//     Stereo preset: 1 AAC. 8-track preset: 4 AAC stereo pairs (MPEG-TS cannot carry 8ch PCM).
+//
 // Audio levels are parsed from astats metadata on a shared stereo branch in filter_complex.
 func (m *Manager) runFFmpeg(s *Stream) error {
 	outDir := filepath.Join(m.hlsDir, fmt.Sprintf("%d", s.ID))
@@ -669,9 +671,11 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	audioCh := audiox.NormalizeCount(enc.AudioChannels)
 	encodeTap := "[aencsrc]pan=stereo|c0=c0|c1=c1[arec];"
 	audioEncode := []string{"-c:a", "aac", "-b:a", enc.AudioBitrate, "-ar", "48000", "-ac", "2"}
+	masterAudio := []string{"[arec]"}
 	if audioCh == audiox.Channels {
-		encodeTap = "[aencsrc]anull[arec];"
-		audioEncode = []string{"-c:a", "pcm_s16le", "-ar", "48000", "-ac", "8"}
+		// MPEG-TS cannot carry 8ch PCM; four AAC stereo pairs copy cleanly into MP4.
+		encodeTap = audiox.PairSplitGraph("[aencsrc]", "en", "arec")
+		masterAudio = []string{"[arec0]", "[arec1]", "[arec2]", "[arec3]"}
 	}
 	filterGraph := "[0:v]yadif=mode=0:deint=interlaced,split=2[vrec][vprevsrc];" +
 		"[vprevsrc]scale=640:360,fps=10,format=yuv420p[vprev];" +
@@ -691,7 +695,11 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	args = append(args,
 		// Master encode feed (REC remuxes with -c copy)
 		"-map", "[vrecout]",
-		"-map", "[arec]",
+	)
+	for _, pad := range masterAudio {
+		args = append(args, "-map", pad)
+	}
+	args = append(args,
 		"-c:v", enc.VideoCodec,
 		"-b:v", enc.VideoBitrate,
 		"-maxrate", enc.VideoMaxrate,
@@ -700,6 +708,11 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 		"-g", gop,
 	)
 	args = append(args, audioEncode...)
+	if audioCh == audiox.Channels {
+		for i := 0; i < 4; i++ {
+			args = append(args, "-metadata:s:a:"+strconv.Itoa(i), "title="+audiox.PreviewPairTitle(i))
+		}
+	}
 	args = append(args,
 		"-f", "mpegts",
 		"-mpegts_flags", "+resend_headers",

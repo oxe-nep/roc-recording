@@ -36,7 +36,7 @@ need_root() {
 
 cmd_build() {
   echo "Building backend..."
-  (cd "$BACKEND_DIR" && go build -o roc-recording ./cmd/server)
+  (cd "$BACKEND_DIR" && go mod tidy && go build -o roc-recording ./cmd/server)
   echo "OK: $BIN"
 }
 

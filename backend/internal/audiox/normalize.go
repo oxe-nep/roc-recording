@@ -9,6 +9,7 @@ import (
 
 var (
 	reAudioStream = regexp.MustCompile(`(?i)Stream\s+#\d+:\d+.*?\bAudio:\s*(.+)`)
+	reStreamHead  = regexp.MustCompile(`(?i)Stream\s+#\d+:\d+`)
 	reNChannels   = regexp.MustCompile(`(?i)(\d+)\s*channels`)
 )
 
@@ -35,24 +36,41 @@ func LinkPad(pad, chain string) string {
 
 // ParseAudioStreams returns channel counts per audio stream from FFmpeg -i banner text.
 func ParseAudioStreams(banner string) []int {
+	raw := strings.Split(banner, "\n")
+	lines := make([]string, 0, len(raw))
+	for _, line := range raw {
+		lines = append(lines, strings.TrimSpace(strings.TrimSuffix(line, "\r")))
+	}
+
 	var out []int
-	for _, line := range strings.Split(banner, "\n") {
-		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
-		m := reAudioStream.FindStringSubmatch(line)
-		if m == nil {
+	for i, line := range lines {
+		if m := reAudioStream.FindStringSubmatch(line); m != nil {
+			desc := m[1]
+			if i+1 < len(lines) && !hasLayoutHint(desc) && hasLayoutHint(lines[i+1]) {
+				desc = desc + " " + lines[i+1]
+			}
+			out = append(out, channelsFromDesc(desc))
 			continue
 		}
-		out = append(out, channelsFromDesc(m[1]))
-	}
-	if len(out) == 0 {
-		for _, line := range strings.Split(banner, "\n") {
-			l := strings.ToLower(line)
-			if strings.Contains(l, "stream #") && strings.Contains(l, "audio:") {
-				out = append(out, channelsFromDesc(line))
+		// Wrapped banner: "Stream #0:1(eng):" then next line "Audio: pcm_s24le, …"
+		if reStreamHead.MatchString(line) && !strings.Contains(strings.ToLower(line), "audio:") &&
+			!strings.Contains(strings.ToLower(line), "video:") &&
+			!strings.Contains(strings.ToLower(line), "subtitle:") {
+			if i+1 < len(lines) && strings.Contains(strings.ToLower(lines[i+1]), "audio:") {
+				out = append(out, channelsFromDesc(lines[i+1]))
 			}
 		}
 	}
 	return out
+}
+
+func hasLayoutHint(s string) bool {
+	l := strings.ToLower(s)
+	return reNChannels.MatchString(l) ||
+		strings.Contains(l, "mono") ||
+		strings.Contains(l, "stereo") ||
+		strings.Contains(l, "7.1") ||
+		strings.Contains(l, "5.1")
 }
 
 func channelsFromDesc(desc string) int {

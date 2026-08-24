@@ -38,6 +38,20 @@ Stream #0:8: Audio: aac (LC), 48000 Hz, mono, fltp, 64 kb/s
 	}
 }
 
+func TestParseAudioStreamsWrappedLines(t *testing.T) {
+	banner := `
+    Stream #0:0[0x1]: Video: prores
+    Stream #0:1[0x2](eng):
+    Audio: pcm_s24le, 48000 Hz, 1 channels, s32 (24 bit)
+    Stream #0:2[0x3](eng):
+    Audio: pcm_s24le, 48000 Hz, 1 channels, s32 (24 bit)
+`
+	chs := ParseAudioStreams(banner)
+	if len(chs) != 2 || chs[0] != 1 || chs[1] != 1 {
+		t.Fatalf("got %v", chs)
+	}
+}
+
 func TestParseAudioStreams8chAndStereo(t *testing.T) {
 	if n := ParseAudioStreams("Stream #0:1: Audio: pcm_s16le, 48000 Hz, 8 channels, s16\n"); len(n) != 1 || n[0] != 8 {
 		t.Fatalf("got %v", n)

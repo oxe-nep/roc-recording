@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -93,9 +94,67 @@ func probeAudioChannels(ffmpegBin, path string) []int {
 	if strings.TrimSpace(path) == "" {
 		return nil
 	}
-	cmd := exec.Command(ffmpegBin, "-hide_banner", "-i", path)
+	if chs := probeAudioWithFfprobe(ffmpegBin, path); len(chs) > 0 {
+		return chs
+	}
+	cmd := exec.Command(ffmpegBin,
+		"-hide_banner",
+		"-analyzeduration", "50M",
+		"-probesize", "50M",
+		"-i", path,
+	)
 	out, _ := cmd.CombinedOutput()
 	return audiox.ParseAudioStreams(string(out))
+}
+
+func probeAudioWithFfprobe(ffmpegBin, path string) []int {
+	probe := ffprobePath(ffmpegBin)
+	cmd := exec.Command(probe,
+		"-v", "error",
+		"-analyzeduration", "50M",
+		"-probesize", "50M",
+		"-select_streams", "a",
+		"-show_entries", "stream=channels",
+		"-of", "csv=p=0",
+		path,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil
+	}
+	var chs []int
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if line == "" {
+			continue
+		}
+		// csv may be "1" or "1,stereo"
+		nStr := line
+		if i := strings.IndexByte(line, ','); i >= 0 {
+			nStr = line[:i]
+		}
+		n, err := strconv.Atoi(nStr)
+		if err != nil || n < 1 {
+			n = 1
+		}
+		chs = append(chs, n)
+	}
+	return chs
+}
+
+func ffprobePath(ffmpegBin string) string {
+	ffmpegBin = strings.TrimSpace(ffmpegBin)
+	if ffmpegBin == "" {
+		return "ffprobe"
+	}
+	dir := filepath.Dir(ffmpegBin)
+	base := filepath.Base(ffmpegBin)
+	name := strings.Replace(base, "ffmpeg", "ffprobe", 1)
+	name = strings.Replace(name, "FFmpeg", "FFprobe", 1)
+	if dir == "." || dir == "" {
+		return name
+	}
+	return filepath.Join(dir, name)
 }
 
 var reFFDuration = regexp.MustCompile(`(?i)Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)`)

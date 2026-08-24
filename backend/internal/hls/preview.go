@@ -5,18 +5,31 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/roc-recording/backend/internal/audiox"
 )
 
-// PreviewPaths returns low-latency video HLS paths under a channel output directory.
+// PreviewPaths returns video HLS paths. Segment names include a unique generation
+// so a new play cannot reuse cached preview_000.ts from the previous file.
 func PreviewPaths(dir string) (playlist, segmentPattern string) {
-	return filepath.Join(dir, "preview.m3u8"), filepath.Join(dir, "preview_%03d.ts")
+	gen := time.Now().UnixMilli()
+	return filepath.Join(dir, "preview.m3u8"),
+		filepath.Join(dir, fmt.Sprintf("pv%d_%%03d.ts", gen))
 }
 
-func listenPaths(dir string, pair int) (playlist, segmentPattern string) {
+func genFromVideoSeg(segPattern string) int64 {
+	base := filepath.Base(segPattern)
+	var gen int64
+	if _, err := fmt.Sscanf(base, "pv%d", &gen); err != nil || gen <= 0 {
+		return time.Now().UnixMilli()
+	}
+	return gen
+}
+
+func listenPaths(dir string, pair int, gen int64) (playlist, segmentPattern string) {
 	return filepath.Join(dir, fmt.Sprintf("listen_%d.m3u8", pair)),
-		filepath.Join(dir, fmt.Sprintf("listen_%d_%%03d.ts", pair))
+		filepath.Join(dir, fmt.Sprintf("l%d_%d_%%03d.ts", gen, pair))
 }
 
 func appendHLSFlags(args []string, playlist, segPattern string, segTime string, listSize string) []string {
@@ -24,7 +37,7 @@ func appendHLSFlags(args []string, playlist, segPattern string, segTime string, 
 		"-f", "hls",
 		"-hls_time", segTime,
 		"-hls_list_size", listSize,
-		"-hls_flags", "delete_segments+independent_segments+omit_endlist+program_date_time",
+		"-hls_flags", "delete_segments+independent_segments+omit_endlist+program_date_time+temp_file",
 		"-hls_segment_filename", segPattern,
 		playlist,
 	)
@@ -53,8 +66,9 @@ func AppendAVPreviewOutputs(args []string, videoMap, playlist, segPattern string
 	out = appendHLSFlags(out, playlist, segPattern, "1", "6")
 
 	dir := filepath.Dir(playlist)
+	gen := genFromVideoSeg(segPattern)
 	for i, pad := range audiox.PreviewPairMaps() {
-		lp, ls := listenPaths(dir, i)
+		lp, ls := listenPaths(dir, i, gen)
 		out = append(out,
 			"-map", pad,
 			"-vn",
@@ -76,12 +90,12 @@ func RemovePreviewArtifacts(dir string) {
 		return
 	}
 	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
 		name := e.Name()
-		if name == "thumb.jpg" ||
-			name == "preview.m3u8" ||
-			strings.HasPrefix(name, "preview_") ||
-			strings.HasPrefix(name, "listen_") ||
-			strings.HasPrefix(name, "audio") {
+		ext := strings.ToLower(filepath.Ext(name))
+		if name == "thumb.jpg" || ext == ".m3u8" || ext == ".ts" {
 			_ = os.Remove(filepath.Join(dir, name))
 		}
 	}

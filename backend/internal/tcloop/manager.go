@@ -739,8 +739,7 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 	playoutOutDir := filepath.Join(m.hlsDir, "playout", strconv.Itoa(id))
 	_ = os.RemoveAll(playoutOutDir)
 	_ = os.MkdirAll(playoutOutDir, 0o755)
-	previewPlaylist := filepath.Join(playoutOutDir, "preview.m3u8")
-	previewSeg := filepath.Join(playoutOutDir, "preview_%03d.ts")
+	previewPlaylist, previewSeg := hlsout.PreviewPaths(playoutOutDir)
 
 	textPath := filepath.Join(os.TempDir(), fmt.Sprintf("roc-tcloop-%d-tc.txt", id))
 	metaPath := filepath.Join(os.TempDir(), fmt.Sprintf("roc-tcloop-%d-astats.meta", id))

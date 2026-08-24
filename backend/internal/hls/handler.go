@@ -54,10 +54,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if strings.HasSuffix(fullAbs, ".m3u8") {
-		w.Header().Set("Cache-Control", "no-cache, no-store")
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	} else if strings.HasSuffix(fullAbs, ".ts") {
-		w.Header().Set("Cache-Control", "max-age=60")
+		w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 		w.Header().Set("Content-Type", "video/MP2T")
 	} else if strings.HasSuffix(fullAbs, ".jpg") || strings.HasSuffix(fullAbs, ".jpeg") {
 		w.Header().Set("Cache-Control", "no-cache, no-store")

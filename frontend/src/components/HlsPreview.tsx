@@ -16,7 +16,10 @@ type Props = {
 };
 
 function listenPlaylist(previewPath: string, pair: number): string {
-  return previewPath.replace(/preview\.m3u8$/, `listen_${pair}.m3u8`);
+  const q = previewPath.indexOf("?");
+  const path = q >= 0 ? previewPath.slice(0, q) : previewPath;
+  const query = q >= 0 ? previewPath.slice(q) : "";
+  return path.replace(/preview\.m3u8$/, `listen_${pair}.m3u8`) + query;
 }
 
 /** Low-latency HLS video preview; listen audio is a separate stereo playlist per pair. */

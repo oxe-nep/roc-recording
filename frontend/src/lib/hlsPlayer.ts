@@ -20,24 +20,17 @@ export function attachHls(
   onFatal: () => void,
 ): Hls | null {
   if (Hls.isSupported()) {
-    const hls = new Hls({ ...HLS_LIVE_CONFIG });
+    const hls = new Hls({
+      ...HLS_LIVE_CONFIG,
+      xhrSetup(xhr) {
+        xhr.setRequestHeader("Cache-Control", "no-cache");
+      },
+    });
     live.add(hls);
     hls.loadSource(src);
     hls.attachMedia(el);
-
-    let bufferedFrags = 0;
-    let started = false;
-    const tryPlay = () => {
-      if (started) return;
-      started = true;
-      void el.play().catch(() => {});
-    };
-    hls.on(Hls.Events.FRAG_BUFFERED, () => {
-      bufferedFrags += 1;
-      if (bufferedFrags >= 2) tryPlay();
-    });
     hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      window.setTimeout(() => tryPlay(), 2000);
+      void el.play().catch(() => {});
     });
     hls.on(Hls.Events.ERROR, (_ev, data) => {
       if (!data.fatal) return;
@@ -67,6 +60,11 @@ export function stopMedia(el: HTMLMediaElement | null, hls: Hls | null) {
   el.pause();
   el.removeAttribute("src");
   el.srcObject = null;
+  try {
+    el.load();
+  } catch {
+    /* ignore */
+  }
 }
 
 if (typeof window !== "undefined") {

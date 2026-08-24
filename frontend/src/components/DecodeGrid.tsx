@@ -136,16 +136,18 @@ export default function DecodeGrid() {
             const listenAt = listenPair[c.id] ?? null;
             const isFile = c.source === "file";
             const title = cardTitle(c);
+            const previewOn = isFile ? on && !!c.sending : on;
+            const previewKey = `${c.id}-${c.file_id ?? ""}-${c.sending ? "live" : "idle"}`;
             return (
               <div key={c.id} className={`card-panel ${c.status}`}>
                 <div className="card-stage">
                   <AudioMeters channelId={c.id} bus="playout">
                   <div className="card-thumb">
                     <HlsPreview
-                      active={on}
+                      active={previewOn}
                       listenPair={listenAt}
-                      playlistPath={`/hls/playout/${c.id}/preview.m3u8`}
-                      sessionKey={`${c.id}-${c.status}-${c.source ?? "srt"}-${c.sending ? "live" : "idle"}`}
+                      playlistPath={`/hls/playout/${c.id}/preview.m3u8?s=${encodeURIComponent(previewKey)}`}
+                      sessionKey={previewKey}
                     />
                     {on && isFile && (c.duration_sec ?? 0) > 0 && (
                       <div className="thumb-badges">

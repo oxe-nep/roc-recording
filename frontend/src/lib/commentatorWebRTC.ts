@@ -167,12 +167,24 @@ export class CommentatorSession {
       };
       ws.onclose = (ev) => {
         if (!settled) {
-          reject(new Error(`Signaling WebSocket closed (${ev.code}${ev.reason ? `: ${ev.reason}` : ""})`));
+          const hint =
+            path.includes("/api/commentator/ws/")
+              ? " Redeploy frontend and capture host, then create a new invite."
+              : "";
+          reject(
+            new Error(
+              `Signaling WebSocket closed (${ev.code}${ev.reason ? `: ${ev.reason}` : ""}). URL: ${url}.${hint}`
+            )
+          );
         }
       };
       ws.onerror = () => {
         if (!settled) {
-          reject(new Error(`Signaling WebSocket failed (${url})`));
+          reject(
+            new Error(
+              `Signaling WebSocket failed (${url}). If the dashboard works but this does not, redeploy frontend + capture host and create a new invite.`
+            )
+          );
         }
       };
       ws.onmessage = (ev) => void this.handleSignal(JSON.parse(String(ev.data)) as SignalMsg);

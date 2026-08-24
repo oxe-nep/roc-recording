@@ -52,7 +52,8 @@ func (m *Manager) JoinInfo(token string) (joinResponse, error) {
 		ChannelID:  id,
 		ICEServers: m.ice.ClientICEServers(),
 		Intercom:   enabledIntercom(settings),
-		WSPath:     "/api/commentator/ws/" + token,
+		// Use /ws/commentator/ so nginx can proxy via the existing /ws WebSocket location.
+		WSPath: "/ws/commentator/" + token,
 	}, nil
 }
 

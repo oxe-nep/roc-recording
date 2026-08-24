@@ -26,9 +26,13 @@ func registerCommentatorPublicRoutes(r chi.Router, commMgr *commentator.Manager)
 		}
 		jsonOK(w, info)
 	})
-	r.Get("/api/commentator/ws/{token}", func(w http.ResponseWriter, r *http.Request) {
+	serveCommentatorWS := func(w http.ResponseWriter, r *http.Request) {
 		commMgr.ServeSignaling(w, r, chi.URLParam(r, "token"))
-	})
+	}
+	// Primary path: nginx already upgrades WebSockets on location /ws.
+	r.Get("/ws/commentator/{token}", serveCommentatorWS)
+	// Legacy alias (older frontends / cached join responses).
+	r.Get("/api/commentator/ws/{token}", serveCommentatorWS)
 }
 
 func registerCommentatorRoutes(r chi.Router, commMgr *commentator.Manager) {

@@ -11,6 +11,15 @@ type Props = {
   token: string;
 };
 
+const STATE_LABELS: Record<CommentatorConnectionState, string> = {
+  idle: "Väntar",
+  joining: "Ansluter…",
+  connecting: "Förhandlar WebRTC…",
+  connected: "Ansluten",
+  reconnecting: "Återansluter…",
+  failed: "Fel",
+};
+
 export default function CommentatorClient({ token }: Props) {
   const sessionRef = useRef<CommentatorSession | null>(null);
   const [state, setState] = useState<CommentatorConnectionState>("idle");
@@ -101,30 +110,56 @@ export default function CommentatorClient({ token }: Props) {
     },
   });
 
+  const statusClass =
+    state === "connected"
+      ? "commentator-status--ok"
+      : state === "failed"
+        ? "commentator-status--err"
+        : "commentator-status--pending";
+
   return (
     <div className="commentator-shell">
       <header className="commentator-header">
-        <h1>Remote Commentator</h1>
-        <p className="commentator-subtitle">Status: {state}</p>
-        {(state === "failed" || state === "reconnecting") && (
-          <button type="button" className="commentator-reconnect" onClick={reconnect}>
-            Återanslut
-          </button>
-        )}
+        <div className="commentator-header-text">
+          <p className="commentator-eyebrow">ROC Recording</p>
+          <h1>Fjärrkommentator</h1>
+        </div>
+        <div className="commentator-header-actions">
+          <span className={`commentator-status-pill ${statusClass}`}>{STATE_LABELS[state]}</span>
+          {(state === "failed" || state === "reconnecting") && (
+            <button type="button" className="commentator-btn commentator-btn-primary" onClick={reconnect}>
+              Återanslut
+            </button>
+          )}
+        </div>
       </header>
 
-      {error && <div className="error-message">{error}</div>}
+      {error && <div className="commentator-alert">{error}</div>}
 
       <div className="commentator-main">
-        <div className="commentator-video-wrap">
-          <video ref={videoRef} className="commentator-program-video" autoPlay playsInline />
-          <p className="commentator-video-label">Program (WebRTC)</p>
-        </div>
+        <section className="commentator-video-panel">
+          <div className="commentator-video-wrap">
+            <video ref={videoRef} className="commentator-program-video" autoPlay playsInline muted={false} />
+            {state !== "connected" && (
+              <div className="commentator-video-overlay">
+                <span>{STATE_LABELS[state]}</span>
+              </div>
+            )}
+          </div>
+          <p className="commentator-video-caption">Programbild</p>
+        </section>
 
         <aside className="commentator-controls">
+          <h2 className="commentator-controls-title">Ljudmix</h2>
+
           <div className="commentator-fader-row">
-            <label>PGM</label>
+            <div className="commentator-fader-head">
+              <label htmlFor="pgm-vol">PGM / mix-minus</label>
+              <span className="commentator-fader-val">{Math.round(pgmVol * 100)}%</span>
+            </div>
             <input
+              id="pgm-vol"
+              className="commentator-range"
               type="range"
               min={0}
               max={1}
@@ -136,26 +171,39 @@ export default function CommentatorClient({ token }: Props) {
 
           {intercom.map((slot) => (
             <div key={slot.id} className="commentator-fader-row">
-              <label>{slot.name}</label>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                value={intercomVol[slot.id] ?? 0.8}
-                onChange={(e) =>
-                  setIntercomVol((prev) => ({ ...prev, [slot.id]: Number(e.target.value) }))
-                }
-              />
-              <button
-                type="button"
-                className={`commentator-ptt${pttActive === slot.id ? " active" : ""}`}
-                {...bindPTT(slot.id)}
-              >
-                PTT
-              </button>
+              <div className="commentator-fader-head">
+                <label htmlFor={`ic-${slot.id}`}>{slot.name}</label>
+                <span className="commentator-fader-val">
+                  {Math.round((intercomVol[slot.id] ?? 0.8) * 100)}%
+                </span>
+              </div>
+              <div className="commentator-fader-actions">
+                <input
+                  id={`ic-${slot.id}`}
+                  className="commentator-range"
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={intercomVol[slot.id] ?? 0.8}
+                  onChange={(e) =>
+                    setIntercomVol((prev) => ({ ...prev, [slot.id]: Number(e.target.value) }))
+                  }
+                />
+                <button
+                  type="button"
+                  className={`commentator-ptt${pttActive === slot.id ? " active" : ""}`}
+                  {...bindPTT(slot.id)}
+                >
+                  PTT
+                </button>
+              </div>
             </div>
           ))}
+
+          {intercom.length === 0 && (
+            <p className="commentator-empty-hint">Inga intercom-kanaler aktiva i producentinställningarna.</p>
+          )}
         </aside>
       </div>
     </div>

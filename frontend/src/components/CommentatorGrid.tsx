@@ -84,13 +84,17 @@ export default function CommentatorGrid() {
                 </div>
 
                 <div className="card-body commentator-card-body">
-                  {info?.invite_url ? (
+                  {info?.connected ? (
+                    <p className="commentator-invite-hint commentator-invite-hint--live">
+                      Kommentator ansluten
+                    </p>
+                  ) : info?.invite_url ? (
                     <p className="commentator-invite-hint">
-                      Invite link active — open settings to copy or revoke.
+                      Inbjudan aktiv — öppna Settings för att kopiera eller öppna länken.
                     </p>
                   ) : (
                     <p className="commentator-invite-hint">
-                      Configure intercom channels, then create an invite link.
+                      Konfigurera intercom och skapa en inbjudan.
                     </p>
                   )}
                 </div>

@@ -1,4 +1,3 @@
-import { mediaBase } from "@/lib/mediaBase";
 import type { CommentatorIntercomSlot } from "@/lib/api";
 
 export type CommentatorJoinInfo = {
@@ -16,8 +15,14 @@ export type CommentatorConnectionState =
   | "reconnecting"
   | "failed";
 
+/** Commentator page always talks to backend via same origin (nginx proxy). */
+function commentatorOrigin(): string {
+  if (typeof window !== "undefined") return window.location.origin;
+  return "";
+}
+
 function wsURL(path: string): string {
-  const u = new URL(path, mediaBase());
+  const u = new URL(path, commentatorOrigin() || "http://localhost");
   u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
   return u.toString();
 }
@@ -27,10 +32,11 @@ function delay(ms: number): Promise<void> {
 }
 
 export async function fetchCommentatorJoin(token: string): Promise<CommentatorJoinInfo> {
-  const res = await fetch(`${mediaBase()}/api/commentator/join/${encodeURIComponent(token)}`);
+  const base = commentatorOrigin();
+  const res = await fetch(`${base}/api/commentator/join/${encodeURIComponent(token)}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `join failed: ${res.status}`);
+    throw new Error(body.error || `Join misslyckades (${res.status})`);
   }
   return res.json();
 }
@@ -51,10 +57,11 @@ export class CommentatorSession {
   private localStream: MediaStream | null = null;
   private audioCtx: AudioContext | null = null;
   private gainNodes = new Map<string, GainNode>();
-  private pttChannel = 0;
+  private pendingRemoteICE: RTCIceCandidateInit[] = [];
+  private remoteDescSet = false;
   private stopped = false;
   private reconnectAttempts = 0;
-  private readonly maxReconnects = 5;
+  private readonly maxReconnects = 3;
 
   onState?: (state: CommentatorConnectionState) => void;
   onError?: (message: string) => void;
@@ -65,7 +72,10 @@ export class CommentatorSession {
 
   async start(): Promise<void> {
     this.stopped = false;
+    this.remoteDescSet = false;
+    this.pendingRemoteICE = [];
     this.onState?.("joining");
+
     const join = await fetchCommentatorJoin(this.token);
     this.onIntercom?.(join.intercom);
 
@@ -106,7 +116,10 @@ export class CommentatorSession {
     };
     this.pc.onconnectionstatechange = () => {
       const state = this.pc?.connectionState;
-      if (state === "failed" || state === "disconnected") {
+      if (state === "connected") {
+        this.reconnectAttempts = 0;
+        this.onState?.("connected");
+      } else if (state === "failed") {
         void this.scheduleReconnect();
       }
     };
@@ -121,7 +134,9 @@ export class CommentatorSession {
   private async scheduleReconnect() {
     if (this.stopped || this.reconnectAttempts >= this.maxReconnects) {
       this.onState?.("failed");
-      this.onError?.("WebRTC-anslutningen bröts. Prova Återanslut.");
+      this.onError?.(
+        "WebRTC-anslutningen misslyckades. Kontrollera att WEBRTC_PUBLIC_HOST och ev. TURN är konfigurerat på capture host, sedan prova Återanslut."
+      );
       return;
     }
     this.reconnectAttempts++;
@@ -130,12 +145,11 @@ export class CommentatorSession {
     this.pc?.close();
     this.ws = null;
     this.pc = null;
-    await delay(Math.min(1000 * this.reconnectAttempts, 5000));
+    await delay(Math.min(1500 * this.reconnectAttempts, 5000));
     if (this.stopped) return;
     try {
       await this.start();
-      this.reconnectAttempts = 0;
-    } catch (e) {
+    } catch {
       void this.scheduleReconnect();
     }
   }
@@ -145,17 +159,12 @@ export class CommentatorSession {
       const ws = new WebSocket(wsURL(path));
       this.ws = ws;
       ws.onopen = () => resolve();
-      ws.onerror = () => reject(new Error("signaling websocket failed"));
-      ws.onmessage = (ev) => this.handleSignal(JSON.parse(String(ev.data)) as SignalMsg);
-      ws.onclose = () => {
-        if (!this.stopped && this.pc?.connectionState !== "connected") {
-          void this.scheduleReconnect();
-        }
-      };
+      ws.onerror = () => reject(new Error("Signaling WebSocket misslyckades"));
+      ws.onmessage = (ev) => void this.handleSignal(JSON.parse(String(ev.data)) as SignalMsg);
     });
   }
 
-  private handleSignal(msg: SignalMsg) {
+  private async handleSignal(msg: SignalMsg) {
     if (!this.pc) return;
     switch (msg.type) {
       case "config":
@@ -163,17 +172,24 @@ export class CommentatorSession {
         break;
       case "answer":
         if (msg.sdp) {
-          void this.pc.setRemoteDescription({ type: "answer", sdp: msg.sdp }).then(() => {
-            this.reconnectAttempts = 0;
-            this.onState?.("connected");
-          });
+          await this.pc.setRemoteDescription({ type: "answer", sdp: msg.sdp });
+          this.remoteDescSet = true;
+          for (const c of this.pendingRemoteICE) {
+            await this.pc.addIceCandidate(c);
+          }
+          this.pendingRemoteICE = [];
         }
         break;
       case "ice":
-        if (msg.candidate) void this.pc.addIceCandidate(msg.candidate);
+        if (!msg.candidate) return;
+        if (!this.remoteDescSet) {
+          this.pendingRemoteICE.push(msg.candidate);
+          return;
+        }
+        await this.pc.addIceCandidate(msg.candidate);
         break;
       case "error":
-        this.onError?.(msg.message || "WebRTC error");
+        this.onError?.(msg.message || "WebRTC-fel");
         this.onState?.("failed");
         break;
     }
@@ -192,7 +208,6 @@ export class CommentatorSession {
   }
 
   setPTT(channel: number) {
-    this.pttChannel = channel;
     this.send({ type: "ptt", channel });
   }
 
@@ -215,4 +230,15 @@ export class CommentatorSession {
     this.audioCtx = null;
     this.gainNodes.clear();
   }
+}
+
+/** Turn a stored invite path into an absolute browser URL. */
+export function absoluteInviteURL(url: string): string {
+  const u = url.trim();
+  if (!u) return "";
+  if (u.startsWith("http://") || u.startsWith("https://")) return u;
+  if (typeof window !== "undefined") {
+    return `${window.location.origin}${u.startsWith("/") ? u : `/${u}`}`;
+  }
+  return u;
 }

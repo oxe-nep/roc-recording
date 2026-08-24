@@ -1,3 +1,3 @@
 export default function CommentatorLayout({ children }: { children: React.ReactNode }) {
-  return children;
+  return <div className="commentator-root">{children}</div>;
 }

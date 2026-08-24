@@ -18,6 +18,21 @@ type rtcSession struct {
 	stopOnce    sync.Once
 }
 
+func (m *Manager) newPeerConnection() (*webrtc.PeerConnection, error) {
+	mediaEngine := &webrtc.MediaEngine{}
+	if err := mediaEngine.RegisterDefaultCodecs(); err != nil {
+		return nil, fmt.Errorf("register codecs: %w", err)
+	}
+	opts := []func(*webrtc.API){webrtc.WithMediaEngine(mediaEngine)}
+	if host := m.ice.PublicHost; host != "" {
+		se := webrtc.SettingEngine{}
+		se.SetNAT1To1IPs([]string{host}, webrtc.ICECandidateTypeHost)
+		opts = append(opts, webrtc.WithSettingEngine(se))
+	}
+	api := webrtc.NewAPI(opts...)
+	return api.NewPeerConnection(m.ice.PeerConfiguration())
+}
+
 func (m *Manager) startRTCSession(channelID int, token string) (*rtcSession, error) {
 	m.mu.Lock()
 	if existing, ok := m.rtcByChannel[channelID]; ok {
@@ -26,14 +41,9 @@ func (m *Manager) startRTCSession(channelID int, token string) (*rtcSession, err
 	}
 	m.mu.Unlock()
 
-	mediaEngine := &webrtc.MediaEngine{}
-	if err := mediaEngine.RegisterDefaultCodecs(); err != nil {
-		return nil, fmt.Errorf("register codecs: %w", err)
-	}
-	api := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine))
-	pc, err := api.NewPeerConnection(m.ice.PeerConfiguration())
+	pc, err := m.newPeerConnection()
 	if err != nil {
-		return nil, fmt.Errorf("peer connection: %w", err)
+		return nil, err
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

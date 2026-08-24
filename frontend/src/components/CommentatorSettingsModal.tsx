@@ -10,6 +10,7 @@ import {
   type CommentatorIntercomSlot,
 } from "@/lib/api";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
+import { absoluteInviteURL } from "@/lib/commentatorWebRTC";
 
 const SLOT_COUNT = 6;
 
@@ -115,13 +116,21 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
   };
 
   const copyInvite = async () => {
-    if (!inviteURL) return;
+    const url = absoluteInviteURL(inviteURL);
+    if (!url) return;
     try {
-      await navigator.clipboard.writeText(inviteURL);
+      await navigator.clipboard.writeText(url);
     } catch (e) {
       setError(String(e));
     }
   };
+
+  const openInvite = () => {
+    const url = absoluteInviteURL(inviteURL);
+    if (url) window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const displayInvite = absoluteInviteURL(inviteURL);
 
   return (
     <div className="modal-backdrop" onClick={() => !busy && onClose()} role="presentation">
@@ -140,15 +149,19 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
 
         {error && <div className="error-message">{error}</div>}
 
-        <div className="channel-settings-section">
+        <div className="channel-settings-section commentator-settings-section">
           <h3>Status</h3>
-          <p className="commentator-status-line">State: {status}</p>
+          <p className="commentator-status-line">
+            <span className={`status-pill ${sessionActive ? "status-waiting" : "status-stopped"}`}>
+              {status}
+            </span>
+          </p>
         </div>
 
-        <div className="channel-settings-section">
+        <div className="channel-settings-section commentator-settings-section">
           <h3>Intercom channels</h3>
           <p className="commentator-settings-hint">
-            Enable and name up to six mono intercom channels (DeckLink tracks 3–8). PGM uses tracks 1–2.
+            Aktivera och namnge upp till sex mono intercom-kanaler (DeckLink spår 3–8). PGM använder spår 1–2.
           </p>
           <div className="commentator-intercom-list">
             {intercom.map((slot, idx) => (
@@ -179,31 +192,34 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
               </div>
             ))}
           </div>
-          <button type="button" className="badge" disabled={busy} onClick={() => void saveSettings()}>
-            Save intercom
+          <button type="button" className="badge start-btn" disabled={busy} onClick={() => void saveSettings()}>
+            Spara intercom
           </button>
         </div>
 
-        <div className="channel-settings-section">
-          <h3>Invite link</h3>
-          {inviteURL ? (
+        <div className="channel-settings-section commentator-settings-section">
+          <h3>Inbjudan</h3>
+          {displayInvite ? (
             <div className="commentator-invite-row">
-              <input className="commentator-invite-url" readOnly value={inviteURL} />
+              <input className="commentator-invite-url" readOnly value={displayInvite} />
               <button type="button" className="badge" disabled={busy} onClick={() => void copyInvite()}>
-                Copy
+                Kopiera
+              </button>
+              <button type="button" className="badge" disabled={busy} onClick={openInvite}>
+                Öppna
               </button>
             </div>
           ) : (
-            <p className="commentator-settings-hint">No active invite. Create one for the commentator.</p>
+            <p className="commentator-settings-hint">Ingen aktiv inbjudan. Skapa en länk för kommentatorn.</p>
           )}
           <div className="commentator-invite-actions">
             {!sessionActive ? (
               <button type="button" className="badge start-btn" disabled={busy} onClick={() => void createInvite()}>
-                Create invite
+                Skapa inbjudan
               </button>
             ) : (
               <button type="button" className="badge stop-btn" disabled={busy} onClick={() => void revokeInvite()}>
-                Revoke invite
+                Återkalla inbjudan
               </button>
             )}
           </div>

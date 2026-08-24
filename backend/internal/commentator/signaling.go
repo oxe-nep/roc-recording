@@ -147,6 +147,16 @@ func (m *Manager) ServeSignaling(w http.ResponseWriter, r *http.Request, token s
 	})
 
 	conn.SetReadLimit(signalingMaxMsg)
+	var pendingICE []webrtc.ICECandidateInit
+	remoteSet := false
+	flushICE := func() {
+		for _, init := range pendingICE {
+			if err := sess.pc.AddICECandidate(init); err != nil {
+				log.Printf("[commentator %d] add ice: %v", channelID, err)
+			}
+		}
+		pendingICE = pendingICE[:0]
+	}
 	for {
 		var msg signalMsg
 		if err := conn.ReadJSON(&msg); err != nil {
@@ -170,6 +180,8 @@ func (m *Manager) ServeSignaling(w http.ResponseWriter, r *http.Request, token s
 				writeJSON(map[string]string{"type": "error", "message": err.Error()})
 				continue
 			}
+			remoteSet = true
+			flushICE()
 			writeJSON(signalMsg{Type: "answer", SDP: answer.SDP})
 		case "ice":
 			if len(msg.Candidate) == 0 {
@@ -179,7 +191,13 @@ func (m *Manager) ServeSignaling(w http.ResponseWriter, r *http.Request, token s
 			if err := json.Unmarshal(msg.Candidate, &init); err != nil {
 				continue
 			}
-			_ = sess.pc.AddICECandidate(init)
+			if !remoteSet {
+				pendingICE = append(pendingICE, init)
+				continue
+			}
+			if err := sess.pc.AddICECandidate(init); err != nil {
+				log.Printf("[commentator %d] add ice: %v", channelID, err)
+			}
 		case "ptt":
 			m.SetPTT(channelID, msg.Channel)
 		}

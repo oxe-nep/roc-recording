@@ -87,6 +87,8 @@ func (m *Manager) consumeCommentatorWebcam(ctx context.Context, channelID int, t
 	switch mime {
 	case webrtc.MimeTypeH264:
 		m.consumeH264Webcam(ctx, channelID, tr, frames)
+	case webrtc.MimeTypeVP8:
+		m.consumeVP8Webcam(ctx, channelID, tr, frames)
 	default:
 		log.Printf("[commentator %d] unsupported webcam codec %s — black frames only", channelID, mime)
 		m.emitBlackVideo(ctx, frames)
@@ -129,7 +131,7 @@ func (m *Manager) consumeH264Webcam(ctx context.Context, channelID int, tr *webr
 			if sample == nil {
 				break
 			}
-			if _, err := pw.Write(sample.Data); err != nil {
+			if _, err := pw.Write(toAnnexB(sample.Data)); err != nil {
 				_ = pw.Close()
 				wg.Wait()
 				return
@@ -146,6 +148,7 @@ func (m *Manager) runWebcamH264Decoder(ctx context.Context, channelID int, r io.
 	args := []string{
 		"-hide_banner", "-loglevel", "warning",
 		"-probesize", "32", "-analyzeduration", "0",
+		"-fflags", "nobuffer",
 		"-f", "h264", "-i", "pipe:0",
 		"-vf", "scale=1280:720",
 		"-r", "25",
@@ -183,6 +186,109 @@ func (m *Manager) runWebcamH264Decoder(ctx context.Context, channelID int, r io.
 		if _, err := io.ReadFull(stdout, buf); err != nil {
 			if ctx.Err() == nil && err != io.EOF {
 				log.Printf("[commentator %d] webcam decode read: %v", channelID, err)
+			}
+			return
+		}
+		frame := append([]byte(nil), buf...)
+		select {
+		case frames <- frame:
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+func (m *Manager) consumeVP8Webcam(ctx context.Context, channelID int, tr *webrtc.TrackRemote, frames chan<- []byte) {
+	builder := samplebuilder.New(10, &codecs.VP8Packet{}, tr.Codec().ClockRate)
+	decCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	pr, pw := io.Pipe()
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		m.runWebcamVP8Decoder(decCtx, channelID, pr, frames)
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			_ = pw.Close()
+			wg.Wait()
+			return
+		default:
+		}
+		pkt, _, err := tr.ReadRTP()
+		if err != nil {
+			_ = pw.Close()
+			wg.Wait()
+			if err != io.EOF {
+				log.Printf("[commentator %d] webcam rtp: %v", channelID, err)
+			}
+			return
+		}
+		builder.Push(pkt)
+		for {
+			sample := builder.Pop()
+			if sample == nil {
+				break
+			}
+			if _, err := pw.Write(sample.Data); err != nil {
+				_ = pw.Close()
+				wg.Wait()
+				return
+			}
+		}
+	}
+}
+
+func (m *Manager) runWebcamVP8Decoder(ctx context.Context, channelID int, r io.Reader, frames chan<- []byte) {
+	if m.ffmpegBin == "" {
+		m.emitBlackVideo(ctx, frames)
+		return
+	}
+	args := []string{
+		"-hide_banner", "-loglevel", "warning",
+		"-probesize", "32", "-analyzeduration", "0",
+		"-fflags", "nobuffer",
+		"-c:v", "libvpx-vp8", "-i", "pipe:0",
+		"-vf", "scale=1280:720",
+		"-r", "25",
+		"-pix_fmt", "yuv420p",
+		"-f", "rawvideo", "pipe:1",
+	}
+	cmd := exec.CommandContext(ctx, m.ffmpegBin, args...)
+	cmd.Stdin = r
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		log.Printf("[commentator %d] webcam vp8 stdout: %v", channelID, err)
+		m.emitBlackVideo(ctx, frames)
+		return
+	}
+	stderr, _ := cmd.StderrPipe()
+	if err := cmd.Start(); err != nil {
+		log.Printf("[commentator %d] webcam vp8 start: %v", channelID, err)
+		m.emitBlackVideo(ctx, frames)
+		return
+	}
+	go func() {
+		sc := bufio.NewScanner(stderr)
+		for sc.Scan() {
+			log.Printf("[commentator %d] webcam vp8 %s", channelID, sc.Text())
+		}
+	}()
+	buf := make([]byte, inboundFrame)
+	for {
+		select {
+		case <-ctx.Done():
+			_ = cmd.Process.Kill()
+			return
+		default:
+		}
+		if _, err := io.ReadFull(stdout, buf); err != nil {
+			if ctx.Err() == nil && err != io.EOF {
+				log.Printf("[commentator %d] webcam vp8 read: %v", channelID, err)
 			}
 			return
 		}

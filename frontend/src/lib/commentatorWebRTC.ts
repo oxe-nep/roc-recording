@@ -31,6 +31,17 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function preferVideoCodec(transceiver: RTCRtpTransceiver, mimeType: string) {
+  if (typeof RTCRtpSender === "undefined" || !RTCRtpSender.getCapabilities) return;
+  const caps = RTCRtpSender.getCapabilities("video");
+  if (!caps?.codecs?.length) return;
+  const preferred = caps.codecs.filter((c) => c.mimeType.toLowerCase() === mimeType.toLowerCase());
+  const rest = caps.codecs.filter((c) => c.mimeType.toLowerCase() !== mimeType.toLowerCase());
+  if (preferred.length > 0) {
+    transceiver.setCodecPreferences([...preferred, ...rest]);
+  }
+}
+
 export async function fetchCommentatorJoin(token: string): Promise<CommentatorJoinInfo> {
   const base = commentatorOrigin();
   const res = await fetch(`${base}/api/commentator/join/${encodeURIComponent(token)}`);
@@ -90,8 +101,18 @@ export class CommentatorSession {
     }
 
     this.pc = new RTCPeerConnection({ iceServers: join.ice_servers });
-    for (const track of this.localStream.getTracks()) {
-      this.pc.addTrack(track, this.localStream);
+
+    const videoTrack = this.localStream.getVideoTracks()[0];
+    const audioTrack = this.localStream.getAudioTracks()[0];
+    if (videoTrack) {
+      const tx = this.pc.addTransceiver(videoTrack, {
+        direction: "sendonly",
+        streams: [this.localStream],
+      });
+      preferVideoCodec(tx, "video/h264");
+    }
+    if (audioTrack) {
+      this.pc.addTrack(audioTrack, this.localStream);
     }
 
     if (!this.audioCtx) {

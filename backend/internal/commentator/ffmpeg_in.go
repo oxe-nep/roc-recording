@@ -64,10 +64,13 @@ func (m *Manager) runFFmpegInbound(
 	args = append(args,
 		"-map", "[vout]",
 		"-c:v", "libx264",
+		"-profile:v", "baseline",
+		"-level", "3.1",
 		"-preset", "veryfast",
 		"-tune", "zerolatency",
 		"-g", "25",
 		"-bf", "0",
+		"-x264-params", "repeat-headers=1:annexb=1:scenecut=0",
 		"-f", "h264",
 		"pipe:1",
 	)
@@ -237,23 +240,57 @@ func (m *Manager) runSilenceFallback(ctx context.Context, pgm *webrtc.TrackLocal
 }
 
 func (m *Manager) runTestPattern(ctx context.Context, videoTrack *webrtc.TrackLocalStaticSample) {
-	ticker := time.NewTicker(2 * time.Second)
-	defer ticker.Stop()
+	if m.ffmpegBin == "" {
+		return
+	}
+	args := []string{
+		"-hide_banner", "-loglevel", "warning",
+		"-f", "lavfi", "-i", "testsrc=size=1280x720:rate=25",
+		"-pix_fmt", "yuv420p",
+		"-c:v", "libx264",
+		"-preset", "veryfast",
+		"-tune", "zerolatency",
+		"-g", "25",
+		"-bf", "0",
+		"-x264-params", "repeat-headers=1:annexb=1",
+		"-f", "h264", "pipe:1",
+	}
+	cmd := exec.CommandContext(ctx, m.ffmpegBin, args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return
+	}
+	stderr, _ := cmd.StderrPipe()
+	if err := cmd.Start(); err != nil {
+		return
+	}
+	go func() {
+		sc := bufio.NewScanner(stderr)
+		for sc.Scan() {
+			log.Printf("[commentator] testsrc %s", sc.Text())
+		}
+	}()
+	writer := newH264TrackWriter(videoTrack)
+	tmp := make([]byte, 32*1024)
 	for {
 		select {
 		case <-ctx.Done():
+			_ = cmd.Process.Kill()
 			return
-		case <-ticker.C:
-			_ = videoTrack.WriteSample(media.Sample{
-				Data:     []byte{0x00, 0x00, 0x00, 0x01, 0x09, 0xf0},
-				Duration: 2 * time.Second,
-			})
+		default:
+		}
+		n, err := stdout.Read(tmp)
+		if n > 0 {
+			writer.feed(tmp[:n])
+		}
+		if err != nil {
+			return
 		}
 	}
 }
 
 func (m *Manager) pipeH264ToTrack(ctx context.Context, r io.Reader, track *webrtc.TrackLocalStaticSample) {
-	buf := make([]byte, 0, 256*1024)
+	writer := newH264TrackWriter(track)
 	tmp := make([]byte, 32*1024)
 	for {
 		select {
@@ -263,8 +300,7 @@ func (m *Manager) pipeH264ToTrack(ctx context.Context, r io.Reader, track *webrt
 		}
 		n, err := r.Read(tmp)
 		if n > 0 {
-			buf = append(buf, tmp[:n]...)
-			buf = flushH264AnnexB(buf, track)
+			writer.feed(tmp[:n])
 		}
 		if err != nil {
 			if err != io.EOF && ctx.Err() == nil {
@@ -272,22 +308,6 @@ func (m *Manager) pipeH264ToTrack(ctx context.Context, r io.Reader, track *webrt
 			}
 			return
 		}
-	}
-}
-
-func flushH264AnnexB(buf []byte, track *webrtc.TrackLocalStaticSample) []byte {
-	for {
-		start := findAnnexBStart(buf, 0)
-		if start < 0 {
-			return buf
-		}
-		next := findAnnexBStart(buf, start+3)
-		if next < 0 {
-			return buf
-		}
-		nal := append([]byte(nil), buf[start:next]...)
-		_ = track.WriteSample(media.Sample{Data: nal, Duration: 40 * time.Millisecond})
-		buf = buf[next:]
 	}
 }
 

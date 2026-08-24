@@ -44,9 +44,12 @@ export default function CommentatorClient({ token }: Props) {
       });
     };
     session.onRemoteVideo = (stream) => {
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
+      const el = videoRef.current;
+      if (!el) return;
+      el.srcObject = stream;
+      void el.play().catch(() => {
+        /* autoplay policy — muted video should still start */
+      });
     };
   }, []);
 
@@ -139,7 +142,7 @@ export default function CommentatorClient({ token }: Props) {
       <div className="commentator-main">
         <section className="commentator-video-panel">
           <div className="commentator-video-wrap">
-            <video ref={videoRef} className="commentator-program-video" autoPlay playsInline />
+            <video ref={videoRef} className="commentator-program-video" autoPlay playsInline muted />
             {state !== "connected" && (
               <div className="commentator-video-overlay">
                 <span>{STATE_LABELS[state]}</span>

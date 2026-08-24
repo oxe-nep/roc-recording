@@ -142,6 +142,9 @@ func (m *Manager) ServeSignaling(w http.ResponseWriter, r *http.Request, token s
 
 	sess.pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		log.Printf("[commentator %d] pc state: %s", channelID, state.String())
+		if state == webrtc.PeerConnectionStateConnected {
+			m.startMediaPipelines(sess, channelID)
+		}
 		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
 			_ = conn.Close()
 		}
@@ -179,6 +182,9 @@ func (m *Manager) ServeSignaling(w http.ResponseWriter, r *http.Request, token s
 			}
 			remoteSet = true
 			flushICE()
+			if sess.pc.ConnectionState() == webrtc.PeerConnectionStateConnected {
+				m.startMediaPipelines(sess, channelID)
+			}
 		case "ice":
 			if len(msg.Candidate) == 0 {
 				continue

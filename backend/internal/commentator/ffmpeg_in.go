@@ -137,7 +137,8 @@ func (m *Manager) runFFmpegInbound(
 	}
 	extra := make([]*os.File, len(pipes))
 	for i, p := range pipes {
-		extra[i] = p.reader
+		// FFmpeg writes encoded opus to pipe:N — pass the write end (not the reader).
+		extra[i] = p.writer
 	}
 	cmd.ExtraFiles = extra
 

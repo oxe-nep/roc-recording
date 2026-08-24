@@ -3,26 +3,29 @@ package commentator
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 
 	"github.com/pion/webrtc/v4"
 )
 
 type rtcSession struct {
-	channelID      int
-	token          string
-	pc             *webrtc.PeerConnection
-	ctx            context.Context
-	cancel         context.CancelFunc
-	router         *AudioRouter
-	videoFrames    chan []byte
-	videoTrack     *webrtc.TrackLocalStaticSample
-	pgmTrack       *webrtc.TrackLocalStaticSample
-	intercomTracks []*webrtc.TrackLocalStaticSample
+	channelID       int
+	token           string
+	pc              *webrtc.PeerConnection
+	ctx             context.Context
+	cancel          context.CancelFunc
+	router          *AudioRouter
+	videoFrames     chan []byte
+	videoTrack      *webrtc.TrackLocalStaticSample
+	pgmTrack        *webrtc.TrackLocalStaticSample
+	intercomTracks  []*webrtc.TrackLocalStaticSample
 	enabledIntercom []IntercomSlot
-	stopOnce       sync.Once
-	negotiated     bool
-	negotiateMu    sync.Mutex
+	silenceCancel   context.CancelFunc
+	stopOnce        sync.Once
+	negotiated      bool
+	mediaStarted    sync.Once
+	negotiateMu     sync.Mutex
 }
 
 func (m *Manager) newPeerConnection() (*webrtc.PeerConnection, error) {
@@ -139,12 +142,19 @@ func (m *Manager) negotiateAnswer(sess *rtcSession, channelID int, answerSDP str
 	}
 
 	silenceCtx, silenceCancel := context.WithCancel(sess.ctx)
+	sess.silenceCancel = silenceCancel
 	go m.runSilenceFallback(silenceCtx, sess.pgmTrack, sess.intercomTracks)
-	go m.runFFmpegInbound(sess.ctx, channelID, sess.videoTrack, sess.pgmTrack, sess.enabledIntercom, sess.intercomTracks, silenceCancel)
-	go m.runFFmpegOutbound(sess.ctx, channelID, sess.router, sess.videoFrames)
 
 	sess.negotiated = true
 	return nil
+}
+
+func (m *Manager) startMediaPipelines(sess *rtcSession, channelID int) {
+	sess.mediaStarted.Do(func() {
+		log.Printf("[commentator %d] WebRTC connected — starting DeckLink/ffmpeg pipelines", channelID)
+		go m.runFFmpegInbound(sess.ctx, channelID, sess.videoTrack, sess.pgmTrack, sess.enabledIntercom, sess.intercomTracks, sess.silenceCancel)
+		go m.runFFmpegOutbound(sess.ctx, channelID, sess.router, sess.videoFrames)
+	})
 }
 
 func (m *Manager) addCommentatorOutgoingTracks(

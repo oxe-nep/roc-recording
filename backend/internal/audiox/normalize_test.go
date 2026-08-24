@@ -50,6 +50,15 @@ func TestParseAudioStreams8chAndStereo(t *testing.T) {
 	}
 }
 
+func TestLinkPadNoCommaAfterLabel(t *testing.T) {
+	if g := LinkPad("[a8]", "asplit=2[aprevsrc][ameter];"); g != "[a8]asplit=2[aprevsrc][ameter];" {
+		t.Fatalf("got %q", g)
+	}
+	if g := LinkPad("[a8]", ",aresample=48000[a]"); g != "[a8]aresample=48000[a]" {
+		t.Fatalf("got %q", g)
+	}
+}
+
 func TestFileTo8SingleStereo(t *testing.T) {
 	g, pad := FileTo8(0, []int{2})
 	if pad != "[a8]" {

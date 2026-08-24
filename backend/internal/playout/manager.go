@@ -1237,10 +1237,10 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 				w, h, w, h, fps,
 			)
 		}
-		filter := vdl + ";" + fileAudioTo8 + ";" + fmt.Sprintf(
-			"%s,aresample=48000:async=1:first_pts=0,asetnsamples=n=%d:p=0[a]",
-			audioSrc, samplesPerFrame,
-		)
+		filter := vdl + ";" + fileAudioTo8 + ";" + audiox.LinkPad(audioSrc, fmt.Sprintf(
+			"aresample=48000:async=1:first_pts=0,asetnsamples=n=%d:p=0[a]",
+			samplesPerFrame,
+		))
 		dlArgs := append([]string{}, args...)
 		dlArgs = append(dlArgs,
 			"-filter_complex", filter,
@@ -1279,7 +1279,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		prevFilter :=
 			"[0:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,fps=10,format=yuv420p[vprev];" +
 				prevTo8 + ";" +
-				fmt.Sprintf("%s,asplit=2[aprevsrc][ameter];", prevPad) +
+				audiox.LinkPad(prevPad, "asplit=2[aprevsrc][ameter];") +
 				audiox.PreviewPairGraph("[aprevsrc]") +
 				"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
 				"ametadata=print,anullsink"
@@ -1298,10 +1298,10 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			audioSrc, audiox.Discrete8Pan, samplesPerFrame,
 		)
 		if fileAudioTo8 != "" {
-			aChain = fileAudioTo8 + ";" + fmt.Sprintf(
-				"%s,aresample=48000:async=1:first_pts=0,asetnsamples=n=%d:p=0,asplit=3[aout][aprevsrc][ameter];",
-				audioSrc, samplesPerFrame,
-			)
+			aChain = fileAudioTo8 + ";" + audiox.LinkPad(audioSrc, fmt.Sprintf(
+				"aresample=48000:async=1:first_pts=0,asetnsamples=n=%d:p=0,asplit=3[aout][aprevsrc][ameter];",
+				samplesPerFrame,
+			))
 		}
 		filter = vchain + ";" +
 			"[vt]scale=640:360,fps=10,format=yuv420p[vprev];" +
@@ -1335,7 +1335,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	} else {
 		aChain := fmt.Sprintf("%s%s,asplit=2[aprevsrc][ameter];", audioSrc, audiox.Discrete8Pan)
 		if fileAudioTo8 != "" {
-			aChain = fileAudioTo8 + ";" + fmt.Sprintf("%s,asplit=2[aprevsrc][ameter];", audioSrc)
+			aChain = fileAudioTo8 + ";" + audiox.LinkPad(audioSrc, "asplit=2[aprevsrc][ameter];")
 		}
 		filter =
 			"[0:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,fps=10,format=yuv420p[vprev];" +

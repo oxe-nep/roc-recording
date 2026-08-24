@@ -28,15 +28,29 @@ func PanTo8(n int) string {
 	return "pan=8c|" + strings.Join(parts, "|")
 }
 
+// LinkPad attaches filters to a labeled pad. FFmpeg wants [a8]aresample=… not [a8],aresample=….
+func LinkPad(pad, chain string) string {
+	return pad + strings.TrimPrefix(chain, ",")
+}
+
 // ParseAudioStreams returns channel counts per audio stream from FFmpeg -i banner text.
 func ParseAudioStreams(banner string) []int {
 	var out []int
 	for _, line := range strings.Split(banner, "\n") {
+		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
 		m := reAudioStream.FindStringSubmatch(line)
 		if m == nil {
 			continue
 		}
 		out = append(out, channelsFromDesc(m[1]))
+	}
+	if len(out) == 0 {
+		for _, line := range strings.Split(banner, "\n") {
+			l := strings.ToLower(line)
+			if strings.Contains(l, "stream #") && strings.Contains(l, "audio:") {
+				out = append(out, channelsFromDesc(line))
+			}
+		}
 	}
 	return out
 }

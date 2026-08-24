@@ -129,6 +129,9 @@ func channelsFromDesc(desc string) int {
 
 // FileTo8 builds a filter that flattens one or more audio streams into [a8] (8 discrete channels).
 // fileIdx is the FFmpeg input index (0 = media file).
+//
+// Multi-stream (e.g. 4×AAC stereo) must not use amerge+pan=8c — FFmpeg fails with
+// "Error reinitializing filters". join with an explicit 7.1 layout is reliable.
 func FileTo8(fileIdx int, chs []int) (filter, outPad string) {
 	outPad = "[a8]"
 	if len(chs) == 0 {
@@ -162,12 +165,17 @@ func FileTo8(fileIdx int, chs []int) (filter, outPad string) {
 		}
 		in := fmt.Sprintf("[%d:a:%d]", fileIdx, si)
 		name := fmt.Sprintf("s%d", si)
-		rs := "aresample=48000:async=1:first_pts=0"
-		if take < ch {
-			parts = append(parts, fmt.Sprintf("%s%s,%s[%s]", in, rs, panCopy(take), name))
+		layout := "mono"
+		if take >= 2 {
+			layout = "stereo"
+			take = 2
 		} else {
-			parts = append(parts, fmt.Sprintf("%s%s[%s]", in, rs, name))
+			take = 1
 		}
+		parts = append(parts, fmt.Sprintf(
+			"%saresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=%s[%s]",
+			in, layout, name,
+		))
 		pads = append(pads, "["+name+"]")
 		filled += take
 	}
@@ -176,20 +184,6 @@ func FileTo8(fileIdx int, chs []int) (filter, outPad string) {
 		src := fmt.Sprintf("[%d:a]", fileIdx)
 		return src + "aresample=48000:async=1:first_pts=0," + PanTo8(2) + outPad, outPad
 	}
-	merged := strings.Join(pads, "") + fmt.Sprintf("amerge=inputs=%d", n)
-	return strings.Join(parts, ";") + ";" + merged + "," + PanTo8(min(filled, Channels)) + outPad, outPad
-}
-
-func panCopy(n int) string {
-	if n > Channels {
-		n = Channels
-	}
-	if n < 1 {
-		n = 1
-	}
-	parts := make([]string, n)
-	for i := 0; i < n; i++ {
-		parts[i] = fmt.Sprintf("c%d=c%d", i, i)
-	}
-	return fmt.Sprintf("pan=%dc|%s", n, strings.Join(parts, "|"))
+	joined := strings.Join(pads, "") + fmt.Sprintf("join=inputs=%d:channel_layout=7.1", n) + outPad
+	return strings.Join(parts, ";") + ";" + joined, outPad
 }

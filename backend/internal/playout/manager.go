@@ -1246,6 +1246,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			"aresample=48000:async=1:first_pts=0,asetnsamples=n=%d:p=0[a]",
 			samplesPerFrame,
 		))
+		c.appendLog("file audio graph: " + fileAudioTo8)
 		dlArgs := append([]string{}, args...)
 		dlArgs = append(dlArgs,
 			"-filter_complex", filter,

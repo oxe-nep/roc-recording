@@ -57,16 +57,12 @@ function preferSendCodec(transceiver: RTCRtpTransceiver, mimeType: string) {
   const want = mimeType.toLowerCase();
   const preferred = caps.codecs.filter((c) => c.mimeType.toLowerCase() === want);
   if (preferred.length === 0) return;
-  // Keep RTX for the chosen codec; drop VP8/VP9 so the answer cannot fall back.
-  const rtx = caps.codecs.filter((c) => c.mimeType.toLowerCase() === "video/rtx");
+  // Keep VP8/others as fallback — H264-only breaks some browsers / encoders.
+  const rest = caps.codecs.filter((c) => c.mimeType.toLowerCase() !== want);
   try {
-    transceiver.setCodecPreferences([...preferred, ...rtx]);
+    transceiver.setCodecPreferences([...preferred, ...rest]);
   } catch {
-    try {
-      transceiver.setCodecPreferences(preferred);
-    } catch {
-      /* ignore */
-    }
+    /* ignore */
   }
 }
 

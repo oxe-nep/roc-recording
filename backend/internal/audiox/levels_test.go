@@ -18,3 +18,10 @@ func TestPairSplitGraphUniqueLabels(t *testing.T) {
 		t.Fatal("encode and preview graphs must not share pad names")
 	}
 }
+
+func TestStereoTo8Pad(t *testing.T) {
+	g := StereoTo8Pad("[ap2]")
+	if g != "[ap2]pan=8c|c0=c0|c1=c1[a8]" {
+		t.Fatalf("got %q", g)
+	}
+}

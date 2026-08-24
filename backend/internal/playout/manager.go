@@ -1197,9 +1197,10 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		"-analyzeduration", "2M",
 		"-probesize", "2M",
 	}
-	audioSrc := "[0:a]"
+	// Playout DeckLink is stereo only (first AAC pair). Joining 4×AAC in the same
+	// graph stalls video against DeckLink preroll; encode/TC keep full 8ch.
+	audioSrc := "[0:a:0]"
 	silenceInput := false
-	fileAudioTo8 := ""
 	if source == SourceFile {
 		// Software decode: NVDEC + -stream_loop stalls HEVC at each wrap.
 		args = append(args, "-stream_loop", "-1")
@@ -1208,22 +1209,24 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		if len(chs) == 0 {
 			args = append(args,
 				"-f", "lavfi",
-				"-i", "anullsrc=channel_layout=7.1:sample_rate=48000",
+				"-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
 			)
 			silenceInput = true
-			fileAudioTo8, audioSrc = audiox.FileTo8(1, []int{audiox.Channels})
-			c.appendLog("file has no audio – using silent 8ch")
+			audioSrc = "[1:a]"
+			c.appendLog("file has no audio – using silent stereo")
 			if dump != "" {
 				c.appendLog("audio probe: " + dump)
 			}
 		} else {
-			fileAudioTo8, audioSrc = audiox.FileTo8(0, chs)
-			c.appendLog(fmt.Sprintf("file audio: %d stream(s) %v → 8ch", len(chs), chs))
+			c.appendLog(fmt.Sprintf("file audio: %d stream(s) %v → playout stereo (pair 1–2)", len(chs), chs))
 		}
 	} else {
 		// SRT arrives as MPEG-TS; CUDA hwaccel here often fails and kills preview + DeckLink.
 		args = append(args, "-f", "mpegts", "-i", srtURL)
 	}
+
+	stereoPrep := audioSrc + "aresample=48000:async=1:first_pts=0,aformat=channel_layouts=stereo"
+	stereoPrepReset := audioSrc + "asetpts=PTS-STARTPTS,aresample=48000:async=1,aformat=channel_layouts=stereo"
 
 	// File → DeckLink: keep a single DeckLink output (proven path). Preview runs separately
 	// so image2/HLS cannot stall the DeckLink consumer after preroll.
@@ -1241,11 +1244,8 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 				w, h, w, h, fps,
 			)
 		}
-		filter := vdl + ";" + fileAudioTo8 + ";" + audiox.LinkPad(audioSrc, fmt.Sprintf(
-			"asetpts=PTS-STARTPTS,aresample=48000:async=1,asetnsamples=n=%d:p=0[a]",
-			samplesPerFrame,
-		))
-		c.appendLog("file audio graph: " + fileAudioTo8)
+		filter := vdl + ";" + stereoPrepReset + fmt.Sprintf(",asetnsamples=n=%d:p=0[a]", samplesPerFrame)
+		c.appendLog("file audio graph: playout stereo (first pair only)")
 		dlArgs := append([]string{}, args...)
 		dlArgs = append(dlArgs,
 			"-filter_complex", filter,
@@ -1254,7 +1254,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			"-c:v", "v210",
 			"-c:a", "pcm_s16le",
 			"-ar", "48000",
-			"-ac", "8",
+			"-ac", "2",
 			"-fps_mode", "cfr",
 			"-r", fmt.Sprintf("%g", fps),
 			"-s", fmt.Sprintf("%dx%d", w, h),
@@ -1265,7 +1265,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		if formatCode != "" && !isAllDigits(formatCode) {
 			dlArgs = append(dlArgs, "-format_code", strings.TrimSpace(formatCode))
 		}
-		dlArgs = append(dlArgs, "-preroll", "1", "-f", "decklink", openDevice)
+		dlArgs = append(dlArgs, "-preroll", "0.5", "-f", "decklink", openDevice)
 
 		previewArgs := []string{
 			"-hide_banner", "-loglevel", "info",
@@ -1277,16 +1277,16 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			"-stream_loop", "-1",
 		}
 		previewArgs = append(previewArgs, "-i", filePath)
-		prevTo8, prevPad := fileAudioTo8, audioSrc
+		prevAudio := "[0:a:0]"
 		if silenceInput {
-			previewArgs = append(previewArgs, "-f", "lavfi", "-i", "anullsrc=channel_layout=7.1:sample_rate=48000")
-			prevTo8, prevPad = audiox.FileTo8(1, []int{audiox.Channels})
+			previewArgs = append(previewArgs, "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000")
+			prevAudio = "[1:a]"
 		}
 		prevFilter :=
 			"[0:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,fps=10,format=yuv420p[vprev];" +
-				prevTo8 + ";" +
-				audiox.LinkPad(prevPad, "asplit=2[aprevsrc][ameter];") +
-				audiox.PreviewPairGraph("[aprevsrc]") +
+				prevAudio + "aresample=48000:async=1,aformat=channel_layouts=stereo,asplit=2[ap2][ameter];" +
+				audiox.StereoTo8Pad("[ap2]") + ";" +
+				audiox.PreviewPairGraph("[a8]") +
 				"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
 				"ametadata=print,anullsink"
 		previewArgs = append(previewArgs,
@@ -1299,22 +1299,17 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 
 	var filter string
 	if useDeckLink {
-		aChain := fmt.Sprintf(
-			"%s%s,aresample=48000:async=1:first_pts=0,asetnsamples=n=%d:p=0,asplit=3[aout][aprevsrc][ameter];",
-			audioSrc, audiox.Discrete8Pan, samplesPerFrame,
-		)
-		if fileAudioTo8 != "" {
-			aChain = fileAudioTo8 + ";" + audiox.LinkPad(audioSrc, fmt.Sprintf(
-				"aresample=48000:async=1:first_pts=0,asetnsamples=n=%d:p=0,asplit=3[aout][aprevsrc][ameter];",
-				samplesPerFrame,
-			))
-		}
-		filter = vchain + ";" +
-			"[vt]scale=640:360,fps=10,format=yuv420p[vprev];" +
-			aChain +
-			audiox.PreviewPairGraph("[aprevsrc]") +
+		aChain := stereoPrep + fmt.Sprintf(
+			",asetnsamples=n=%d:p=0,asplit=3[aout][ap2][ameter];",
+			samplesPerFrame,
+		) +
+			audiox.StereoTo8Pad("[ap2]") + ";" +
+			audiox.PreviewPairGraph("[a8]") +
 			"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
 			"ametadata=print,anullsink"
+		filter = vchain + ";" +
+			"[vt]scale=640:360,fps=10,format=yuv420p[vprev];" +
+			aChain
 		args = append(args,
 			"-filter_complex", filter,
 			"-map", "[vdl]",
@@ -1322,7 +1317,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			"-c:v", "v210",
 			"-c:a", "pcm_s16le",
 			"-ar", "48000",
-			"-ac", "8",
+			"-ac", "2",
 			"-fps_mode", "cfr",
 			"-r", fmt.Sprintf("%g", fps),
 			"-s", fmt.Sprintf("%dx%d", w, h),
@@ -1339,16 +1334,14 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		)
 		args = hlsout.AppendAVPreviewOutputs(args, "[vprev]", previewPlaylist, previewSeg)
 	} else {
-		aChain := fmt.Sprintf("%s%s,asplit=2[aprevsrc][ameter];", audioSrc, audiox.Discrete8Pan)
-		if fileAudioTo8 != "" {
-			aChain = fileAudioTo8 + ";" + audiox.LinkPad(audioSrc, "asplit=2[aprevsrc][ameter];")
-		}
+		aChain := stereoPrep + ",asplit=2[ap2][ameter];" +
+			audiox.StereoTo8Pad("[ap2]") + ";" +
+			audiox.PreviewPairGraph("[a8]") +
+			"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
+			"ametadata=print,anullsink"
 		filter =
 			"[0:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,fps=10,format=yuv420p[vprev];" +
-				aChain +
-				audiox.PreviewPairGraph("[aprevsrc]") +
-				"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
-				"ametadata=print,anullsink"
+				aChain
 		args = append(args,
 			"-filter_complex", filter,
 		)

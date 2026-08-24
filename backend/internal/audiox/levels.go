@@ -10,6 +10,15 @@ const (
 // Discrete8Pan maps input channels 1–8 1:1 (missing inputs become silent).
 const Discrete8Pan = "pan=8c|c0=c0|c1=c1|c2=c2|c3=c3|c4=c4|c5=c5|c6=c6|c7=c7"
 
+// StereoPan keeps only the first two channels as a stereo pair.
+const StereoPan = "pan=stereo|c0=c0|c1=c1"
+
+// StereoTo8Pad expands stereo into 8 discrete channels (L/R in 1–2, rest silent)
+// so preview meters / listen HLS can keep the 4-pair layout.
+func StereoTo8Pad(srcPad string) string {
+	return LinkPad(srcPad, "pan=8c|c0=c0|c1=c1[a8]")
+}
+
 func NormalizeCount(n int) int {
 	if n == Channels {
 		return Channels

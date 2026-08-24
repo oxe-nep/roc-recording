@@ -11,6 +11,7 @@ export type CommentatorConnectionState =
   | "idle"
   | "joining"
   | "connecting"
+  | "negotiating"
   | "connected"
   | "reconnecting"
   | "failed";
@@ -64,6 +65,7 @@ export class CommentatorSession {
   private reconnectAttempts = 0;
   private readonly maxReconnects = 3;
   private iceServers: RTCIceServer[] = [];
+  private iceTimer: ReturnType<typeof setTimeout> | null = null;
 
   onState?: (state: CommentatorConnectionState) => void;
   onError?: (message: string) => void;
@@ -146,18 +148,62 @@ export class CommentatorSession {
     });
   }
 
+  private markConnected() {
+    if (this.iceTimer) {
+      clearTimeout(this.iceTimer);
+      this.iceTimer = null;
+    }
+    this.reconnectAttempts = 0;
+    this.onState?.("connected");
+  }
+
+  private startIceTimeout() {
+    if (this.iceTimer) clearTimeout(this.iceTimer);
+    this.iceTimer = setTimeout(() => {
+      if (this.stopped || this.pc?.connectionState === "connected") return;
+      const ice = this.pc?.iceConnectionState;
+      if (ice === "connected" || ice === "completed") return;
+      this.onError?.(
+        "Media connection timed out (ICE). On the capture host set WEBRTC_PUBLIC_HOST to a reachable IP/hostname and configure TURN for remote commentators."
+      );
+      this.onState?.("failed");
+    }, 25000);
+  }
+
+  private bindPeerConnectionHandlers() {
+    if (!this.pc) return;
+    this.pc.oniceconnectionstatechange = () => {
+      const ice = this.pc?.iceConnectionState;
+      if (ice === "connected" || ice === "completed") {
+        this.markConnected();
+      } else if (ice === "failed") {
+        void this.scheduleReconnect();
+      }
+    };
+    this.pc.onconnectionstatechange = () => {
+      const state = this.pc?.connectionState;
+      if (state === "connected") {
+        this.markConnected();
+      } else if (state === "failed") {
+        void this.scheduleReconnect();
+      }
+    };
+  }
+
   private async handleOffer(sdp: string) {
     if (this.answering || this.stopped) return;
     this.answering = true;
+    this.onState?.("negotiating");
     try {
+      this.pc = new RTCPeerConnection({ iceServers: this.iceServers });
+      this.bindPeerConnectionHandlers();
+
       if (!this.localStream) {
         this.localStream = await navigator.mediaDevices.getUserMedia({
           audio: { echoCancellation: true, noiseSuppression: true },
           video: { width: { ideal: 1280 }, height: { ideal: 720 } },
         });
       }
-
-      this.pc = new RTCPeerConnection({ iceServers: this.iceServers });
 
       if (!this.audioCtx) {
         this.audioCtx = new AudioContext();
@@ -182,15 +228,6 @@ export class CommentatorSession {
         src.connect(gain).connect(this.audioCtx!.destination);
         this.gainNodes.set(id, gain);
       };
-      this.pc.onconnectionstatechange = () => {
-        const state = this.pc?.connectionState;
-        if (state === "connected") {
-          this.reconnectAttempts = 0;
-          this.onState?.("connected");
-        } else if (state === "failed") {
-          void this.scheduleReconnect();
-        }
-      };
 
       await this.pc.setRemoteDescription({ type: "offer", sdp });
       this.remoteDescSet = true;
@@ -213,6 +250,8 @@ export class CommentatorSession {
       const answer = await this.pc.createAnswer();
       await this.pc.setLocalDescription(answer);
       this.send({ type: "answer", sdp: answer.sdp });
+      this.onState?.("connecting");
+      this.startIceTimeout();
 
       for (const c of this.pendingRemoteICE) {
         await this.pc.addIceCandidate(c);
@@ -238,8 +277,8 @@ export class CommentatorSession {
         this.onState?.("failed");
         return;
       case "ice":
-        if (!this.pc || !msg.candidate) return;
-        if (!this.remoteDescSet) {
+        if (!msg.candidate) return;
+        if (!this.pc || !this.remoteDescSet) {
           this.pendingRemoteICE.push(msg.candidate);
           return;
         }
@@ -272,6 +311,10 @@ export class CommentatorSession {
 
   stop() {
     this.stopped = true;
+    if (this.iceTimer) {
+      clearTimeout(this.iceTimer);
+      this.iceTimer = null;
+    }
     this.send({ type: "ptt", channel: 0 });
     this.ws?.close();
     this.pc?.close();

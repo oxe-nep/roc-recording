@@ -14,7 +14,8 @@ type Props = {
 const STATE_LABELS: Record<CommentatorConnectionState, string> = {
   idle: "Idle",
   joining: "Joining…",
-  connecting: "Connecting…",
+  connecting: "Connecting media…",
+  negotiating: "Setting up…",
   connected: "Connected",
   reconnecting: "Reconnecting…",
   failed: "Failed",

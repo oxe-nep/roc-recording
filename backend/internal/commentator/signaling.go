@@ -110,8 +110,6 @@ func (m *Manager) ServeSignaling(w http.ResponseWriter, r *http.Request, token s
 		return
 	}
 	defer m.endRTCSession(channelID, sess)
-
-	m.SetConnected(channelID, true)
 	defer m.SetConnected(channelID, false)
 
 	settings := m.GetSettings(channelID)
@@ -142,11 +140,15 @@ func (m *Manager) ServeSignaling(w http.ResponseWriter, r *http.Request, token s
 
 	sess.pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		log.Printf("[commentator %d] pc state: %s", channelID, state.String())
-		if state == webrtc.PeerConnectionStateConnected {
+		switch state {
+		case webrtc.PeerConnectionStateConnected:
+			m.SetConnected(channelID, true)
 			m.startMediaPipelines(sess, channelID)
-		}
-		if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
+		case webrtc.PeerConnectionStateFailed, webrtc.PeerConnectionStateClosed:
+			m.SetConnected(channelID, false)
 			_ = conn.Close()
+		case webrtc.PeerConnectionStateDisconnected:
+			m.SetConnected(channelID, false)
 		}
 	})
 

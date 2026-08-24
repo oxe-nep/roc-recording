@@ -21,7 +21,7 @@ export function commentatorNumClass(info?: CommentatorInfo): string {
 export function commentatorStatusLabel(info?: CommentatorInfo): string {
   if (!info || !info.enabled) return "Off";
   if (info.connected) return "Connected";
-  if (info.session_active) return "Waiting";
+  if (info.session_active) return "Signaling";
   return "Ready";
 }
 
@@ -39,7 +39,7 @@ export function commentatorCardMeta(info?: CommentatorInfo): string {
   if (info.output_format) parts.push(info.output_format);
   if (intercomCount > 0) parts.push(`${intercomCount} intercom`);
   if (info.connected) parts.push("Live");
-  else if (info.session_active) parts.push("Invite active");
+  else if (info.session_active) parts.push("Signaling");
   else parts.push("No invite");
   return parts.join(" · ");
 }

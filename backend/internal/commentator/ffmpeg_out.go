@@ -149,6 +149,7 @@ func (m *Manager) feedOutboundVideo(ctx context.Context, w *os.File, frames <-ch
 	ticker := time.NewTicker(time.Duration(float64(time.Second) / inboundVideoFPS))
 	defer ticker.Stop()
 	var latest []byte
+	var loggedWait, loggedLive bool
 	for {
 		select {
 		case <-ctx.Done():
@@ -156,11 +157,18 @@ func (m *Manager) feedOutboundVideo(ctx context.Context, w *os.File, frames <-ch
 		case frame, ok := <-frames:
 			if ok && len(frame) == inboundFrame {
 				latest = frame
+				if !loggedLive {
+					loggedLive = true
+					log.Printf("[commentator] DeckLink OUT receiving decoded webcam frames")
+				}
 			}
 		case <-ticker.C:
 			frame := black
 			if len(latest) == inboundFrame {
 				frame = latest
+			} else if !loggedWait {
+				loggedWait = true
+				log.Printf("[commentator] DeckLink OUT waiting for webcam frames (sending black)")
 			}
 			if _, err := w.Write(frame); err != nil {
 				return

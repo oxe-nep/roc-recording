@@ -102,7 +102,7 @@ func (m *Manager) startRTCSession(channelID int, token string) (*rtcSession, err
 			go m.consumeCommentatorMic(ctx, channelID, tr, router)
 		}
 		if tr.Kind() == webrtc.RTPCodecTypeVideo {
-			go m.consumeCommentatorWebcam(ctx, channelID, tr, videoFrames)
+			go m.consumeCommentatorWebcam(ctx, channelID, tr, pc, videoFrames)
 		}
 	})
 

@@ -32,6 +32,21 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function preferSendCodec(transceiver: RTCRtpTransceiver, mimeType: string) {
+  if (typeof RTCRtpSender === "undefined" || !RTCRtpSender.getCapabilities) return;
+  const caps = RTCRtpSender.getCapabilities("video");
+  if (!caps?.codecs?.length) return;
+  const preferred = caps.codecs.filter((c) => c.mimeType.toLowerCase() === mimeType.toLowerCase());
+  const rest = caps.codecs.filter((c) => c.mimeType.toLowerCase() !== mimeType.toLowerCase());
+  if (preferred.length > 0) {
+    try {
+      transceiver.setCodecPreferences([...preferred, ...rest]);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 export async function fetchCommentatorJoin(token: string): Promise<CommentatorJoinInfo> {
   const base = commentatorOrigin();
   const res = await fetch(`${base}/api/commentator/join/${encodeURIComponent(token)}`);
@@ -265,18 +280,16 @@ export class CommentatorSession {
       await this.pc.setRemoteDescription({ type: "offer", sdp });
       this.remoteDescSet = true;
 
-      // Attach webcam/mic to the server's recvonly slots — do NOT addTransceiver
-      // (that creates extra m-lines and the server never receives OnTrack).
+      // addTrack reuses the server's recvonly m-lines (safer than addTransceiver).
       const videoTrack = this.localStream.getVideoTracks()[0];
       const audioTrack = this.localStream.getAudioTracks()[0];
+      if (videoTrack) this.pc.addTrack(videoTrack, this.localStream);
+      if (audioTrack) this.pc.addTrack(audioTrack, this.localStream);
+
+      // Prefer VP8 for webcam — we IVF-mux it for FFmpeg; H264 annex-B is also supported.
       for (const tx of this.pc.getTransceivers()) {
-        if (tx.direction !== "sendonly" && tx.direction !== "sendrecv") continue;
-        const kind = tx.receiver.track?.kind;
-        if (kind === "video" && videoTrack) {
-          await tx.sender.replaceTrack(videoTrack);
-        } else if (kind === "audio" && audioTrack) {
-          await tx.sender.replaceTrack(audioTrack);
-        }
+        if (tx.sender.track?.kind !== "video") continue;
+        preferSendCodec(tx, "video/VP8");
       }
 
       const answer = await this.pc.createAnswer();

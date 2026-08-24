@@ -234,10 +234,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     const session = ++sessionRef.current;
     connect(session);
 
-    return () => {
-      sessionRef.current++;
-      clearRetryTimer();
-      clearConnectTimer();
+    const dropSocket = () => {
       intentionalCloseRef.current = true;
       try {
         wsRef.current?.close();
@@ -245,6 +242,16 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         /* ignore */
       }
       wsRef.current = null;
+    };
+
+    window.addEventListener("pagehide", dropSocket);
+
+    return () => {
+      sessionRef.current++;
+      clearRetryTimer();
+      clearConnectTimer();
+      window.removeEventListener("pagehide", dropSocket);
+      dropSocket();
     };
   }, [connect, clearRetryTimer, clearConnectTimer]);
 

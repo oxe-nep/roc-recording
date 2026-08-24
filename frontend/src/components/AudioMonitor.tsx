@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import Hls from "hls.js";
-
-const BASE = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8080";
+import type Hls from "hls.js";
+import { mediaURL } from "@/lib/mediaBase";
+import { attachHls, stopMedia } from "@/lib/hlsPlayer";
 
 interface AudioMonitorProps {
   id: number;
@@ -22,11 +22,8 @@ export default function AudioMonitor({ id, active, listening, playlistPath }: Au
     if (!audio) return;
 
     const stop = () => {
-      hlsRef.current?.destroy();
+      stopMedia(audio, hlsRef.current);
       hlsRef.current = null;
-      audio.pause();
-      audio.removeAttribute("src");
-      audio.load();
     };
 
     if (!listening || !active) {
@@ -34,20 +31,8 @@ export default function AudioMonitor({ id, active, listening, playlistPath }: Au
       return;
     }
 
-    const src = `${BASE}${playlistPath ?? `/hls/${id}/audio.m3u8`}`;
-
-    if (Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
-      hlsRef.current = hls;
-      hls.loadSource(src);
-      hls.attachMedia(audio);
-      hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        void audio.play().catch(() => {});
-      });
-    } else if (audio.canPlayType("application/vnd.apple.mpegurl")) {
-      audio.src = src;
-      void audio.play().catch(() => {});
-    }
+    const src = mediaURL(playlistPath ?? `/hls/${id}/audio.m3u8`);
+    hlsRef.current = attachHls(audio, src, () => {});
 
     return stop;
   }, [id, active, listening, playlistPath]);

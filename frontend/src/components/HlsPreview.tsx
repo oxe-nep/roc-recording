@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import Hls from "hls.js";
+import type Hls from "hls.js";
 import { mediaURL } from "@/lib/mediaBase";
+import { attachHls, stopMedia } from "@/lib/hlsPlayer";
 
 type Props = {
   active: boolean;
@@ -16,46 +17,6 @@ type Props = {
 
 function listenPlaylist(previewPath: string, pair: number): string {
   return previewPath.replace(/preview\.m3u8$/, `listen_${pair}.m3u8`);
-}
-
-function attachHls(
-  el: HTMLMediaElement,
-  src: string,
-  onFatal: () => void,
-): Hls | null {
-  if (Hls.isSupported()) {
-    const hls = new Hls({
-      enableWorker: true,
-      lowLatencyMode: true,
-      liveSyncDurationCount: 2,
-      liveMaxLatencyDurationCount: 4,
-      maxLiveSyncPlaybackRate: 1.5,
-    });
-    hls.loadSource(src);
-    hls.attachMedia(el);
-    hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      void el.play().catch(() => {});
-    });
-    hls.on(Hls.Events.ERROR, (_ev, data) => {
-      if (!data.fatal) return;
-      hls.destroy();
-      onFatal();
-    });
-    return hls;
-  }
-  if (el.canPlayType("application/vnd.apple.mpegurl")) {
-    el.src = src;
-    void el.play().catch(() => {});
-  }
-  return null;
-}
-
-function stopMedia(el: HTMLMediaElement | null, hls: Hls | null) {
-  hls?.destroy();
-  if (!el) return;
-  el.pause();
-  el.removeAttribute("src");
-  el.load();
 }
 
 /** Low-latency HLS video preview; listen audio is a separate stereo playlist per pair. */

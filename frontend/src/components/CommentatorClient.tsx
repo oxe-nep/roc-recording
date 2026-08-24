@@ -22,6 +22,45 @@ const STATE_LABELS: Record<CommentatorConnectionState, string> = {
   failed: "Failed",
 };
 
+type SavedVolumes = {
+  pgm: number;
+  intercom: Record<string, number>;
+};
+
+function volumesKey(token: string) {
+  return `roc-commentator-volumes:${token}`;
+}
+
+function loadVolumes(token: string): SavedVolumes {
+  try {
+    const raw = localStorage.getItem(volumesKey(token));
+    if (!raw) return { pgm: 1, intercom: {} };
+    const parsed = JSON.parse(raw) as Partial<SavedVolumes>;
+    const pgm = typeof parsed.pgm === "number" ? Math.min(1, Math.max(0, parsed.pgm)) : 1;
+    const intercom: Record<string, number> = {};
+    if (parsed.intercom && typeof parsed.intercom === "object") {
+      for (const [id, v] of Object.entries(parsed.intercom)) {
+        if (typeof v === "number") intercom[id] = Math.min(1, Math.max(0, v));
+      }
+    }
+    return { pgm, intercom };
+  } catch {
+    return { pgm: 1, intercom: {} };
+  }
+}
+
+function saveVolumes(token: string, pgm: number, intercom: Record<number, number>) {
+  try {
+    const payload: SavedVolumes = {
+      pgm,
+      intercom: Object.fromEntries(Object.entries(intercom).map(([k, v]) => [k, v])),
+    };
+    localStorage.setItem(volumesKey(token), JSON.stringify(payload));
+  } catch {
+    /* private mode / quota */
+  }
+}
+
 export default function CommentatorClient({ token }: Props) {
   const sessionRef = useRef<CommentatorSession | null>(null);
   const [state, setState] = useState<CommentatorConnectionState>("idle");
@@ -29,10 +68,23 @@ export default function CommentatorClient({ token }: Props) {
   const [intercom, setIntercom] = useState<CommentatorIntercomSlot[]>([]);
   const [pgmVol, setPgmVol] = useState(1);
   const [intercomVol, setIntercomVol] = useState<Record<number, number>>({});
+  const [volsHydrated, setVolsHydrated] = useState(false);
   const [pttActive, setPttActive] = useState<number | null>(null);
   const [audioLocked, setAudioLocked] = useState(false);
   const [rtcStats, setRtcStats] = useState<CommentatorRTCStats | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    const saved = loadVolumes(token);
+    setPgmVol(saved.pgm);
+    const out: Record<number, number> = {};
+    for (const [id, v] of Object.entries(saved.intercom)) {
+      const n = Number(id);
+      if (Number.isFinite(n)) out[n] = v;
+    }
+    setIntercomVol(out);
+    setVolsHydrated(true);
+  }, [token]);
 
   const bindSession = useCallback((session: CommentatorSession) => {
     session.onState = setState;
@@ -98,6 +150,11 @@ export default function CommentatorClient({ token }: Props) {
       session.setIntercomVolume(Number(id), vol);
     }
   }, [intercomVol]);
+
+  useEffect(() => {
+    if (!volsHydrated) return;
+    saveVolumes(token, pgmVol, intercomVol);
+  }, [token, pgmVol, intercomVol, volsHydrated]);
 
   const bindPTT = (channelId: number) => ({
     onPointerDown: (e: React.PointerEvent) => {

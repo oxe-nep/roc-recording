@@ -54,11 +54,16 @@ function preferSendCodec(transceiver: RTCRtpTransceiver, mimeType: string) {
   if (typeof RTCRtpSender === "undefined" || !RTCRtpSender.getCapabilities) return;
   const caps = RTCRtpSender.getCapabilities("video");
   if (!caps?.codecs?.length) return;
-  const preferred = caps.codecs.filter((c) => c.mimeType.toLowerCase() === mimeType.toLowerCase());
-  const rest = caps.codecs.filter((c) => c.mimeType.toLowerCase() !== mimeType.toLowerCase());
-  if (preferred.length > 0) {
+  const want = mimeType.toLowerCase();
+  const preferred = caps.codecs.filter((c) => c.mimeType.toLowerCase() === want);
+  if (preferred.length === 0) return;
+  // Keep RTX for the chosen codec; drop VP8/VP9 so the answer cannot fall back.
+  const rtx = caps.codecs.filter((c) => c.mimeType.toLowerCase() === "video/rtx");
+  try {
+    transceiver.setCodecPreferences([...preferred, ...rtx]);
+  } catch {
     try {
-      transceiver.setCodecPreferences([...preferred, ...rest]);
+      transceiver.setCodecPreferences(preferred);
     } catch {
       /* ignore */
     }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 
 	"github.com/pion/webrtc/v4"
@@ -40,6 +41,38 @@ func (m *Manager) newPeerConnection() (*webrtc.PeerConnection, error) {
 	}
 	api := webrtc.NewAPI(opts...)
 	return api.NewPeerConnection(m.ice.PeerConfiguration())
+}
+
+// preferH264Recv constrains the recvonly webcam m-line to H264.
+// RegisterDefaultCodecs lists VP8 first; without this Chrome answers VP8.
+func preferH264Recv(tr *webrtc.RTPTransceiver) {
+	if tr == nil || tr.Receiver() == nil {
+		return
+	}
+	codecs := tr.Receiver().GetParameters().Codecs
+	var prefs []webrtc.RTPCodecParameters
+	for _, c := range codecs {
+		if strings.Contains(strings.ToLower(c.MimeType), "h264") {
+			prefs = append(prefs, c)
+		}
+	}
+	for _, c := range codecs {
+		if strings.EqualFold(c.MimeType, webrtc.MimeTypeRTX) {
+			prefs = append(prefs, c)
+		}
+	}
+	if len(prefs) == 0 {
+		// Receiver params can be empty pre-negotiate — MimeType-only still fuzzy-matches MediaEngine.
+		prefs = []webrtc.RTPCodecParameters{{
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				MimeType:  webrtc.MimeTypeH264,
+				ClockRate: 90000,
+			},
+		}}
+	}
+	if err := tr.SetCodecPreferences(prefs); err != nil {
+		log.Printf("[commentator] SetCodecPreferences(H264 webcam): %v", err)
+	}
 }
 
 func (m *Manager) startRTCSession(channelID int, token string) (*rtcSession, error) {
@@ -80,14 +113,16 @@ func (m *Manager) startRTCSession(channelID int, token string) (*rtcSession, err
 	sess.enabledIntercom = enabled
 
 	// Receive webcam + mic from the commentator browser (server is SDP offerer).
-	if _, err := pc.AddTransceiverFromKind(
+	webcamTr, err := pc.AddTransceiverFromKind(
 		webrtc.RTPCodecTypeVideo,
 		webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly},
-	); err != nil {
+	)
+	if err != nil {
 		_ = pc.Close()
 		cancel()
 		return nil, err
 	}
+	preferH264Recv(webcamTr)
 	if _, err := pc.AddTransceiverFromKind(
 		webrtc.RTPCodecTypeAudio,
 		webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly},

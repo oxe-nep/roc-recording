@@ -136,7 +136,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	client := &Client{
 		hub:  h,
 		conn: conn,
-		send: make(chan []byte, 4),
+		send: make(chan []byte, 16),
 	}
 	h.register <- client
 	go client.writePump()

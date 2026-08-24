@@ -74,7 +74,7 @@ function cardMeta(c: PlayoutClient): string {
 }
 
 export default function DecodeGrid() {
-  const { loading, playout: clients, metersPlayout: audio } = useDashboard();
+  const { loading, playout: clients } = useDashboard();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Record<number, boolean>>({});
   const [listenPair, setListenPair] = useState<Record<number, number | null>>({});
@@ -139,7 +139,7 @@ export default function DecodeGrid() {
             return (
               <div key={c.id} className={`card-panel ${c.status}`}>
                 <div className="card-stage">
-                  <AudioMeters levels={audio[c.id]}>
+                  <AudioMeters channelId={c.id} bus="playout">
                   <div className="card-thumb">
                     <HlsPreview
                       active={on}

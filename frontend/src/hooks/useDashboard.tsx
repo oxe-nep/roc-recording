@@ -37,8 +37,6 @@ type DashboardState = {
   recordings: Record<number, RecordingInfo>;
   srtById: Record<number, SrtInfo>;
   workflows: Record<number, ChannelWorkflowConfig>;
-  metersEncode: Record<number, AudioLevels>;
-  metersPlayout: Record<number, AudioLevels>;
 };
 
 const EMPTY: DashboardState = {
@@ -50,11 +48,19 @@ const EMPTY: DashboardState = {
   recordings: {},
   srtById: {},
   workflows: {},
-  metersEncode: {},
-  metersPlayout: {},
 };
 
 const DashboardContext = createContext<DashboardState>(EMPTY);
+
+export type MeterBus = "encode" | "playout";
+
+type MetersState = {
+  encode: Record<number, AudioLevels>;
+  playout: Record<number, AudioLevels>;
+};
+
+const EMPTY_METERS: MetersState = { encode: {}, playout: {} };
+const MetersContext = createContext<MetersState>(EMPTY_METERS);
 
 function wsURL(): string {
   const u = new URL("/ws", mediaBase());
@@ -102,13 +108,12 @@ function snapshotToState(msg: DashboardSnapshot, connected: boolean): DashboardS
     recordings: rec,
     srtById: srt,
     workflows: mapWorkflows(msg.workflows),
-    metersEncode: mapMeters(msg.meters_encode),
-    metersPlayout: mapMeters(msg.meters_playout),
   };
 }
 
 export function DashboardProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<DashboardState>(EMPTY);
+  const [meters, setMeters] = useState<MetersState>(EMPTY_METERS);
   const retryRef = useRef(0);
   const wsRef = useRef<WebSocket | null>(null);
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -203,9 +208,21 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       sock.onmessage = (ev) => {
         if (session !== sessionRef.current || wsRef.current !== sock) return;
         try {
-          const msg = JSON.parse(String(ev.data)) as DashboardSnapshot;
+          const msg = JSON.parse(String(ev.data)) as DashboardSnapshot | { type?: string; meters_encode?: Record<string, AudioLevels>; meters_playout?: Record<string, AudioLevels> };
+          if (msg?.type === "meters") {
+            setMeters({
+              encode: mapMeters(msg.meters_encode),
+              playout: mapMeters(msg.meters_playout),
+            });
+            return;
+          }
           if (msg?.type !== "snapshot") return;
-          applySnapshot(msg, true, session);
+          const snap = msg as DashboardSnapshot;
+          applySnapshot(snap, true, session);
+          setMeters({
+            encode: mapMeters(snap.meters_encode),
+            playout: mapMeters(snap.meters_playout),
+          });
         } catch {
           /* ignore bad frames */
         }
@@ -256,9 +273,18 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   }, [connect, clearRetryTimer, clearConnectTimer]);
 
   const value = useMemo(() => state, [state]);
-  return <DashboardContext.Provider value={value}>{children}</DashboardContext.Provider>;
+  return (
+    <DashboardContext.Provider value={value}>
+      <MetersContext.Provider value={meters}>{children}</MetersContext.Provider>
+    </DashboardContext.Provider>
+  );
 }
 
 export function useDashboard(): DashboardState {
   return useContext(DashboardContext);
+}
+
+export function useMeterLevels(id: number, bus: MeterBus): AudioLevels | undefined {
+  const meters = useContext(MetersContext);
+  return bus === "encode" ? meters.encode[id] : meters.playout[id];
 }

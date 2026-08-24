@@ -741,6 +741,12 @@ export async function deletePlayoutMedia(id: string): Promise<void> {
   }
 }
 
+export type DashboardMeters = {
+  type: "meters";
+  meters_encode: Record<string, AudioLevels>;
+  meters_playout: Record<string, AudioLevels>;
+};
+
 export type DashboardSnapshot = {
   type: "snapshot";
   streams: Stream[];

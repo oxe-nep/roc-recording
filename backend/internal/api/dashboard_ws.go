@@ -37,6 +37,12 @@ type dashboardSnapshot struct {
 	MetersPlayout map[string]meterLevels     `json:"meters_playout"`
 }
 
+type metersFrame struct {
+	Type          string                 `json:"type"`
+	MetersEncode  map[string]meterLevels `json:"meters_encode"`
+	MetersPlayout map[string]meterLevels `json:"meters_playout"`
+}
+
 func fromPeaks(ch []float64, ok bool) meterLevels {
 	peaks := audiox.SilencePeaks()
 	if ok {
@@ -90,37 +96,42 @@ func startDashboardWS(
 	})
 	go hub.Run()
 	go func() {
-		t := time.NewTicker(500 * time.Millisecond)
-		defer t.Stop()
-		for range t.C {
-			if hub.ClientCount() == 0 {
-				continue
+		snapTick := time.NewTicker(500 * time.Millisecond)
+		meterTick := time.NewTicker(80 * time.Millisecond)
+		defer snapTick.Stop()
+		defer meterTick.Stop()
+		for {
+			select {
+			case <-snapTick.C:
+				if hub.ClientCount() == 0 {
+					continue
+				}
+				hub.BroadcastJSON(snapshot())
+			case <-meterTick.C:
+				if hub.ClientCount() == 0 {
+					continue
+				}
+				enc, play := collectMeterMaps(mgr, playMgr, tcMgr)
+				hub.BroadcastJSON(metersFrame{
+					Type:          "meters",
+					MetersEncode:  enc,
+					MetersPlayout: play,
+				})
 			}
-			hub.BroadcastJSON(snapshot())
 		}
 	}()
-	log.Printf("[ws] dashboard hub started (immediate snapshot on connect, 500ms updates)")
+	log.Printf("[ws] dashboard hub started (immediate snapshot on connect, 80ms meters, 500ms snapshot)")
 }
 
-func buildDashboardSnapshot(
+func collectMeterMaps(
 	mgr *capture.Manager,
-	recMgr *recording.Manager,
-	srtMgr *srt.Manager,
 	playMgr *playout.Manager,
 	tcMgr *tcloop.Manager,
-	tslMgr *tsl.Manager,
-	wfStore *workflow.Store,
-	hlsBaseURL string,
-) dashboardSnapshot {
+) (metersEnc, metersPlay map[string]meterLevels) {
 	streams := mgr.List()
-	streamResp := make([]streamResponse, 0, len(streams))
-	ids := make([]int, 0, len(streams))
-	metersEnc := make(map[string]meterLevels, len(streams))
-	metersPlay := make(map[string]meterLevels, len(streams))
-
+	metersEnc = make(map[string]meterLevels, len(streams))
+	metersPlay = make(map[string]meterLevels, len(streams))
 	for _, s := range streams {
-		ids = append(ids, s.ID)
-		streamResp = append(streamResp, toResponse(s, hlsBaseURL, tslMgr, tcMgr))
 		key := strconv.Itoa(s.ID)
 		if tcMgr != nil {
 			if ch, ok := tcMgr.AudioLevels(s.ID); ok {
@@ -136,6 +147,28 @@ func buildDashboardSnapshot(
 			pch, pok := playMgr.AudioLevels(s.ID)
 			metersPlay[key] = fromPeaks(pch, pok)
 		}
+	}
+	return metersEnc, metersPlay
+}
+
+func buildDashboardSnapshot(
+	mgr *capture.Manager,
+	recMgr *recording.Manager,
+	srtMgr *srt.Manager,
+	playMgr *playout.Manager,
+	tcMgr *tcloop.Manager,
+	tslMgr *tsl.Manager,
+	wfStore *workflow.Store,
+	hlsBaseURL string,
+) dashboardSnapshot {
+	streams := mgr.List()
+	streamResp := make([]streamResponse, 0, len(streams))
+	ids := make([]int, 0, len(streams))
+	metersEnc, metersPlay := collectMeterMaps(mgr, playMgr, tcMgr)
+
+	for _, s := range streams {
+		ids = append(ids, s.ID)
+		streamResp = append(streamResp, toResponse(s, hlsBaseURL, tslMgr, tcMgr))
 	}
 
 	var playList []playout.ClientInfo

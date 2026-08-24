@@ -14,7 +14,7 @@ import TcSettingsModal from "@/components/TcSettingsModal";
 import type { TcLoopInfo } from "@/lib/api";
 
 export default function TcGrid() {
-  const { loading, streams, tcById, metersPlayout: audio } = useDashboard();
+  const { loading, streams, tcById } = useDashboard();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Record<number, boolean>>({});
   const [listenPair, setListenPair] = useState<Record<number, number | null>>({});
@@ -92,7 +92,7 @@ export default function TcGrid() {
                   className={`card-panel ${s.status}${tcOn ? " tc-active" : ""}${tcLive ? " tc-live" : ""}`}
                 >
                   <div className="card-stage">
-                    <AudioMeters levels={audio[s.id]}>
+                    <AudioMeters channelId={s.id} bus="playout">
                     <div className="card-thumb">
                       <HlsPreview
                         active={tcOn}

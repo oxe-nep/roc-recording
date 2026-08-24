@@ -49,13 +49,7 @@ function formatSchedBadge(sch: RecordingSchedule): string {
 }
 
 export default function StreamGrid() {
-  const {
-    loading,
-    streams,
-    recordings,
-    srtById,
-    metersEncode: audio,
-  } = useDashboard();
+  const { loading, streams, recordings, srtById } = useDashboard();
   const [presets, setPresets] = useState<EncodePreset[]>([]);
   const [categories, setCategories] = useState<LibraryCategory[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -159,7 +153,7 @@ export default function StreamGrid() {
           return (
             <div key={s.id} className={`card-panel ${s.status}`}>
               <div className="card-stage">
-                <AudioMeters levels={audio[s.id]}>
+                <AudioMeters channelId={s.id} bus="encode">
                 <div className="card-thumb">
                   <HlsPreview
                     active={captureOn}

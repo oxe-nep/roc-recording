@@ -9,16 +9,20 @@ import (
 )
 
 type rtcSession struct {
-	channelID   int
-	token       string
-	pc          *webrtc.PeerConnection
-	ctx         context.Context
-	cancel      context.CancelFunc
-	router      *AudioRouter
-	videoFrames chan []byte
-	stopOnce    sync.Once
-	negotiated  bool
-	negotiateMu sync.Mutex
+	channelID      int
+	token          string
+	pc             *webrtc.PeerConnection
+	ctx            context.Context
+	cancel         context.CancelFunc
+	router         *AudioRouter
+	videoFrames    chan []byte
+	videoTrack     *webrtc.TrackLocalStaticSample
+	pgmTrack       *webrtc.TrackLocalStaticSample
+	intercomTracks []*webrtc.TrackLocalStaticSample
+	enabledIntercom []IntercomSlot
+	stopOnce       sync.Once
+	negotiated     bool
+	negotiateMu    sync.Mutex
 }
 
 func (m *Manager) newPeerConnection() (*webrtc.PeerConnection, error) {
@@ -62,6 +66,35 @@ func (m *Manager) startRTCSession(channelID int, token string) (*rtcSession, err
 		videoFrames: videoFrames,
 	}
 
+	videoTrack, pgmTrack, intercomTracks, enabled, err := m.addCommentatorOutgoingTracks(pc, channelID)
+	if err != nil {
+		_ = pc.Close()
+		cancel()
+		return nil, err
+	}
+	sess.videoTrack = videoTrack
+	sess.pgmTrack = pgmTrack
+	sess.intercomTracks = intercomTracks
+	sess.enabledIntercom = enabled
+
+	// Receive webcam + mic from the commentator browser (server is SDP offerer).
+	if _, err := pc.AddTransceiverFromKind(
+		webrtc.RTPCodecTypeVideo,
+		webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly},
+	); err != nil {
+		_ = pc.Close()
+		cancel()
+		return nil, err
+	}
+	if _, err := pc.AddTransceiverFromKind(
+		webrtc.RTPCodecTypeAudio,
+		webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly},
+	); err != nil {
+		_ = pc.Close()
+		cancel()
+		return nil, err
+	}
+
 	pc.OnTrack(func(tr *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
 		if tr.Kind() == webrtc.RTPCodecTypeAudio {
 			go m.consumeCommentatorMic(ctx, channelID, tr, router)
@@ -80,42 +113,38 @@ func (m *Manager) startRTCSession(channelID int, token string) (*rtcSession, err
 	return sess, nil
 }
 
-// negotiateOffer applies the browser offer, attaches outgoing tracks, and returns the SDP answer.
-// Outgoing tracks are added only after SetRemoteDescription so m-line order matches the offer.
-func (m *Manager) negotiateOffer(sess *rtcSession, channelID int, offerSDP string) (string, error) {
+func (m *Manager) createOffer(sess *rtcSession) (string, error) {
+	offer, err := sess.pc.CreateOffer(nil)
+	if err != nil {
+		return "", err
+	}
+	if err := sess.pc.SetLocalDescription(offer); err != nil {
+		return "", err
+	}
+	return offer.SDP, nil
+}
+
+func (m *Manager) negotiateAnswer(sess *rtcSession, channelID int, answerSDP string) error {
 	sess.negotiateMu.Lock()
 	defer sess.negotiateMu.Unlock()
 	if sess.negotiated {
-		return "", fmt.Errorf("offer already negotiated")
+		return fmt.Errorf("session already negotiated")
 	}
 
 	if err := sess.pc.SetRemoteDescription(webrtc.SessionDescription{
-		Type: webrtc.SDPTypeOffer,
-		SDP:  offerSDP,
+		Type: webrtc.SDPTypeAnswer,
+		SDP:  answerSDP,
 	}); err != nil {
-		return "", err
-	}
-
-	videoTrack, pgmTrack, intercomTracks, enabled, err := m.addCommentatorOutgoingTracks(sess.pc, channelID)
-	if err != nil {
-		return "", err
-	}
-
-	answer, err := sess.pc.CreateAnswer(nil)
-	if err != nil {
-		return "", err
-	}
-	if err := sess.pc.SetLocalDescription(answer); err != nil {
-		return "", err
+		return err
 	}
 
 	silenceCtx, silenceCancel := context.WithCancel(sess.ctx)
-	go m.runSilenceFallback(silenceCtx, pgmTrack, intercomTracks)
-	go m.runFFmpegInbound(sess.ctx, channelID, videoTrack, pgmTrack, enabled, intercomTracks, silenceCancel)
+	go m.runSilenceFallback(silenceCtx, sess.pgmTrack, sess.intercomTracks)
+	go m.runFFmpegInbound(sess.ctx, channelID, sess.videoTrack, sess.pgmTrack, sess.enabledIntercom, sess.intercomTracks, silenceCancel)
 	go m.runFFmpegOutbound(sess.ctx, channelID, sess.router, sess.videoFrames)
 
 	sess.negotiated = true
-	return answer.SDP, nil
+	return nil
 }
 
 func (m *Manager) addCommentatorOutgoingTracks(

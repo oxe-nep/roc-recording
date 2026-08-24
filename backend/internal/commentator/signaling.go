@@ -147,6 +147,14 @@ func (m *Manager) ServeSignaling(w http.ResponseWriter, r *http.Request, token s
 		}
 	})
 
+	offerSDP, err := m.createOffer(sess)
+	if err != nil {
+		log.Printf("[commentator %d] create offer: %v", channelID, err)
+		writeJSON(map[string]string{"type": "error", "message": err.Error()})
+		return
+	}
+	writeJSON(signalMsg{Type: "offer", SDP: offerSDP})
+
 	conn.SetReadLimit(signalingMaxMsg)
 	var pendingICE []webrtc.ICECandidateInit
 	remoteSet := false
@@ -164,15 +172,13 @@ func (m *Manager) ServeSignaling(w http.ResponseWriter, r *http.Request, token s
 			return
 		}
 		switch msg.Type {
-		case "offer":
-			answerSDP, err := m.negotiateOffer(sess, channelID, msg.SDP)
-			if err != nil {
+		case "answer":
+			if err := m.negotiateAnswer(sess, channelID, msg.SDP); err != nil {
 				writeJSON(map[string]string{"type": "error", "message": err.Error()})
 				continue
 			}
 			remoteSet = true
 			flushICE()
-			writeJSON(signalMsg{Type: "answer", SDP: answerSDP})
 		case "ice":
 			if len(msg.Candidate) == 0 {
 				continue

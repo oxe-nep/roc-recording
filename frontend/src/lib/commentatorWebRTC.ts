@@ -31,38 +31,6 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function preferVideoCodec(
-  transceiver: RTCRtpTransceiver,
-  mimeType: string,
-  kind: "send" | "recv" = "send",
-) {
-  const caps =
-    kind === "recv"
-      ? typeof RTCRtpReceiver !== "undefined"
-        ? RTCRtpReceiver.getCapabilities?.("video")
-        : undefined
-      : typeof RTCRtpSender !== "undefined"
-        ? RTCRtpSender.getCapabilities?.("video")
-        : undefined;
-  if (!caps?.codecs?.length) return;
-  const preferred = caps.codecs.filter((c) => c.mimeType.toLowerCase() === mimeType.toLowerCase());
-  const rest = caps.codecs.filter((c) => c.mimeType.toLowerCase() !== mimeType.toLowerCase());
-  if (preferred.length > 0) {
-    transceiver.setCodecPreferences([...preferred, ...rest]);
-  }
-}
-
-/** Incoming transceivers must be declared in the offer before createOffer (Unified Plan). */
-function addReceiveTransceivers(pc: RTCPeerConnection, intercomCount: number) {
-  const recvVideo = pc.addTransceiver("video", { direction: "recvonly" });
-  preferVideoCodec(recvVideo, "video/h264", "recv");
-  // PGM + one recvonly audio transceiver per enabled intercom slot (matches backend AddTrack order).
-  pc.addTransceiver("audio", { direction: "recvonly" });
-  for (let i = 0; i < intercomCount; i++) {
-    pc.addTransceiver("audio", { direction: "recvonly" });
-  }
-}
-
 export async function fetchCommentatorJoin(token: string): Promise<CommentatorJoinInfo> {
   const base = commentatorOrigin();
   const res = await fetch(`${base}/api/commentator/join/${encodeURIComponent(token)}`);
@@ -91,9 +59,11 @@ export class CommentatorSession {
   private gainNodes = new Map<string, GainNode>();
   private pendingRemoteICE: RTCIceCandidateInit[] = [];
   private remoteDescSet = false;
+  private answering = false;
   private stopped = false;
   private reconnectAttempts = 0;
   private readonly maxReconnects = 3;
+  private iceServers: RTCIceServer[] = [];
 
   onState?: (state: CommentatorConnectionState) => void;
   onError?: (message: string) => void;
@@ -105,77 +75,16 @@ export class CommentatorSession {
   async start(): Promise<void> {
     this.stopped = false;
     this.remoteDescSet = false;
+    this.answering = false;
     this.pendingRemoteICE = [];
     this.onState?.("joining");
 
     const join = await fetchCommentatorJoin(this.token);
+    this.iceServers = join.ice_servers;
     this.onIntercom?.(join.intercom);
 
     this.onState?.("connecting");
     await this.connectSignaling(join.ws_path);
-
-    if (!this.localStream) {
-      this.localStream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true },
-        video: { width: { ideal: 1280 }, height: { ideal: 720 } },
-      });
-    }
-
-    this.pc = new RTCPeerConnection({ iceServers: join.ice_servers });
-    addReceiveTransceivers(this.pc, join.intercom.length);
-
-    const videoTrack = this.localStream.getVideoTracks()[0];
-    const audioTrack = this.localStream.getAudioTracks()[0];
-    if (videoTrack) {
-      const tx = this.pc.addTransceiver(videoTrack, {
-        direction: "sendonly",
-        streams: [this.localStream],
-      });
-      preferVideoCodec(tx, "video/h264", "send");
-    }
-    if (audioTrack) {
-      this.pc.addTransceiver(audioTrack, {
-        direction: "sendonly",
-        streams: [this.localStream],
-      });
-    }
-
-    if (!this.audioCtx) {
-      this.audioCtx = new AudioContext();
-    }
-    this.gainNodes.clear();
-
-    this.pc.onicecandidate = (ev) => {
-      if (ev.candidate) {
-        this.send({ type: "ice", candidate: ev.candidate.toJSON() });
-      }
-    };
-    this.pc.ontrack = (ev) => {
-      if (ev.track.kind === "video") {
-        this.onRemoteVideo?.(ev.streams[0] ?? new MediaStream([ev.track]));
-        return;
-      }
-      const stream = ev.streams[0] ?? new MediaStream([ev.track]);
-      const id = ev.track.id || ev.track.label || "track";
-      const gain = this.audioCtx!.createGain();
-      gain.gain.value = id.includes("pgm") || id.includes("audio") ? 1 : 0.8;
-      const src = this.audioCtx!.createMediaStreamSource(stream);
-      src.connect(gain).connect(this.audioCtx!.destination);
-      this.gainNodes.set(id, gain);
-    };
-    this.pc.onconnectionstatechange = () => {
-      const state = this.pc?.connectionState;
-      if (state === "connected") {
-        this.reconnectAttempts = 0;
-        this.onState?.("connected");
-      } else if (state === "failed") {
-        void this.scheduleReconnect();
-      }
-    };
-
-    const offer = await this.pc.createOffer();
-    await this.pc.setLocalDescription(offer);
-    this.send({ type: "offer", sdp: offer.sdp });
   }
 
   private async scheduleReconnect() {
@@ -237,33 +146,97 @@ export class CommentatorSession {
     });
   }
 
+  private async handleOffer(sdp: string) {
+    if (this.answering || this.stopped) return;
+    this.answering = true;
+    try {
+      if (!this.localStream) {
+        this.localStream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+          video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+        });
+      }
+
+      this.pc = new RTCPeerConnection({ iceServers: this.iceServers });
+
+      if (!this.audioCtx) {
+        this.audioCtx = new AudioContext();
+      }
+      this.gainNodes.clear();
+
+      this.pc.onicecandidate = (ev) => {
+        if (ev.candidate) {
+          this.send({ type: "ice", candidate: ev.candidate.toJSON() });
+        }
+      };
+      this.pc.ontrack = (ev) => {
+        if (ev.track.kind === "video") {
+          this.onRemoteVideo?.(ev.streams[0] ?? new MediaStream([ev.track]));
+          return;
+        }
+        const stream = ev.streams[0] ?? new MediaStream([ev.track]);
+        const id = ev.track.id || ev.track.label || "track";
+        const gain = this.audioCtx!.createGain();
+        gain.gain.value = id.includes("pgm") || id.includes("audio") ? 1 : 0.8;
+        const src = this.audioCtx!.createMediaStreamSource(stream);
+        src.connect(gain).connect(this.audioCtx!.destination);
+        this.gainNodes.set(id, gain);
+      };
+      this.pc.onconnectionstatechange = () => {
+        const state = this.pc?.connectionState;
+        if (state === "connected") {
+          this.reconnectAttempts = 0;
+          this.onState?.("connected");
+        } else if (state === "failed") {
+          void this.scheduleReconnect();
+        }
+      };
+
+      await this.pc.setRemoteDescription({ type: "offer", sdp });
+      this.remoteDescSet = true;
+
+      const videoTrack = this.localStream.getVideoTracks()[0];
+      const audioTrack = this.localStream.getAudioTracks()[0];
+      if (videoTrack) {
+        this.pc.addTransceiver(videoTrack, {
+          direction: "sendonly",
+          streams: [this.localStream],
+        });
+      }
+      if (audioTrack) {
+        this.pc.addTransceiver(audioTrack, {
+          direction: "sendonly",
+          streams: [this.localStream],
+        });
+      }
+
+      const answer = await this.pc.createAnswer();
+      await this.pc.setLocalDescription(answer);
+      this.send({ type: "answer", sdp: answer.sdp });
+
+      for (const c of this.pendingRemoteICE) {
+        await this.pc.addIceCandidate(c);
+      }
+      this.pendingRemoteICE = [];
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      this.onError?.(`WebRTC negotiation failed: ${detail}`);
+      this.onState?.("failed");
+    }
+  }
+
   private async handleSignal(msg: SignalMsg) {
     switch (msg.type) {
       case "config":
         if (msg.intercom) this.onIntercom?.(msg.intercom);
         return;
+      case "offer":
+        if (msg.sdp) await this.handleOffer(msg.sdp);
+        return;
       case "error":
         this.onError?.(msg.message || "WebRTC error");
         this.onState?.("failed");
         return;
-      case "answer":
-        if (!this.pc || this.remoteDescSet) return;
-        if (msg.sdp) {
-          try {
-            await this.pc.setRemoteDescription({ type: "answer", sdp: msg.sdp });
-          } catch (e) {
-            const detail = e instanceof Error ? e.message : String(e);
-            this.onError?.(`WebRTC negotiation failed: ${detail}`);
-            this.onState?.("failed");
-            return;
-          }
-          this.remoteDescSet = true;
-          for (const c of this.pendingRemoteICE) {
-            await this.pc.addIceCandidate(c);
-          }
-          this.pendingRemoteICE = [];
-        }
-        break;
       case "ice":
         if (!this.pc || !msg.candidate) return;
         if (!this.remoteDescSet) {

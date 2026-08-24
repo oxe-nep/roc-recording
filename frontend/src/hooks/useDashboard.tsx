@@ -18,6 +18,7 @@ import {
   type SrtInfo,
   type Stream,
   type TcLoopInfo,
+  type CommentatorInfo,
 } from "@/lib/api";
 import { mediaBase } from "@/lib/mediaBase";
 import { sortByChannelId } from "@/lib/sortChannels";
@@ -34,6 +35,7 @@ type DashboardState = {
   streams: Stream[];
   playout: PlayoutClient[];
   tcById: Record<number, TcLoopInfo>;
+  commentatorById: Record<number, CommentatorInfo>;
   recordings: Record<number, RecordingInfo>;
   srtById: Record<number, SrtInfo>;
   workflows: Record<number, ChannelWorkflowConfig>;
@@ -45,6 +47,7 @@ const EMPTY: DashboardState = {
   streams: [],
   playout: [],
   tcById: {},
+  commentatorById: {},
   recordings: {},
   srtById: {},
   workflows: {},
@@ -99,12 +102,15 @@ function snapshotToState(msg: DashboardSnapshot, connected: boolean): DashboardS
   for (const s of msg.srt ?? []) srt[s.id] = s;
   const tc: Record<number, TcLoopInfo> = {};
   for (const t of msg.tc ?? []) tc[t.id] = t;
+  const commentator: Record<number, CommentatorInfo> = {};
+  for (const c of msg.commentator ?? []) commentator[c.id] = c;
   return {
     connected,
     loading: false,
     streams: sortByChannelId(msg.streams ?? []),
     playout: sortByChannelId(msg.playout ?? []),
     tcById: tc,
+    commentatorById: commentator,
     recordings: rec,
     srtById: srt,
     workflows: mapWorkflows(msg.workflows),

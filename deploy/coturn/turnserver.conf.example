@@ -1,0 +1,24 @@
+# Example coturn config for remote commentator WebRTC (TURN).
+# Install: apt install coturn (Debian/Ubuntu) or run coturn in Docker.
+# Copy/adapt to /etc/turnserver.conf and set WEBRTC_* in /etc/roc-recording.env
+
+listening-port=3478
+tls-listening-port=5349
+listening-ip=0.0.0.0
+relay-ip=YOUR_PUBLIC_OR_CAPTURE_HOST_IP
+external-ip=YOUR_PUBLIC_IP/YOUR_PRIVATE_IP
+
+fingerprint
+lt-cred-mech
+user=commentator:CHANGE_ME_SECRET
+realm=recording.nepsweden.tech
+
+no-multicast-peers
+no-cli
+verbose
+
+# Uncomment for TLS (recommended if exposing 5349):
+# cert=/etc/letsencrypt/live/recording.nepsweden.tech/fullchain.pem
+# pkey=/etc/letsencrypt/live/recording.nepsweden.tech/privkey.pem
+
+# Firewall: allow UDP/TCP 3478 (and 5349 if TLS) from the internet.

@@ -283,7 +283,7 @@ export async function setRecordingsPath(path: string): Promise<string> {
 }
 
 export interface ChannelWorkflowConfig {
-  mode: "pair" | "tc";
+  mode: "pair" | "tc" | "remote_commentator";
 }
 
 export async function fetchWorkflows(): Promise<Record<string, ChannelWorkflowConfig>> {
@@ -747,11 +747,82 @@ export type DashboardMeters = {
   meters_playout: Record<string, AudioLevels>;
 };
 
+export interface CommentatorIntercomSlot {
+  id: number;
+  name: string;
+  enabled: boolean;
+}
+
+export interface CommentatorInfo {
+  id: number;
+  enabled: boolean;
+  status: "off" | "waiting" | "session_active" | "connected";
+  session_active: boolean;
+  connected: boolean;
+  ptt_channel: number;
+  invite_url?: string;
+  session_expires_at?: string;
+  intercom: CommentatorIntercomSlot[];
+  error?: string;
+}
+
+export interface CommentatorSessionInfo {
+  token: string;
+  invite_url: string;
+  expires_at: string;
+}
+
+export async function fetchCommentator(id: number): Promise<CommentatorInfo> {
+  const res = await apiFetch(`/api/commentator/${id}`);
+  if (!res.ok) throw new Error(`fetchCommentator: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchCommentatorSettings(id: number): Promise<{ intercom: CommentatorIntercomSlot[] }> {
+  const res = await apiFetch(`/api/commentator/${id}/settings`);
+  if (!res.ok) throw new Error(`fetchCommentatorSettings: ${res.status}`);
+  return res.json();
+}
+
+export async function updateCommentatorSettings(
+  id: number,
+  body: { intercom: CommentatorIntercomSlot[] },
+): Promise<{ intercom: CommentatorIntercomSlot[] }> {
+  const res = await apiFetch(`/api/commentator/${id}/settings`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `updateCommentatorSettings: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function createCommentatorSession(id: number): Promise<CommentatorSessionInfo> {
+  const res = await apiFetch(`/api/commentator/${id}/session`, { method: "POST" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `createCommentatorSession: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function revokeCommentatorSession(id: number): Promise<CommentatorInfo> {
+  const res = await apiFetch(`/api/commentator/${id}/session`, { method: "DELETE" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `revokeCommentatorSession: ${res.status}`);
+  }
+  return res.json();
+}
+
 export type DashboardSnapshot = {
   type: "snapshot";
   streams: Stream[];
   playout: PlayoutClient[];
   tc: TcLoopInfo[];
+  commentator?: CommentatorInfo[];
   recordings: RecordingInfo[];
   srt: SrtInfo[];
   workflows?: Record<string, Partial<ChannelWorkflowConfig>>;

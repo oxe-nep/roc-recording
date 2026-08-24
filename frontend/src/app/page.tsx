@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import StreamGrid from "@/components/StreamGrid";
 import TcGrid from "@/components/TcGrid";
 import DecodeGrid from "@/components/DecodeGrid";
+import CommentatorGrid from "@/components/CommentatorGrid";
 import SystemStatus from "@/components/SystemStatus";
 import LibraryModal from "@/components/LibraryModal";
 import SettingsModal from "@/components/SettingsModal";
@@ -59,6 +60,7 @@ export default function Home() {
       <StreamGrid />
       <DecodeGrid />
       <TcGrid />
+      <CommentatorGrid />
       <SettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}

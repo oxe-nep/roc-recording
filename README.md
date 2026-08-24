@@ -19,6 +19,41 @@ Optional **SRT** output per channel remuxes the same UDP master (`-c copy`) as l
 
 **Decode (playout)** clients receive SRT and output to a DeckLink device (`playout-clients.json`). Devices/formats are probed via FFmpeg. Each client has its own output mode, SRT listener/caller settings, JPEG preview, and audio meters. UI sections: **Encode** (capture) and **Decode** (playout).
 
+**Remote commentator** (branch `feature/remote-commentator`): workflow mode that dedicates a DeckLink channel pair to a WebRTC commentator bridge. Settings → Workflows → *Remote Commentator*. Restore point before this work: git tag `pre-remote-commentator` on `main`.
+
+- **DeckLink IN** → program video + PGM (1–2) + up to 6 intercom mono (3–8) → WebRTC to browser
+- **DeckLink OUT** ← commentator webcam + mic (on air 1–2, or PTT to intercom 3–8)
+- Kommentator-UI: `https://recording.nepsweden.tech/commentator/{token}` (invite link from dashboard)
+- Media går **direkt** browser ↔ capture host (+ TURN); signaling proxas via k3s frontend
+
+**FFmpeg:** din befintliga DeckLink-build räcker troligen — **ingen full ombyggnad** om `libopus` redan finns:
+
+```bash
+/usr/local/bin/ffmpeg -hide_banner -encoders 2>/dev/null | grep libopus
+```
+
+Commentator-ljud **ut** till webbläsaren kodas med `-c:a libopus`. DeckLink OUT använder `pcm_s16le` + `v210` (som TC/playout). Mic **in** från webbläsaren dekodas i Go (`libopus`), inte FFmpeg. Saknas `libopus`, bygg om FFmpeg med `--enable-libopus` (samma build-skript som för decklink/libsrt).
+
+**WebRTC env** (`/etc/roc-recording.env`):
+
+```
+COMMENTATOR_PUBLIC_URL=https://recording.nepsweden.tech
+WEBRTC_STUN_URLS=stun:stun.l.google.com:19302
+WEBRTC_TURN_URLS=turn:YOUR_HOST:3478?transport=udp
+WEBRTC_TURN_USERNAME=commentator
+WEBRTC_TURN_CREDENTIAL=...
+WEBRTC_PUBLIC_HOST=10.199.28.249
+```
+
+TURN (coturn) krävs för kommentatorer bakom NAT. Exempelconfig: [`deploy/coturn/turnserver.conf.example`](deploy/coturn/turnserver.conf.example).
+
+**Deploy backend efter pull:**
+
+```bash
+sudo ./deploy/roc-ctl.sh build   # go mod tidy + go build på capture host
+sudo ./deploy/roc-ctl.sh restart
+```
+
 Encode presets are defined in `config.yaml` (and live-edited via the UI into `encode-presets.json`). Per-channel selection is persisted to `encode-assignments.json`. Encode settings are applied when that channel’s capture starts — editing a preset or switching assignment does not restart a running channel.
 
 Recordings land in global category folders under a configurable storage root

@@ -19,6 +19,7 @@ export default function ListenButton({ pair, onChange, disabled }: Props) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const listening = pair != null;
+  const label = listening ? LISTEN_PAIRS[pair]?.label ?? "1–2" : "";
 
   useEffect(() => {
     if (!open) return;
@@ -30,12 +31,9 @@ export default function ListenButton({ pair, onChange, disabled }: Props) {
   }, [open]);
 
   const pick = (id: number) => {
-    if (pair === id) onChange(null);
-    else onChange(id);
+    onChange(pair === id ? null : id);
     setOpen(false);
   };
-
-  const label = listening ? LISTEN_PAIRS[pair]?.label ?? "1–2" : "";
 
   return (
     <div className="listen-wrap" ref={wrapRef}>
@@ -44,11 +42,11 @@ export default function ListenButton({ pair, onChange, disabled }: Props) {
         className={`badge listen-btn ${listening ? "active" : ""}`}
         disabled={disabled}
         onClick={() => setOpen((v) => !v)}
-        title={listening ? `Listening ${label} — choose pair` : "Listen — choose pair"}
+        title={listening ? `Listening ${label}` : "Listen — choose pair"}
         aria-expanded={open}
         aria-haspopup="menu"
       >
-        {listening ? `🔊 ${label}` : "🔈"}
+        {listening ? "🔊" : "🔈"}
       </button>
       {open && (
         <div className="listen-menu" role="menu">

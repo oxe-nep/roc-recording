@@ -1214,7 +1214,8 @@ html {
 .card-actions {
   display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: flex-end;
+  gap: 5px;
   flex-shrink: 0;
 }
 
@@ -1233,10 +1234,58 @@ html {
   background: rgba(255, 255, 255, 0.04);
 }
 
-.card-actions .listen-btn {
-  width: auto;
-  min-width: 1.7rem;
-  padding: 0 6px;
+.transport {
+  display: inline-flex;
+  align-items: stretch;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.ctrl-btn {
+  height: 1.7rem;
+  min-width: 3.15rem;
+  padding: 0 9px;
+  border: 0;
+  border-right: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.ctrl-btn:last-child {
+  border-right: 0;
+}
+
+.ctrl-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.ctrl-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.ctrl-btn.primary {
+  background: rgba(46, 125, 160, 0.92);
+  color: #fff;
+}
+
+.ctrl-btn.primary:hover:not(:disabled) {
+  background: rgba(37, 106, 136, 0.98);
+  color: #fff;
+}
+
+.ctrl-btn.on {
+  background: rgba(46, 125, 160, 0.38);
+  color: #c8e6f5;
 }
 
 .audio-meter {

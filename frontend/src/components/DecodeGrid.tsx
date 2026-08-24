@@ -177,11 +177,11 @@ export default function DecodeGrid() {
                     </div>
                     <div className="card-actions">
                       {isFile ? (
-                        <>
+                        <div className="transport">
                           {!on || paused ? (
                             <button
                               type="button"
-                              className="stream-btn idle"
+                              className="ctrl-btn primary"
                               disabled={busy[c.id] || (!c.file_id && !paused)}
                               onClick={() =>
                                 withBusy(c.id, async () => {
@@ -196,7 +196,7 @@ export default function DecodeGrid() {
                           ) : (
                             <button
                               type="button"
-                              className="stream-btn streaming"
+                              className="ctrl-btn primary"
                               disabled={busy[c.id]}
                               onClick={() => withBusy(c.id, async () => pausePlayout(c.id))}
                               title="Pause"
@@ -206,7 +206,7 @@ export default function DecodeGrid() {
                           )}
                           <button
                             type="button"
-                            className="badge"
+                            className="ctrl-btn"
                             disabled={busy[c.id] || !on}
                             onClick={() => withBusy(c.id, async () => stopPlayout(c.id))}
                             title="Stop"
@@ -215,14 +215,14 @@ export default function DecodeGrid() {
                           </button>
                           <button
                             type="button"
-                            className={`badge loop-btn${c.loop ? " active" : ""}`}
+                            className={`ctrl-btn${c.loop ? " on" : ""}`}
                             disabled={busy[c.id]}
                             onClick={() => toggleLoop(c)}
                             title={c.loop ? "Loop on" : "Loop off"}
                           >
                             LOOP
                           </button>
-                        </>
+                        </div>
                       ) : on ? (
                         <button
                           type="button"

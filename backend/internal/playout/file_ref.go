@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/roc-recording/backend/internal/audiox"
 )
 
 const libraryRefPrefix = "lib:"
@@ -84,12 +86,16 @@ func (m *Manager) ResolveFilePath(fileID string) (path, displayName string, err 
 }
 
 func fileHasAudioStream(ffmpegBin, path string) bool {
+	return len(probeAudioChannels(ffmpegBin, path)) > 0
+}
+
+func probeAudioChannels(ffmpegBin, path string) []int {
 	if strings.TrimSpace(path) == "" {
-		return false
+		return nil
 	}
 	cmd := exec.Command(ffmpegBin, "-hide_banner", "-i", path)
 	out, _ := cmd.CombinedOutput()
-	return strings.Contains(strings.ToLower(string(out)), "audio:")
+	return audiox.ParseAudioStreams(string(out))
 }
 
 var reFFDuration = regexp.MustCompile(`(?i)Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)`)

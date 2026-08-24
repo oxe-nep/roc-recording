@@ -219,17 +219,22 @@ export default function DecodeGrid() {
                             LOOP
                           </button>
                         </div>
-                      ) : on ? (
+                      ) : (
                         <button
                           type="button"
-                          className="stream-btn streaming"
-                          onClick={() => withBusy(c.id, async () => stopPlayout(c.id))}
+                          className={`stream-btn ${on ? "streaming" : "idle"}`}
+                          onClick={() =>
+                            withBusy(c.id, async () => {
+                              if (on) await stopPlayout(c.id);
+                              else await startPlayout(c.id);
+                            })
+                          }
                           disabled={busy[c.id]}
-                          title="Stop"
+                          title={on ? "Stop" : "Start"}
                         >
-                          {busy[c.id] ? "…" : "STOP"}
+                          {busy[c.id] ? "…" : on ? "STOP" : "START"}
                         </button>
-                      ) : null}
+                      )}
                       {on && (
                         <ListenButton
                           pair={listenAt}

@@ -356,7 +356,17 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 				return
 			}
 			body.ID = chi.URLParam(r, "id")
+			users := mgr.IDsUsingPreset(body.ID)
+			for _, chID := range users {
+				if recMgr.IsRecording(chID) {
+					jsonError(w, "stop recording on channels using this preset before changing it", http.StatusConflict)
+					return
+				}
+			}
+			wasSRT := srtStreamingSet(srtMgr, users)
+			stopSRTSet(srtMgr, runtimeStore, wasSRT)
 			p, err := mgr.UpsertPreset(body, false)
+			startSRTSet(srtMgr, runtimeStore, wasSRT)
 			if err != nil {
 				jsonError(w, err.Error(), http.StatusConflict)
 				return
@@ -373,10 +383,15 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 					return
 				}
 			}
+			users := mgr.IDsUsingPreset(id)
+			wasSRT := srtStreamingSet(srtMgr, users)
+			stopSRTSet(srtMgr, runtimeStore, wasSRT)
 			if err := mgr.DeletePreset(id); err != nil {
+				startSRTSet(srtMgr, runtimeStore, wasSRT)
 				jsonError(w, err.Error(), http.StatusConflict)
 				return
 			}
+			startSRTSet(srtMgr, runtimeStore, wasSRT)
 			jsonOK(w, map[string]string{"status": "deleted"})
 		})
 
@@ -397,10 +412,14 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 				jsonError(w, "stop recording before changing encode preset", http.StatusConflict)
 				return
 			}
+			wasSRT := srtStreamingSet(srtMgr, []int{id})
+			stopSRTSet(srtMgr, runtimeStore, wasSRT)
 			if err := mgr.SetEncodePreset(id, body.Preset); err != nil {
+				startSRTSet(srtMgr, runtimeStore, wasSRT)
 				jsonError(w, err.Error(), http.StatusBadRequest)
 				return
 			}
+			startSRTSet(srtMgr, runtimeStore, wasSRT)
 			s, ok := mgr.StreamByID(id)
 			if !ok {
 				jsonError(w, "channel not found", http.StatusNotFound)
@@ -1071,6 +1090,53 @@ func meterPayload(ch []float64) map[string]any {
 		"l":        peaks[0],
 		"r":        peaks[1],
 		"channels": audiox.Slice(peaks),
+	}
+}
+
+func srtStreamingSet(srtMgr *srt.Manager, ids []int) map[int]bool {
+	was := make(map[int]bool)
+	if srtMgr == nil {
+		return was
+	}
+	for _, id := range ids {
+		info, err := srtMgr.Get(id)
+		if err == nil && info.Status == srt.StatusStreaming {
+			was[id] = true
+		}
+	}
+	return was
+}
+
+func stopSRTSet(srtMgr *srt.Manager, runtimeStore *runtimestate.Store, was map[int]bool) {
+	if srtMgr == nil {
+		return
+	}
+	for id, on := range was {
+		if !on {
+			continue
+		}
+		_, _ = srtMgr.Stop(id)
+		if runtimeStore != nil {
+			runtimeStore.SetSRT(id, false)
+		}
+	}
+}
+
+func startSRTSet(srtMgr *srt.Manager, runtimeStore *runtimestate.Store, was map[int]bool) {
+	if srtMgr == nil {
+		return
+	}
+	for id, on := range was {
+		if !on {
+			continue
+		}
+		if _, err := srtMgr.Start(id); err != nil {
+			log.Printf("[srt %d] restart after encode change: %v", id, err)
+			continue
+		}
+		if runtimeStore != nil {
+			runtimeStore.SetSRT(id, true)
+		}
 	}
 }
 

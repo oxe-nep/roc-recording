@@ -192,25 +192,29 @@ export default function ChannelSettingsModal({
       if (category && category !== baseline.category) {
         await setRecordingCategory(stream.id, category);
       }
-      if (preset && preset !== baseline.preset) {
+      const presetChanged = Boolean(preset && preset !== baseline.preset);
+      if (presetChanged) {
         await setEncodePreset(stream.id, preset);
       }
 
-      // Restart active capture so encode takes effect; start if stopped
-      // (e.g. after TC → Encode workflow switch left the channel off).
-      try {
-        await stopSrt(stream.id);
-      } catch {
-        // ignore if SRT was not running
-      }
-      if (captureOn) {
+      // Backend restarts capture (and restores SRT) when the preset changes on
+      // a live channel. Otherwise bounce capture so a stopped channel starts
+      // (e.g. after TC → Encode) and name-only saves keep the previous behavior.
+      if (!(presetChanged && captureOn)) {
         try {
-          await stopStream(stream.id);
+          await stopSrt(stream.id);
         } catch {
-          // already stopped
+          // ignore if SRT was not running
         }
+        if (captureOn) {
+          try {
+            await stopStream(stream.id);
+          } catch {
+            // already stopped
+          }
+        }
+        await startStream(stream.id);
       }
-      await startStream(stream.id);
 
       onSaved();
       onClose();

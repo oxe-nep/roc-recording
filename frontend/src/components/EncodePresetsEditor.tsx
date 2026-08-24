@@ -438,8 +438,8 @@ export default function EncodePresetsEditor({ open, onClose, onChanged, embedded
           </p>
 
           <p className="presets-hint">
-            Codecs are detected from FFmpeg on the capture host. Running channels keep their
-            current encode; new settings apply the next time that channel&apos;s capture starts.
+            Codecs are detected from FFmpeg on the capture host. Saving changes restarts capture
+            on every running channel that uses this preset (blocked while recording).
           </p>
           <div className="presets-form-actions">
             <button type="button" className="global-rec-btn" onClick={save} disabled={busy}>

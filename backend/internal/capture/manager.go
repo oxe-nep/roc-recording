@@ -278,9 +278,8 @@ func (m *Manager) profileFor(presetID string) EncodeProfile {
 	}
 }
 
-// SetEncodePreset stores the encode preset for a channel.
-// Settings are applied the next time capture starts for that channel —
-// a running encode is left alone so recordings are not interrupted.
+// SetEncodePreset stores the encode preset and restarts capture if the channel
+// is already running, so the live UDP feed matches the assignment immediately.
 func (m *Manager) SetEncodePreset(id int, presetID string) error {
 	m.mu.RLock()
 	if m.presets[presetID].ID == "" {
@@ -296,6 +295,7 @@ func (m *Manager) SetEncodePreset(id int, presetID string) error {
 	s.mu.Lock()
 	prev := s.EncodePreset
 	s.EncodePreset = presetID
+	active := isActiveStatus(s.Status)
 	s.mu.Unlock()
 
 	m.mu.Lock()
@@ -305,8 +305,17 @@ func (m *Manager) SetEncodePreset(id int, presetID string) error {
 		log.Printf("[encode] failed to persist assignments: %v", err)
 	}
 
-	if prev != presetID {
+	if prev == presetID {
+		return nil
+	}
+	if !active {
 		log.Printf("[channel %d] encode preset %s → %s (applies on next start)", id, prev, presetID)
+		return nil
+	}
+	log.Printf("[channel %d] encode preset %s → %s – restarting capture", id, prev, presetID)
+	s.appendLog(fmt.Sprintf("encode preset %s → %s – restarting capture", prev, presetID))
+	if err := m.restart(id); err != nil {
+		return fmt.Errorf("preset saved but capture restart failed: %w", err)
 	}
 	return nil
 }

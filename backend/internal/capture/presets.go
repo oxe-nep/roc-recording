@@ -195,8 +195,42 @@ func (m *Manager) UpsertPreset(in PresetInput, create bool) (NamedPreset, error)
 	if err != nil {
 		return NamedPreset{}, err
 	}
-	// Running channels keep their current encode; new settings apply on next capture start.
+	if !create {
+		m.restartActiveUsingPreset(id)
+	}
 	return p, nil
+}
+
+func (m *Manager) IDsUsingPreset(presetID string) []int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var ids []int
+	for chID, s := range m.streams {
+		s.mu.Lock()
+		use := s.EncodePreset == presetID
+		s.mu.Unlock()
+		if use {
+			ids = append(ids, chID)
+		}
+	}
+	return ids
+}
+
+func (m *Manager) restartActiveUsingPreset(presetID string) {
+	for _, id := range m.IDsUsingPreset(presetID) {
+		st, ok := m.StatusByID(id)
+		if !ok || !isActiveStatus(st) {
+			continue
+		}
+		log.Printf("[channel %d] encode preset %s updated – restarting capture", id, presetID)
+		s, sok := m.StreamByID(id)
+		if sok {
+			s.appendLog(fmt.Sprintf("encode preset %s updated – restarting capture", presetID))
+		}
+		if err := m.restart(id); err != nil {
+			log.Printf("[channel %d] capture restart after preset edit: %v", id, err)
+		}
+	}
 }
 
 func (m *Manager) DeletePreset(id string) error {
@@ -239,9 +273,17 @@ func (m *Manager) DeletePreset(id string) error {
 	if err != nil {
 		return err
 	}
-	// Do not restart capture — assignment change applies on next start.
 	if len(affected) > 0 {
-		log.Printf("[encode] deleted preset %q; channels %v reassigned to %q (applies on next start)", id, affected, fallback)
+		log.Printf("[encode] deleted preset %q; channels %v reassigned to %q – restarting active capture", id, affected, fallback)
+	}
+	for _, chID := range affected {
+		st, ok := m.StatusByID(chID)
+		if !ok || !isActiveStatus(st) {
+			continue
+		}
+		if rerr := m.restart(chID); rerr != nil {
+			log.Printf("[channel %d] capture restart after preset delete: %v", chID, rerr)
+		}
 	}
 	return nil
 }

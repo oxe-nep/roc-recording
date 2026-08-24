@@ -142,7 +142,8 @@ func (m *Manager) runFFmpegInboundOnce(
 		"-g", "25",
 		"-keyint_min", "25",
 		"-bf", "0",
-		"-x264-params", "repeat-headers=1:annexb=1:scenecut=0:keyint=25:min-keyint=25:rc-lookahead=0:sync-lookahead=0:sliced-threads=1",
+		"-slices", "1",
+		"-x264-params", "repeat-headers=1:annexb=1:scenecut=0:keyint=25:min-keyint=25:rc-lookahead=0:sync-lookahead=0:sliced-threads=0:threads=4",
 		"-f", "h264",
 		"pipe:1",
 	)
@@ -408,7 +409,7 @@ func (m *Manager) pipePCMToOpusTrack(ctx context.Context, r io.Reader, track *we
 		log.Printf("[commentator] opus encoder: %v", err)
 		return
 	}
-	_ = enc.SetBitrate(64000)
+	_ = enc.SetBitrate(48000)
 	_ = enc.SetInBandFEC(true)
 	_ = enc.SetPacketLossPerc(20)
 	frameSamples := samplesPerFrame * channels
@@ -416,6 +417,8 @@ func (m *Manager) pipePCMToOpusTrack(ctx context.Context, r io.Reader, track *we
 	pcm := make([]int16, frameSamples)
 	out := make([]byte, 1500)
 	logged := false
+	start := time.Now()
+	frameIdx := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -441,6 +444,10 @@ func (m *Manager) pipePCMToOpusTrack(ctx context.Context, r io.Reader, track *we
 		if !logged {
 			logged = true
 			log.Printf("[commentator] opus audio flowing on track %s/%s (%d ch)", track.ID(), track.StreamID(), channels)
+		}
+		frameIdx++
+		if wait := time.Until(start.Add(time.Duration(frameIdx) * 20 * time.Millisecond)); wait > 0 {
+			time.Sleep(wait)
 		}
 	}
 }

@@ -93,21 +93,24 @@ func TestFileTo8SingleStereo(t *testing.T) {
 
 func TestFileTo8EightMonoMerges(t *testing.T) {
 	g, _ := FileTo8(0, []int{1, 1, 1, 1, 1, 1, 1, 1})
-	for _, part := range []string{"[0:a:0]", "[0:a:7]", "join=inputs=8:channel_layout=7.1", "channel_layouts=mono"} {
+	for _, part := range []string{"[0:a:0]", "[0:a:7]", "amerge=inputs=8", "pan=8c|"} {
 		if !strings.Contains(g, part) {
 			t.Fatalf("missing %q in %q", part, g)
 		}
+	}
+	if strings.Contains(g, "7.1") {
+		t.Fatalf("must not use 7.1 layout: %q", g)
 	}
 }
 
 func TestFileTo8FourStereo(t *testing.T) {
 	g, _ := FileTo8(0, []int{2, 2, 2, 2})
-	for _, part := range []string{"[0:a:3]", "join=inputs=4:channel_layout=7.1", "channel_layouts=stereo"} {
+	for _, part := range []string{"asplit=2", "amerge=inputs=8", "[0:a:3]", "pan=8c|"} {
 		if !strings.Contains(g, part) {
 			t.Fatalf("missing %q in %q", part, g)
 		}
 	}
-	if strings.Contains(g, "amerge=") || strings.Contains(g, "pan=8c") {
-		t.Fatalf("unexpected graph %q", g)
+	if strings.Contains(g, "7.1") || strings.Contains(g, "join=") {
+		t.Fatalf("must not use 7.1/join: %q", g)
 	}
 }

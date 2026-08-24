@@ -130,13 +130,14 @@ func channelsFromDesc(desc string) int {
 // FileTo8 builds a filter that flattens one or more audio streams into [a8] (8 discrete channels).
 // fileIdx is the FFmpeg input index (0 = media file).
 //
-// Multi-stream (e.g. 4×AAC stereo) must not use amerge+pan=8c — FFmpeg fails with
-// "Error reinitializing filters". join with an explicit 7.1 layout is reliable.
+// 4× stereo cannot be amerge'd as stereo (layout overlap → "Error reinitializing filters").
+// Split each pair to mono, amerge 8 lanes, then pan=8c. Never 7.1 — that layout is unstable on DeckLink.
 func FileTo8(fileIdx int, chs []int) (filter, outPad string) {
 	outPad = "[a8]"
 	if len(chs) == 0 {
 		chs = []int{Channels}
 	}
+	rs := "aresample=48000:async=1:first_pts=0"
 	if len(chs) == 1 {
 		n := chs[0]
 		if n > Channels {
@@ -146,44 +147,56 @@ func FileTo8(fileIdx int, chs []int) (filter, outPad string) {
 			n = 1
 		}
 		src := fmt.Sprintf("[%d:a]", fileIdx)
-		return src + "aresample=48000:async=1:first_pts=0," + PanTo8(n) + outPad, outPad
+		return src + rs + "," + PanTo8(n) + outPad, outPad
 	}
 
 	var parts []string
-	var pads []string
-	filled := 0
+	var lanes []string
+	lane := 0
 	for si, ch := range chs {
-		if filled >= Channels {
+		if lane >= Channels {
 			break
 		}
+		in := fmt.Sprintf("[%d:a:%d]", fileIdx, si)
 		if ch < 1 {
 			ch = 1
 		}
+		if ch == 1 {
+			pad := fmt.Sprintf("ln%d", lane)
+			parts = append(parts, in+rs+",aformat=channel_layouts=mono["+pad+"]")
+			lanes = append(lanes, "["+pad+"]")
+			lane++
+			continue
+		}
 		take := ch
-		if take > Channels-filled {
-			take = Channels - filled
+		if take > Channels-lane {
+			take = Channels - lane
 		}
-		in := fmt.Sprintf("[%d:a:%d]", fileIdx, si)
-		name := fmt.Sprintf("s%d", si)
-		layout := "mono"
-		if take >= 2 {
-			layout = "stereo"
-			take = 2
-		} else {
-			take = 1
+		splitName := fmt.Sprintf("sp%d", si)
+		parts = append(parts, fmt.Sprintf("%s%s,asplit=%d", in, rs, take)+splitPads(splitName, take))
+		for c := 0; c < take; c++ {
+			pad := fmt.Sprintf("ln%d", lane)
+			parts = append(parts, fmt.Sprintf("[%s%d]pan=mono|c0=c%d[%s]", splitName, c, c, pad))
+			lanes = append(lanes, "["+pad+"]")
+			lane++
 		}
-		parts = append(parts, fmt.Sprintf(
-			"%saresample=48000:async=1:first_pts=0,aformat=sample_fmts=fltp:channel_layouts=%s[%s]",
-			in, layout, name,
-		))
-		pads = append(pads, "["+name+"]")
-		filled += take
 	}
-	n := len(pads)
+	n := len(lanes)
 	if n == 0 {
 		src := fmt.Sprintf("[%d:a]", fileIdx)
-		return src + "aresample=48000:async=1:first_pts=0," + PanTo8(2) + outPad, outPad
+		return src + rs + "," + PanTo8(2) + outPad, outPad
 	}
-	joined := strings.Join(pads, "") + fmt.Sprintf("join=inputs=%d:channel_layout=7.1", n) + outPad
-	return strings.Join(parts, ";") + ";" + joined, outPad
+	merged := strings.Join(lanes, "") + fmt.Sprintf("amerge=inputs=%d", n)
+	return strings.Join(parts, ";") + ";" + merged + "," + PanTo8(min(n, Channels)) + outPad, outPad
+}
+
+func splitPads(prefix string, n int) string {
+	var b strings.Builder
+	for i := 0; i < n; i++ {
+		b.WriteByte('[')
+		b.WriteString(prefix)
+		b.WriteString(strconv.Itoa(i))
+		b.WriteByte(']')
+	}
+	return b.String()
 }

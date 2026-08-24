@@ -11,6 +11,7 @@ export const HLS_LIVE_CONFIG = {
   maxLiveSyncPlaybackRate: 1,
   maxBufferLength: 8,
   maxMaxBufferLength: 16,
+  startFragPrefetch: true,
 } as const;
 
 export function attachHls(
@@ -23,8 +24,20 @@ export function attachHls(
     live.add(hls);
     hls.loadSource(src);
     hls.attachMedia(el);
-    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+
+    let bufferedFrags = 0;
+    let started = false;
+    const tryPlay = () => {
+      if (started) return;
+      started = true;
       void el.play().catch(() => {});
+    };
+    hls.on(Hls.Events.FRAG_BUFFERED, () => {
+      bufferedFrags += 1;
+      if (bufferedFrags >= 2) tryPlay();
+    });
+    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+      window.setTimeout(() => tryPlay(), 2000);
     });
     hls.on(Hls.Events.ERROR, (_ev, data) => {
       if (!data.fatal) return;

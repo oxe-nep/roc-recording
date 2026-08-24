@@ -1200,6 +1200,8 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	fileAudioTo8 := ""
 	if source == SourceFile {
 		args = append(args, "-hwaccel", "cuda")
+		// Pace file read to realtime so DeckLink is not burst-fed (choppy first seconds).
+		args = append(args, "-re")
 		// Always loop at demuxer level; when Loop is false we stop at end-of-pass
 		// ourselves so LOOP can be toggled without restarting playback.
 		args = append(args, "-stream_loop", "-1")
@@ -1263,7 +1265,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		if formatCode != "" && !isAllDigits(formatCode) {
 			dlArgs = append(dlArgs, "-format_code", strings.TrimSpace(formatCode))
 		}
-		dlArgs = append(dlArgs, "-preroll", "0.5", "-f", "decklink", openDevice)
+		dlArgs = append(dlArgs, "-preroll", "1.5", "-f", "decklink", openDevice)
 
 		previewArgs := []string{
 			"-hide_banner", "-loglevel", "info",

@@ -103,8 +103,8 @@ func (m *Manager) runFFmpegInboundOnce(
 	args = append(args, "-analyzeduration", "0", "-probesize", "32")
 
 	filters := []string{
-		// DeckLink Hi50/Hi25 are interlaced — deinterlace before scale or the browser shows striped frames.
-		"[0:v]yadif=0:-1:0,scale=1280:720,fps=25,format=yuv420p[vout]",
+		// Deinterlace only when needed; force exactly 25 fps into the encoder.
+		"[0:v]yadif=0:-1:0,scale=1280:720:flags=fast_bilinear,fps=25,format=yuv420p,setpts=PTS-STARTPTS[vout]",
 		"[0:a]pan=8c|c0=c0|c1=c1|c2=c2|c3=c3|c4=c4|c5=c5|c6=c6|c7=c7[a8]",
 		// Mono PGM — stereo Opus without matching SDP stereo flags sounds wrong in Chrome.
 		"[a8]pan=mono|c0=0.5*c0+0.5*c1[pgm]",
@@ -136,9 +136,9 @@ func (m *Manager) runFFmpegInboundOnce(
 		"-level", "3.1",
 		"-preset", "veryfast",
 		"-tune", "zerolatency",
-		"-b:v", "2500k",
-		"-maxrate", "3000k",
-		"-bufsize", "500k",
+		"-b:v", "1500k",
+		"-maxrate", "1800k",
+		"-bufsize", "400k",
 		"-g", "25",
 		"-keyint_min", "25",
 		"-bf", "0",

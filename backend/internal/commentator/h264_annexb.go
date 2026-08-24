@@ -10,9 +10,13 @@ import (
 const h264FrameDuration = 40 * time.Millisecond
 
 type h264TrackWriter struct {
-	track  *webrtc.TrackLocalStaticSample
-	spsPps []byte
-	buf    []byte
+	track   *webrtc.TrackLocalStaticSample
+	spsPps  []byte
+	buf     []byte
+	au      []byte
+	start   time.Time
+	frameN  int
+	started bool
 }
 
 func newH264TrackWriter(track *webrtc.TrackLocalStaticSample) *h264TrackWriter {
@@ -53,15 +57,32 @@ func (w *h264TrackWriter) writeNAL(nal []byte) {
 		w.spsPps = append([]byte(nil), nal...)
 	case 8: // PPS
 		w.spsPps = append(w.spsPps, nal...)
-	case 5: // IDR — encoder is forced to 1 slice/frame
+	case 5: // IDR
 		payload := append([]byte(nil), w.spsPps...)
 		payload = append(payload, nal...)
-		_ = w.track.WriteSample(media.Sample{Data: payload, Duration: h264FrameDuration})
-	case 1: // non-IDR coded slice
-		_ = w.track.WriteSample(media.Sample{Data: nal, Duration: h264FrameDuration})
+		w.emitFrame(payload)
+	case 1: // non-IDR
+		w.emitFrame(append([]byte(nil), nal...))
 	default:
-		// AUD / SEI — ignore (must not advance RTP clock)
+		// AUD / SEI — ignore
 	}
+}
+
+func (w *h264TrackWriter) emitFrame(payload []byte) {
+	if len(payload) == 0 {
+		return
+	}
+	if !w.started {
+		w.started = true
+		w.start = time.Now()
+		w.frameN = 0
+	}
+	// Pace to 25 fps wall clock so RTP timestamps stay realtime (avoids Chrome drops/freezes).
+	w.frameN++
+	if wait := time.Until(w.start.Add(time.Duration(w.frameN) * h264FrameDuration)); wait > 0 {
+		time.Sleep(wait)
+	}
+	_ = w.track.WriteSample(media.Sample{Data: payload, Duration: h264FrameDuration})
 }
 
 func h264NALType(nal []byte) byte {

@@ -64,6 +64,14 @@ func TestParseAudioStreams8chAndStereo(t *testing.T) {
 	}
 }
 
+func TestParseFfprobeChannelCSVIgnoresWarnings(t *testing.T) {
+	raw := "ffprobe version\n[mov @ 0x1] Using non-standard frame rate\n1\n1\n1\n1\n1\n1\n1\n1\n"
+	chs := ParseFfprobeChannelCSV(raw)
+	if len(chs) != 8 {
+		t.Fatalf("got %v", chs)
+	}
+}
+
 func TestLinkPadNoCommaAfterLabel(t *testing.T) {
 	if g := LinkPad("[a8]", "asplit=2[aprevsrc][ameter];"); g != "[a8]asplit=2[aprevsrc][ameter];" {
 		t.Fatalf("got %q", g)

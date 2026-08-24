@@ -1,6 +1,7 @@
 package playout
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -91,11 +92,19 @@ func fileHasAudioStream(ffmpegBin, path string) bool {
 }
 
 func probeAudioChannels(ffmpegBin, path string) []int {
+	chs, _ := probeAudioChannelsDetailed(ffmpegBin, path)
+	return chs
+}
+
+func probeAudioChannelsDetailed(ffmpegBin, path string) (chs []int, dump string) {
 	if strings.TrimSpace(path) == "" {
-		return nil
+		return nil, ""
+	}
+	if chs := probeAudioWithFfprobeJSON(ffmpegBin, path); len(chs) > 0 {
+		return chs, ""
 	}
 	if chs := probeAudioWithFfprobe(ffmpegBin, path); len(chs) > 0 {
-		return chs
+		return chs, ""
 	}
 	cmd := exec.Command(ffmpegBin,
 		"-hide_banner",
@@ -104,7 +113,71 @@ func probeAudioChannels(ffmpegBin, path string) []int {
 		"-i", path,
 	)
 	out, _ := cmd.CombinedOutput()
-	return audiox.ParseAudioStreams(string(out))
+	banner := string(out)
+	chs = audiox.ParseAudioStreams(banner)
+	if len(chs) > 0 {
+		return chs, ""
+	}
+	return nil, audioStreamDump(banner)
+}
+
+func audioStreamDump(banner string) string {
+	var lines []string
+	for _, line := range strings.Split(banner, "\n") {
+		l := strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		low := strings.ToLower(l)
+		if strings.Contains(low, "stream #") || strings.Contains(low, "audio") || strings.Contains(low, "duration") {
+			lines = append(lines, l)
+		}
+		if len(lines) >= 16 {
+			break
+		}
+	}
+	if len(lines) == 0 {
+		return strings.TrimSpace(banner)
+	}
+	return strings.Join(lines, " | ")
+}
+
+func probeAudioWithFfprobeJSON(ffmpegBin, path string) []int {
+	probe := ffprobePath(ffmpegBin)
+	cmd := exec.Command(probe,
+		"-v", "error",
+		"-analyzeduration", "50M",
+		"-probesize", "50M",
+		"-print_format", "json",
+		"-show_streams",
+		path,
+	)
+	out, _ := cmd.CombinedOutput()
+	s := string(out)
+	i := strings.Index(s, "{")
+	if i < 0 {
+		return nil
+	}
+	var doc struct {
+		Streams []struct {
+			CodecType string `json:"codec_type"`
+			CodecName string `json:"codec_name"`
+			Channels  int    `json:"channels"`
+		} `json:"streams"`
+	}
+	if err := json.Unmarshal([]byte(s[i:]), &doc); err != nil {
+		return nil
+	}
+	var chs []int
+	for _, st := range doc.Streams {
+		isAudio := st.CodecType == "audio" || strings.HasPrefix(strings.ToLower(st.CodecName), "pcm")
+		if !isAudio {
+			continue
+		}
+		n := st.Channels
+		if n < 1 {
+			n = 1
+		}
+		chs = append(chs, n)
+	}
+	return chs
 }
 
 func probeAudioWithFfprobe(ffmpegBin, path string) []int {
@@ -118,28 +191,8 @@ func probeAudioWithFfprobe(ffmpegBin, path string) []int {
 		"-of", "csv=p=0",
 		path,
 	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return nil
-	}
-	var chs []int
-	for _, line := range strings.Split(string(out), "\n") {
-		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
-		if line == "" {
-			continue
-		}
-		// csv may be "1" or "1,stereo"
-		nStr := line
-		if i := strings.IndexByte(line, ','); i >= 0 {
-			nStr = line[:i]
-		}
-		n, err := strconv.Atoi(nStr)
-		if err != nil || n < 1 {
-			n = 1
-		}
-		chs = append(chs, n)
-	}
-	return chs
+	out, _ := cmd.CombinedOutput()
+	return audiox.ParseFfprobeChannelCSV(string(out))
 }
 
 func ffprobePath(ffmpegBin string) string {

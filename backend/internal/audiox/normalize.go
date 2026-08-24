@@ -34,6 +34,34 @@ func LinkPad(pad, chain string) string {
 	return pad + strings.TrimPrefix(chain, ",")
 }
 
+// ParseFfprobeChannelCSV reads ffprobe csv=p=0 channel counts, ignoring banner/warning lines.
+func ParseFfprobeChannelCSV(raw string) []int {
+	var chs []int
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if line == "" {
+			continue
+		}
+		nStr := line
+		if i := strings.IndexByte(line, ','); i >= 0 {
+			nStr = strings.TrimSpace(line[:i])
+		}
+		if nStr == "" || strings.EqualFold(nStr, "N/A") {
+			chs = append(chs, 1)
+			continue
+		}
+		n, err := strconv.Atoi(nStr)
+		if err != nil {
+			continue
+		}
+		if n < 1 {
+			n = 1
+		}
+		chs = append(chs, n)
+	}
+	return chs
+}
+
 // ParseAudioStreams returns channel counts per audio stream from FFmpeg -i banner text.
 func ParseAudioStreams(banner string) []int {
 	raw := strings.Split(banner, "\n")

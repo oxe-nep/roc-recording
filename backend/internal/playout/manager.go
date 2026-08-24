@@ -1204,7 +1204,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		// ourselves so LOOP can be toggled without restarting playback.
 		args = append(args, "-stream_loop", "-1")
 		args = append(args, "-i", filePath)
-		chs := probeAudioChannels(m.ffmpegBin, filePath)
+		chs, dump := probeAudioChannelsDetailed(m.ffmpegBin, filePath)
 		if len(chs) == 0 {
 			args = append(args,
 				"-f", "lavfi",
@@ -1213,6 +1213,9 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			silenceInput = true
 			fileAudioTo8, audioSrc = audiox.FileTo8(1, []int{audiox.Channels})
 			c.appendLog("file has no audio – using silent 8ch")
+			if dump != "" {
+				c.appendLog("audio probe: " + dump)
+			}
 		} else {
 			fileAudioTo8, audioSrc = audiox.FileTo8(0, chs)
 			c.appendLog(fmt.Sprintf("file audio: %d stream(s) %v → 8ch", len(chs), chs))

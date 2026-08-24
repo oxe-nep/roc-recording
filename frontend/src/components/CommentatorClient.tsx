@@ -12,12 +12,12 @@ type Props = {
 };
 
 const STATE_LABELS: Record<CommentatorConnectionState, string> = {
-  idle: "Väntar",
-  joining: "Ansluter…",
-  connecting: "Förhandlar WebRTC…",
-  connected: "Ansluten",
-  reconnecting: "Återansluter…",
-  failed: "Fel",
+  idle: "Idle",
+  joining: "Joining…",
+  connecting: "Connecting…",
+  connected: "Connected",
+  reconnecting: "Reconnecting…",
+  failed: "Failed",
 };
 
 export default function CommentatorClient({ token }: Props) {
@@ -122,13 +122,13 @@ export default function CommentatorClient({ token }: Props) {
       <header className="commentator-header">
         <div className="commentator-header-text">
           <p className="commentator-eyebrow">ROC Recording</p>
-          <h1>Fjärrkommentator</h1>
+          <h1>Remote Commentator</h1>
         </div>
         <div className="commentator-header-actions">
           <span className={`commentator-status-pill ${statusClass}`}>{STATE_LABELS[state]}</span>
           {(state === "failed" || state === "reconnecting") && (
             <button type="button" className="commentator-btn commentator-btn-primary" onClick={reconnect}>
-              Återanslut
+              Reconnect
             </button>
           )}
         </div>
@@ -139,18 +139,18 @@ export default function CommentatorClient({ token }: Props) {
       <div className="commentator-main">
         <section className="commentator-video-panel">
           <div className="commentator-video-wrap">
-            <video ref={videoRef} className="commentator-program-video" autoPlay playsInline muted={false} />
+            <video ref={videoRef} className="commentator-program-video" autoPlay playsInline />
             {state !== "connected" && (
               <div className="commentator-video-overlay">
                 <span>{STATE_LABELS[state]}</span>
               </div>
             )}
           </div>
-          <p className="commentator-video-caption">Programbild</p>
+          <p className="commentator-video-caption">Program feed</p>
         </section>
 
         <aside className="commentator-controls">
-          <h2 className="commentator-controls-title">Ljudmix</h2>
+          <h2 className="commentator-controls-title">Audio mix</h2>
 
           <div className="commentator-fader-row">
             <div className="commentator-fader-head">
@@ -202,7 +202,7 @@ export default function CommentatorClient({ token }: Props) {
           ))}
 
           {intercom.length === 0 && (
-            <p className="commentator-empty-hint">Inga intercom-kanaler aktiva i producentinställningarna.</p>
+            <p className="commentator-empty-hint">No intercom channels enabled in producer settings.</p>
           )}
         </aside>
       </div>

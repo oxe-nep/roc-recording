@@ -8,7 +8,8 @@ server {
 
     # Proxy capture-host backend (outside k3s) through same origin to avoid mixed content.
     # WebSocket dashboard feed (status + meters).
-    location /ws/commentator/ {
+    # Commentator signaling uses /api/commentator/ws/ (same /api/ proxy as join).
+    location /api/commentator/ws/ {
         proxy_pass http://${BACKEND_HOST}:${BACKEND_PORT};
         proxy_http_version 1.1;
         proxy_set_header Host $host;

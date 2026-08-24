@@ -26,7 +26,7 @@ func registerCommentatorPublicRoutes(r chi.Router, commMgr *commentator.Manager)
 		}
 		jsonOK(w, info)
 	})
-	r.Get("/ws/commentator/{token}", func(w http.ResponseWriter, r *http.Request) {
+	r.Get("/api/commentator/ws/{token}", func(w http.ResponseWriter, r *http.Request) {
 		commMgr.ServeSignaling(w, r, chi.URLParam(r, "token"))
 	})
 }

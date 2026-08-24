@@ -161,7 +161,7 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
         <div className="channel-settings-section commentator-settings-section">
           <h3>Intercom channels</h3>
           <p className="commentator-settings-hint">
-            Aktivera och namnge upp till sex mono intercom-kanaler (DeckLink spår 3–8). PGM använder spår 1–2.
+            Enable and name up to six mono intercom channels (DeckLink tracks 3–8). PGM uses tracks 1–2.
           </p>
           <div className="commentator-intercom-list">
             {intercom.map((slot, idx) => (
@@ -193,33 +193,33 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
             ))}
           </div>
           <button type="button" className="badge start-btn" disabled={busy} onClick={() => void saveSettings()}>
-            Spara intercom
+            Save intercom
           </button>
         </div>
 
         <div className="channel-settings-section commentator-settings-section">
-          <h3>Inbjudan</h3>
+          <h3>Invite link</h3>
           {displayInvite ? (
             <div className="commentator-invite-row">
               <input className="commentator-invite-url" readOnly value={displayInvite} />
               <button type="button" className="badge" disabled={busy} onClick={() => void copyInvite()}>
-                Kopiera
+                Copy
               </button>
               <button type="button" className="badge" disabled={busy} onClick={openInvite}>
-                Öppna
+                Open
               </button>
             </div>
           ) : (
-            <p className="commentator-settings-hint">Ingen aktiv inbjudan. Skapa en länk för kommentatorn.</p>
+            <p className="commentator-settings-hint">No active invite. Create a link for the commentator.</p>
           )}
           <div className="commentator-invite-actions">
             {!sessionActive ? (
               <button type="button" className="badge start-btn" disabled={busy} onClick={() => void createInvite()}>
-                Skapa inbjudan
+                Create invite
               </button>
             ) : (
               <button type="button" className="badge stop-btn" disabled={busy} onClick={() => void revokeInvite()}>
-                Återkalla inbjudan
+                Revoke invite
               </button>
             )}
           </div>

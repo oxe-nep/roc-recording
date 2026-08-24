@@ -52,7 +52,7 @@ func (m *Manager) JoinInfo(token string) (joinResponse, error) {
 		ChannelID:  id,
 		ICEServers: m.ice.ClientICEServers(),
 		Intercom:   enabledIntercom(settings),
-		WSPath:     "/ws/commentator/" + token,
+		WSPath:     "/api/commentator/ws/" + token,
 	}, nil
 }
 

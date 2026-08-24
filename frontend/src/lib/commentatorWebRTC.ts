@@ -36,7 +36,7 @@ export async function fetchCommentatorJoin(token: string): Promise<CommentatorJo
   const res = await fetch(`${base}/api/commentator/join/${encodeURIComponent(token)}`);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `Join misslyckades (${res.status})`);
+    throw new Error(body.error || `Join failed (${res.status})`);
   }
   return res.json();
 }
@@ -78,6 +78,9 @@ export class CommentatorSession {
 
     const join = await fetchCommentatorJoin(this.token);
     this.onIntercom?.(join.intercom);
+
+    this.onState?.("connecting");
+    await this.connectSignaling(join.ws_path);
 
     if (!this.localStream) {
       this.localStream = await navigator.mediaDevices.getUserMedia({
@@ -124,8 +127,6 @@ export class CommentatorSession {
       }
     };
 
-    this.onState?.("connecting");
-    await this.connectSignaling(join.ws_path);
     const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);
     this.send({ type: "offer", sdp: offer.sdp });
@@ -135,7 +136,7 @@ export class CommentatorSession {
     if (this.stopped || this.reconnectAttempts >= this.maxReconnects) {
       this.onState?.("failed");
       this.onError?.(
-        "WebRTC-anslutningen misslyckades. Kontrollera att WEBRTC_PUBLIC_HOST och ev. TURN är konfigurerat på capture host, sedan prova Återanslut."
+        "WebRTC connection failed. Check WEBRTC_PUBLIC_HOST (and TURN if remote) on the capture host, then click Reconnect."
       );
       return;
     }
@@ -155,21 +156,40 @@ export class CommentatorSession {
   }
 
   private async connectSignaling(path: string): Promise<void> {
+    const url = wsURL(path);
     await new Promise<void>((resolve, reject) => {
-      const ws = new WebSocket(wsURL(path));
+      let settled = false;
+      const ws = new WebSocket(url);
       this.ws = ws;
-      ws.onopen = () => resolve();
-      ws.onerror = () => reject(new Error("Signaling WebSocket misslyckades"));
+      ws.onopen = () => {
+        settled = true;
+        resolve();
+      };
+      ws.onclose = (ev) => {
+        if (!settled) {
+          reject(new Error(`Signaling WebSocket closed (${ev.code}${ev.reason ? `: ${ev.reason}` : ""})`));
+        }
+      };
+      ws.onerror = () => {
+        if (!settled) {
+          reject(new Error(`Signaling WebSocket failed (${url})`));
+        }
+      };
       ws.onmessage = (ev) => void this.handleSignal(JSON.parse(String(ev.data)) as SignalMsg);
     });
   }
 
   private async handleSignal(msg: SignalMsg) {
-    if (!this.pc) return;
     switch (msg.type) {
       case "config":
         if (msg.intercom) this.onIntercom?.(msg.intercom);
-        break;
+        return;
+      case "error":
+        this.onError?.(msg.message || "WebRTC error");
+        this.onState?.("failed");
+        return;
+    }
+    if (!this.pc) return;
       case "answer":
         if (msg.sdp) {
           await this.pc.setRemoteDescription({ type: "answer", sdp: msg.sdp });
@@ -187,10 +207,6 @@ export class CommentatorSession {
           return;
         }
         await this.pc.addIceCandidate(msg.candidate);
-        break;
-      case "error":
-        this.onError?.(msg.message || "WebRTC-fel");
-        this.onState?.("failed");
         break;
     }
   }

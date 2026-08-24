@@ -6,7 +6,6 @@ import { useMeterLevels, type MeterBus } from "@/hooks/useDashboard";
 const METER_SEGMENTS = 24;
 const METER_MIN_DB = -50;
 const METER_MAX_DB = 0;
-const COLS = 4;
 const COL_GAP = 3;
 const SEG_GAP = 1;
 const OFF = "rgba(255, 255, 255, 0.07)";
@@ -52,6 +51,7 @@ function zoneColor(zone: "green" | "yellow" | "red"): string {
 }
 
 function drawBank(canvas: HTMLCanvasElement, dbs: number[]) {
+  const cols = Math.max(1, dbs.length);
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
@@ -64,9 +64,9 @@ function drawBank(canvas: HTMLCanvasElement, dbs: number[]) {
   if (!ctx) return;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  const colW = (w - COL_GAP * (COLS - 1)) / COLS;
+  const colW = (w - COL_GAP * (cols - 1)) / cols;
   const segH = (h - SEG_GAP * (METER_SEGMENTS - 1)) / METER_SEGMENTS;
-  for (let c = 0; c < COLS; c++) {
+  for (let c = 0; c < cols; c++) {
     const lit = litSegmentCount(dbs[c]);
     const x = c * (colW + COL_GAP);
     for (let i = 0; i < METER_SEGMENTS; i++) {
@@ -126,39 +126,38 @@ function MeterBank({ dbs, labels, title }: { dbs: number[]; labels: string[]; ti
   );
 }
 
-function LiveBank({
-  channelId,
-  bus,
-  start,
-}: {
-  channelId: number;
-  bus: MeterBus;
-  start: 0 | 4;
-}) {
-  const levels = useMeterLevels(channelId, bus);
-  const ch = meterChannels(levels);
-  const labels = start === 0 ? ["1", "2", "3", "4"] : ["5", "6", "7", "8"];
-  const title = start === 0 ? "Audio 1–4" : "Audio 5–8";
-  return <MeterBank dbs={ch.slice(start, start + 4)} labels={labels} title={title} />;
-}
-
 export default function AudioMeters({
   channelId,
   bus,
   children,
+  channels = 8,
 }: {
   channelId: number;
   bus: MeterBus;
   children: ReactNode;
+  /** Decode/playout is stereo; encode and TC keep 8 meters. */
+  channels?: 2 | 8;
 }) {
+  const levels = useMeterLevels(channelId, bus);
+  const ch = meterChannels(levels);
+  if (channels === 2) {
+    return (
+      <>
+        <div className="audio-meter audio-meter-left audio-meter-stereo">
+          <MeterBank dbs={ch.slice(0, 2)} labels={["1", "2"]} title="Audio 1–2" />
+        </div>
+        {children}
+      </>
+    );
+  }
   return (
     <>
       <div className="audio-meter audio-meter-left">
-        <LiveBank channelId={channelId} bus={bus} start={0} />
+        <MeterBank dbs={ch.slice(0, 4)} labels={["1", "2", "3", "4"]} title="Audio 1–4" />
       </div>
       {children}
       <div className="audio-meter audio-meter-right">
-        <LiveBank channelId={channelId} bus={bus} start={4} />
+        <MeterBank dbs={ch.slice(4, 8)} labels={["5", "6", "7", "8"]} title="Audio 5–8" />
       </div>
     </>
   );

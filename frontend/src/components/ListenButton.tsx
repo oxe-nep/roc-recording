@@ -13,22 +13,38 @@ type Props = {
   pair: number | null;
   onChange: (pair: number | null) => void;
   disabled?: boolean;
+  /** Decode only has pair 1–2; encode/TC keep all four. */
+  stereoOnly?: boolean;
 };
 
-export default function ListenButton({ pair, onChange, disabled }: Props) {
+export default function ListenButton({ pair, onChange, disabled, stereoOnly }: Props) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const listening = pair != null;
   const label = listening ? LISTEN_PAIRS[pair]?.label ?? "1–2" : "";
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || stereoOnly) return;
     const onDoc = (e: MouseEvent) => {
       if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
-  }, [open]);
+  }, [open, stereoOnly]);
+
+  if (stereoOnly) {
+    return (
+      <button
+        type="button"
+        className={`badge listen-btn ${listening ? "active" : ""}`}
+        disabled={disabled}
+        onClick={() => onChange(listening ? null : 0)}
+        title={listening ? "Listening 1–2" : "Listen 1–2"}
+      >
+        {listening ? "🔊" : "🔈"}
+      </button>
+    );
+  }
 
   const pick = (id: number) => {
     onChange(pair === id ? null : id);

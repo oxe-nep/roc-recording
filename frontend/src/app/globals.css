@@ -1338,8 +1338,12 @@ html {
   border-right: 1px solid var(--border-subtle);
 }
 
-.audio-meter-right {
-  border-left: 1px solid var(--border-subtle);
+.audio-meter-stereo {
+  border-right: 1px solid var(--border-subtle);
+}
+
+.audio-meter-stereo .audio-meter-canvas {
+  width: 22px;
 }
 
 .audio-bank {

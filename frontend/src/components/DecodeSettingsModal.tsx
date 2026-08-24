@@ -335,9 +335,6 @@ export default function DecodeSettingsModal({ open, client, onClose, onSaved }: 
                   </span>
                 </label>
               </div>
-              <p className="presets-hint" style={{ marginTop: 8 }}>
-                DeckLink playout uses stereo only (first audio pair). Encode and TC keep full 8-track.
-              </p>
             </div>
 
             {source === "file" ? (

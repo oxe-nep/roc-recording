@@ -135,7 +135,7 @@ export default function DecodeGrid() {
             return (
               <div key={c.id} className={`card-panel ${c.status}`}>
                 <div className="card-stage">
-                  <AudioMeters channelId={c.id} bus="playout">
+                  <AudioMeters channelId={c.id} bus="playout" channels={2}>
                   <div className="card-thumb">
                     <HlsPreview
                       active={previewOn}
@@ -233,6 +233,7 @@ export default function DecodeGrid() {
                       {on && (
                         <ListenButton
                           pair={listenAt}
+                          stereoOnly
                           onChange={(p) => setListenPair((prev) => ({ ...prev, [c.id]: p }))}
                         />
                       )}

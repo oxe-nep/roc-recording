@@ -188,9 +188,8 @@ export class CommentatorSession {
         this.onError?.(msg.message || "WebRTC error");
         this.onState?.("failed");
         return;
-    }
-    if (!this.pc) return;
       case "answer":
+        if (!this.pc) return;
         if (msg.sdp) {
           await this.pc.setRemoteDescription({ type: "answer", sdp: msg.sdp });
           this.remoteDescSet = true;
@@ -201,7 +200,7 @@ export class CommentatorSession {
         }
         break;
       case "ice":
-        if (!msg.candidate) return;
+        if (!this.pc || !msg.candidate) return;
         if (!this.remoteDescSet) {
           this.pendingRemoteICE.push(msg.candidate);
           return;

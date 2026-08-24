@@ -7,10 +7,12 @@ import {
   fetchCommentatorSettings,
   revokeCommentatorSession,
   updateCommentatorSettings,
+  type CommentatorInfo,
   type CommentatorIntercomSlot,
 } from "@/lib/api";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { absoluteInviteURL } from "@/lib/commentatorWebRTC";
+import { commentatorIsActive, commentatorStatusLabel, commentatorStatusPillClass } from "@/lib/commentatorUi";
 
 const SLOT_COUNT = 6;
 
@@ -29,13 +31,32 @@ function defaultSlots(): CommentatorIntercomSlot[] {
   }));
 }
 
+function infoFromState(
+  enabled: boolean,
+  status: CommentatorInfo["status"],
+  sessionActive: boolean,
+  connected: boolean,
+): CommentatorInfo {
+  return {
+    id: 0,
+    enabled,
+    status,
+    session_active: sessionActive,
+    connected,
+    ptt_channel: 0,
+    intercom: [],
+  };
+}
+
 export default function CommentatorSettingsModal({ open, channelId, onClose, onSaved }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [intercom, setIntercom] = useState<CommentatorIntercomSlot[]>(defaultSlots());
   const [inviteURL, setInviteURL] = useState("");
+  const [enabled, setEnabled] = useState(false);
   const [sessionActive, setSessionActive] = useState(false);
-  const [status, setStatus] = useState<string>("off");
+  const [connected, setConnected] = useState(false);
+  const [status, setStatus] = useState<CommentatorInfo["status"]>("off");
   const hydratedRef = useRef(false);
 
   useBodyScrollLock(open);
@@ -52,7 +73,9 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
       .then(([settings, info]) => {
         setIntercom(settings.intercom?.length ? settings.intercom : defaultSlots());
         setInviteURL(info.invite_url ?? "");
+        setEnabled(!!info.enabled);
         setSessionActive(!!info.session_active);
+        setConnected(!!info.connected);
         setStatus(info.status);
       })
       .catch((e) => setError(String(e)));
@@ -68,6 +91,9 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
   }, [open, onClose, busy]);
 
   if (!open || channelId == null) return null;
+
+  const uiInfo = infoFromState(enabled, status, sessionActive, connected);
+  const active = commentatorIsActive(uiInfo);
 
   const saveSettings = async () => {
     setBusy(true);
@@ -106,6 +132,7 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
       const info = await revokeCommentatorSession(channelId);
       setInviteURL(info.invite_url ?? "");
       setSessionActive(!!info.session_active);
+      setConnected(!!info.connected);
       setStatus(info.status);
       onSaved();
     } catch (e) {
@@ -141,67 +168,32 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
         aria-label={`Remote commentator channel ${channelId}`}
       >
         <div className="modal-header">
-          <h2>Remote Commentator — Channel {channelId}</h2>
-          <button type="button" className="modal-close" onClick={onClose} aria-label="Close">
+          <h2>
+            <span className="input-badge decode">{channelId}</span>
+            <span>Commentator</span>
+          </h2>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Close" disabled={busy}>
             ×
           </button>
         </div>
 
         {error && <div className="error-message">{error}</div>}
 
-        <div className="channel-settings-section commentator-settings-section">
-          <h3>Status</h3>
-          <p className="commentator-status-line">
-            <span className={`status-pill ${sessionActive ? "status-waiting" : "status-stopped"}`}>
-              {status}
-            </span>
-          </p>
-        </div>
-
-        <div className="channel-settings-section commentator-settings-section">
-          <h3>Intercom channels</h3>
-          <p className="commentator-settings-hint">
-            Enable and name up to six mono intercom channels (DeckLink tracks 3–8). PGM uses tracks 1–2.
-          </p>
-          <div className="commentator-intercom-list">
-            {intercom.map((slot, idx) => (
-              <div key={slot.id} className="commentator-intercom-row">
-                <label className="commentator-intercom-enable">
-                  <input
-                    type="checkbox"
-                    checked={slot.enabled}
-                    disabled={busy}
-                    onChange={(e) => {
-                      const next = [...intercom];
-                      next[idx] = { ...slot, enabled: e.target.checked };
-                      setIntercom(next);
-                    }}
-                  />
-                  <span>Ch {slot.id}</span>
-                </label>
-                <input
-                  className="commentator-intercom-name"
-                  value={slot.name}
-                  disabled={busy}
-                  onChange={(e) => {
-                    const next = [...intercom];
-                    next[idx] = { ...slot, name: e.target.value };
-                    setIntercom(next);
-                  }}
-                />
-              </div>
-            ))}
+        <div className={`channel-settings-srt channel-settings-commentator${active ? " enabled" : ""}`}>
+          <div className="channel-settings-srt-head">
+            <h3>Session</h3>
+            <span className={commentatorStatusPillClass(uiInfo)}>{commentatorStatusLabel(uiInfo)}</span>
           </div>
-          <button type="button" className="badge start-btn" disabled={busy} onClick={() => void saveSettings()}>
-            Save intercom
-          </button>
-        </div>
+          <p className="channel-settings-hint">
+            Remote commentator uses WebRTC for low-latency return video and audio. PGM uses DeckLink tracks 1–2;
+            intercom channels use tracks 3–8.
+          </p>
 
-        <div className="channel-settings-section commentator-settings-section">
-          <h3>Invite link</h3>
           {displayInvite ? (
-            <div className="commentator-invite-row">
-              <input className="commentator-invite-url" readOnly value={displayInvite} />
+            <div className="srt-url-row">
+              <code className="srt-url" title={displayInvite}>
+                {displayInvite}
+              </code>
               <button type="button" className="badge" disabled={busy} onClick={() => void copyInvite()}>
                 Copy
               </button>
@@ -210,18 +202,65 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
               </button>
             </div>
           ) : (
-            <p className="commentator-settings-hint">No active invite. Create a link for the commentator.</p>
+            <p className="channel-settings-hint">No active invite. Create a link for the commentator to join.</p>
           )}
-          <div className="commentator-invite-actions">
+
+          <div className="channel-settings-actions">
             {!sessionActive ? (
-              <button type="button" className="badge start-btn" disabled={busy} onClick={() => void createInvite()}>
-                Create invite
+              <button type="button" className="tc-start-btn" disabled={busy || !enabled} onClick={() => void createInvite()}>
+                {busy ? "…" : "Create invite"}
               </button>
             ) : (
-              <button type="button" className="badge stop-btn" disabled={busy} onClick={() => void revokeInvite()}>
-                Revoke invite
+              <button type="button" className="tc-stop-btn" disabled={busy} onClick={() => void revokeInvite()}>
+                {busy ? "…" : "Revoke invite"}
               </button>
             )}
+          </div>
+        </div>
+
+        <div className="channel-settings-srt">
+          <div className="channel-settings-srt-head">
+            <h3>Intercom channels</h3>
+          </div>
+          <p className="channel-settings-hint">
+            Enable and name up to six mono intercom channels. Disabled channels are not sent to the commentator.
+          </p>
+          <div className="channel-settings-form">
+            <div className="commentator-intercom-list">
+              {intercom.map((slot, idx) => (
+                <div key={slot.id} className="commentator-intercom-row">
+                  <label className="commentator-intercom-enable">
+                    <input
+                      type="checkbox"
+                      checked={slot.enabled}
+                      disabled={busy}
+                      onChange={(e) => {
+                        const next = [...intercom];
+                        next[idx] = { ...slot, enabled: e.target.checked };
+                        setIntercom(next);
+                      }}
+                    />
+                    <span>Ch {slot.id}</span>
+                  </label>
+                  <input
+                    className="commentator-intercom-name"
+                    value={slot.name}
+                    disabled={busy || !slot.enabled}
+                    placeholder={`Intercom ${slot.id}`}
+                    onChange={(e) => {
+                      const next = [...intercom];
+                      next[idx] = { ...slot, name: e.target.value };
+                      setIntercom(next);
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="channel-settings-actions">
+            <button type="button" className="global-rec-btn" disabled={busy} onClick={() => void saveSettings()}>
+              {busy ? "…" : "Save intercom"}
+            </button>
           </div>
         </div>
       </div>

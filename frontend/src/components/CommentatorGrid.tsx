@@ -4,27 +4,19 @@ import { useState } from "react";
 import {
   createCommentatorSession,
   revokeCommentatorSession,
-  type CommentatorInfo,
 } from "@/lib/api";
+import {
+  commentatorCardMeta,
+  commentatorIsActive,
+  commentatorNumClass,
+  commentatorPanelClass,
+  commentatorThumbLabel,
+} from "@/lib/commentatorUi";
 import { showCommentatorCard } from "@/lib/workflow";
 import { sortByChannelId } from "@/lib/sortChannels";
 import { useWorkflows } from "@/hooks/useWorkflows";
 import { useDashboard } from "@/hooks/useDashboard";
 import CommentatorSettingsModal from "@/components/CommentatorSettingsModal";
-
-function statusLabel(info?: CommentatorInfo): string {
-  if (!info || !info.enabled) return "Off";
-  if (info.connected) return "Connected";
-  if (info.session_active) return "Waiting for commentator";
-  return "Ready";
-}
-
-function statusClass(info?: CommentatorInfo): string {
-  if (!info || !info.enabled) return "status-stopped";
-  if (info.connected) return "status-running";
-  if (info.session_active) return "status-waiting";
-  return "status-waiting";
-}
 
 export default function CommentatorGrid() {
   const { loading, streams, commentatorById } = useDashboard();
@@ -74,69 +66,83 @@ export default function CommentatorGrid() {
         <div className="cards-grid">
           {visible.map((s) => {
             const info = commentatorById[s.id];
+            const active = commentatorIsActive(info);
+            const live = !!info?.connected;
+            const panelClass = commentatorPanelClass(info);
+            const numClass = commentatorNumClass(info);
             const isBusy = !!busy[s.id];
+            const intercomCount = info?.intercom?.filter((slot) => slot.enabled).length ?? 0;
+
             return (
-              <article key={s.id} className="channel-card commentator-card">
-                <div className="card-head">
-                  <span className="input-badge">{s.id}</span>
-                  <span className="card-title">{s.name}</span>
-                  <span className={`status-pill ${statusClass(info)}`}>{statusLabel(info)}</span>
+              <div
+                key={s.id}
+                className={`card-panel ${s.status} ${panelClass}${active ? " commentator-active" : ""}${live ? " commentator-live" : ""}`}
+              >
+                <div className="card-stage">
+                  <div className="card-thumb commentator-thumb">
+                    <div className={`commentator-thumb-inner commentator-thumb-inner--${panelClass}`}>
+                      <span className="commentator-thumb-icon" aria-hidden>
+                        🎧
+                      </span>
+                      <span className="commentator-thumb-status">{commentatorThumbLabel(info)}</span>
+                      {active && intercomCount > 0 && (
+                        <span className="commentator-thumb-meta">{intercomCount} intercom</span>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
-                <div className="card-body commentator-card-body">
-                  {info?.connected ? (
-                    <p className="commentator-invite-hint commentator-invite-hint--live">
-                      Commentator connected
-                    </p>
-                  ) : info?.invite_url ? (
-                    <p className="commentator-invite-hint">
-                      Invite active — open Settings to copy or open the link.
-                    </p>
-                  ) : (
-                    <p className="commentator-invite-hint">
-                      Configure intercom and create an invite link.
-                    </p>
-                  )}
+                <div className="card-footer">
+                  <div className="card-top">
+                    <div className="card-identity">
+                      <span className={`card-channel-num ${numClass}`}>{s.id}</span>
+                      <div className="card-identity-text">
+                        <span className="card-name">{s.name || "Commentator"}</span>
+                        <div className="card-meta">
+                          <span className="card-meta-item">{commentatorCardMeta(info)}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="card-actions">
+                      {!info?.session_active ? (
+                        <button
+                          type="button"
+                          className="tc-start-btn"
+                          disabled={isBusy || !info?.enabled}
+                          onClick={() =>
+                            void run(s.id, async () => {
+                              await createCommentatorSession(s.id);
+                            })
+                          }
+                        >
+                          {isBusy ? "…" : "INVITE"}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="tc-stop-btn"
+                          disabled={isBusy}
+                          onClick={() =>
+                            void run(s.id, async () => {
+                              await revokeCommentatorSession(s.id);
+                            })
+                          }
+                        >
+                          {isBusy ? "…" : "REVOKE"}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="badge settings-btn"
+                        onClick={() => setSettingsId(s.id)}
+                        aria-label="Settings"
+                      >
+                        ⚙
+                      </button>
+                    </div>
+                  </div>
                 </div>
-
-                <div className="card-actions">
-                  <button
-                    type="button"
-                    className="badge"
-                    disabled={isBusy}
-                    onClick={() => setSettingsId(s.id)}
-                  >
-                    Settings
-                  </button>
-                  {!info?.session_active ? (
-                    <button
-                      type="button"
-                      className="badge start-btn"
-                      disabled={isBusy || !info?.enabled}
-                      onClick={() =>
-                        void run(s.id, async () => {
-                          await createCommentatorSession(s.id);
-                        })
-                      }
-                    >
-                      Create invite
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="badge stop-btn"
-                      disabled={isBusy}
-                      onClick={() =>
-                        void run(s.id, async () => {
-                          await revokeCommentatorSession(s.id);
-                        })
-                      }
-                    >
-                      Revoke invite
-                    </button>
-                  )}
-                </div>
-              </article>
+              </div>
             );
           })}
         </div>

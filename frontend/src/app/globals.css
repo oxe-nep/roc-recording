@@ -2651,33 +2651,71 @@ body:has(.commentator-root) .container {
   margin-top: 8px;
 }
 
-.commentator-card .card-body {
-  min-height: 3rem;
+.card-panel.commentator-active {
+  border-color: rgba(91, 159, 212, 0.28);
 }
 
-.commentator-invite-hint {
-  font-size: 0.78rem;
+.card-panel.commentator-live {
+  border-color: rgba(92, 184, 92, 0.4);
+  box-shadow: 0 0 10px rgba(92, 184, 92, 0.08);
+}
+
+.commentator-thumb {
+  background:
+    radial-gradient(ellipse 80% 60% at 50% 40%, rgba(91, 159, 212, 0.12), transparent 70%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0.2));
+}
+
+.commentator-thumb-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 16px;
+  text-align: center;
+}
+
+.commentator-thumb-icon {
+  font-size: 2rem;
+  line-height: 1;
+  opacity: 0.85;
+  filter: grayscale(0.15);
+}
+
+.commentator-thumb-status {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: var(--text-secondary);
-  line-height: 1.45;
 }
 
-.commentator-invite-hint--live {
+.commentator-thumb-inner--running .commentator-thumb-status {
   color: #9ee0b8;
 }
 
-.commentator-settings-section h3 {
-  margin-bottom: 8px;
+.commentator-thumb-inner--waiting .commentator-thumb-status {
+  color: #ffe8b8;
 }
 
-.commentator-settings-hint {
-  margin-bottom: 12px;
-  font-size: 0.78rem;
+.commentator-thumb-meta {
+  font-size: 0.62rem;
   color: var(--text-muted);
-  line-height: 1.45;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
-.commentator-status-line {
-  margin: 0;
+.channel-settings-commentator {
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 12px 12px 4px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.channel-settings-commentator.enabled {
+  border-color: rgba(91, 159, 212, 0.28);
+  background: rgba(91, 159, 212, 0.04);
 }
 
 .commentator-intercom-list {
@@ -2715,28 +2753,3 @@ body:has(.commentator-root) .container {
   font-size: 0.78rem;
 }
 
-.commentator-invite-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.commentator-invite-url {
-  flex: 1 1 220px;
-  min-width: 0;
-  height: 2rem;
-  padding: 0 10px;
-  border-radius: 4px;
-  border: 1px solid var(--border-subtle);
-  background: var(--bg-elevated);
-  color: var(--text-secondary);
-  font: inherit;
-  font-size: 0.72rem;
-}
-
-.commentator-invite-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}

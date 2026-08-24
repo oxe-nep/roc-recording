@@ -1,9 +1,12 @@
 package hls
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/roc-recording/backend/internal/audiox"
 )
 
 // PreviewPaths returns low-latency A/V HLS paths under a channel output directory.
@@ -12,10 +15,16 @@ func PreviewPaths(dir string) (playlist, segmentPattern string) {
 }
 
 // AppendAVPreviewOutputs appends ffmpeg output args for a card preview stream.
-func AppendAVPreviewOutputs(args []string, videoMap, audioMap, playlist, segPattern string) []string {
-	return append(args,
-		"-map", videoMap,
-		"-map", audioMap,
+// Video plus four stereo AAC tracks (pairs 1–2, 3–4, 5–6, 7–8) for listen selection.
+func AppendAVPreviewOutputs(args []string, videoMap, playlist, segPattern string) []string {
+	out := append(args, "-map", videoMap)
+	for i, pad := range audiox.PreviewPairMaps() {
+		out = append(out,
+			"-map", pad,
+			fmt.Sprintf("-metadata:s:a:%d", i), "title="+audiox.PreviewPairTitle(i),
+		)
+	}
+	out = append(out,
 		"-c:v", "libx264",
 		"-preset", "ultrafast",
 		"-tune", "zerolatency",
@@ -39,6 +48,7 @@ func AppendAVPreviewOutputs(args []string, videoMap, audioMap, playlist, segPatt
 		"-hls_segment_filename", segPattern,
 		playlist,
 	)
+	return out
 }
 
 // RemovePreviewArtifacts deletes preview HLS and legacy thumb/audio HLS files.

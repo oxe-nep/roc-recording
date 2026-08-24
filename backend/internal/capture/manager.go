@@ -667,17 +667,18 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	gop := strconv.Itoa(enc.VideoGOP)
 
 	audioCh := audiox.NormalizeCount(enc.AudioChannels)
-	audioBranch := "[0:a]pan=stereo|c0=c0|c1=c1,asplit=3[arec][ameter][aprev];"
+	encodeTap := "[aencsrc]pan=stereo|c0=c0|c1=c1[arec];"
 	audioEncode := []string{"-c:a", "aac", "-b:a", enc.AudioBitrate, "-ar", "48000", "-ac", "2"}
 	if audioCh == audiox.Channels {
-		audioBranch = "[0:a]" + audiox.Discrete8Pan + ",asplit=3[arec][ameter][aprevsrc];" +
-			"[aprevsrc]pan=stereo|c0=c0|c1=c1[aprev];"
+		encodeTap = "[aencsrc]anull[arec];"
 		audioEncode = []string{"-c:a", "pcm_s16le", "-ar", "48000", "-ac", "8"}
 	}
 	filterGraph := "[0:v]yadif=mode=0:deint=interlaced,split=2[vrec][vprevsrc];" +
 		"[vprevsrc]scale=640:360,fps=10,format=yuv420p[vprev];" +
 		"[vrec]format=yuv420p[vrecout];" +
-		audioBranch +
+		"[0:a]" + audiox.Discrete8Pan + ",asplit=3[aencsrc][ameter][aprevsrc];" +
+		audiox.PreviewPairGraph("[aprevsrc]") +
+		encodeTap +
 		"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
 		"ametadata=print,anullsink"
 
@@ -686,7 +687,7 @@ func (m *Manager) runFFmpeg(s *Stream) error {
 	args = append(args,
 		"-filter_complex", filterGraph,
 	)
-	args = hlsout.AppendAVPreviewOutputs(args, "[vprev]", "[aprev]", previewPlaylist, previewSeg)
+	args = hlsout.AppendAVPreviewOutputs(args, "[vprev]", previewPlaylist, previewSeg)
 	args = append(args,
 		// Master encode feed (REC remuxes with -c copy)
 		"-map", "[vrecout]",

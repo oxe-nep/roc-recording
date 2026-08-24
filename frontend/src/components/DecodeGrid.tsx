@@ -17,6 +17,7 @@ import { useWorkflows } from "@/hooks/useWorkflows";
 import { useDashboard } from "@/hooks/useDashboard";
 import HlsPreview from "@/components/HlsPreview";
 import AudioMeters from "@/components/AudioMeters";
+import ListenButton from "@/components/ListenButton";
 import DecodeSettingsModal from "@/components/DecodeSettingsModal";
 
 function formatBitrate(kbps?: number): string {
@@ -76,7 +77,7 @@ export default function DecodeGrid() {
   const { loading, playout: clients, metersPlayout: audio } = useDashboard();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Record<number, boolean>>({});
-  const [listening, setListening] = useState<Record<number, boolean>>({});
+  const [listenPair, setListenPair] = useState<Record<number, number | null>>({});
   const [settingsId, setSettingsId] = useState<number | null>(null);
   const { workflows } = useWorkflows();
 
@@ -132,7 +133,7 @@ export default function DecodeGrid() {
           {visibleClients.map((c) => {
             const on = isPlayoutOn(c.status);
             const paused = isPlayoutPaused(c.status);
-            const isListening = !!listening[c.id];
+            const listenAt = listenPair[c.id] ?? null;
             const isFile = c.source === "file";
             const title = cardTitle(c);
             return (
@@ -142,7 +143,7 @@ export default function DecodeGrid() {
                   <div className="card-thumb">
                     <HlsPreview
                       active={on}
-                      listening={isListening}
+                      listenPair={listenAt}
                       playlistPath={`/hls/playout/${c.id}/preview.m3u8`}
                       sessionKey={`${c.id}-${c.status}-${c.source ?? "srt"}-${c.sending ? "live" : "idle"}`}
                     />
@@ -234,14 +235,10 @@ export default function DecodeGrid() {
                         </button>
                       ) : null}
                       {on && (
-                        <button
-                          type="button"
-                          className={`badge listen-btn ${isListening ? "active" : ""}`}
-                          onClick={() => setListening((prev) => ({ ...prev, [c.id]: !prev[c.id] }))}
-                          title={isListening ? "Mute preview" : "Unmute preview"}
-                        >
-                          {isListening ? "🔊" : "🔈"}
-                        </button>
+                        <ListenButton
+                          pair={listenAt}
+                          onChange={(p) => setListenPair((prev) => ({ ...prev, [c.id]: p }))}
+                        />
                       )}
                       <button
                         type="button"

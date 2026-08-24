@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/roc-recording/backend/internal/audiox"
+	hlsout "github.com/roc-recording/backend/internal/hls"
 )
 
 type Status string
@@ -772,7 +773,7 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 		"[vprevsrc]scale=640:360,fps=10,format=yuv420p[vprev];" +
 		fmt.Sprintf(
 			"[0:a]"+audiox.Discrete8Pan+",asplit=3[adeck][ameter][aprevsrc];"+
-				"[aprevsrc]pan=stereo|c0=c0|c1=c1[aprev];"+
+				audiox.PreviewPairGraph("[aprevsrc]")+
 				"[adeck]asetnsamples=n=%d:p=0[aout];"+
 				"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none,"+
 				"ametadata=print:file=%s,anullsink",
@@ -800,33 +801,8 @@ func (m *Manager) runOnce(id int, st *channelState, stopCh <-chan struct{}, cfg 
 	if formatCode != "" && !isAllDigits(formatCode) {
 		args = append(args, "-format_code", strings.TrimSpace(formatCode))
 	}
-	args = append(args, "-preroll", "0.5", "-f", "decklink", openDevice,
-		// Output #2: low-latency HLS preview (video + audio)
-		"-map", "[vprev]",
-		"-map", "[aprev]",
-		"-c:v", "libx264",
-		"-preset", "ultrafast",
-		"-tune", "zerolatency",
-		"-profile:v", "baseline",
-		"-bf", "0",
-		"-g", "10",
-		"-keyint_min", "10",
-		"-sc_threshold", "0",
-		"-b:v", "800k",
-		"-maxrate", "1000k",
-		"-bufsize", "400k",
-		"-pix_fmt", "yuv420p",
-		"-c:a", "aac",
-		"-b:a", "96k",
-		"-ar", "48000",
-		"-ac", "2",
-		"-f", "hls",
-		"-hls_time", "0.5",
-		"-hls_list_size", "4",
-		"-hls_flags", "delete_segments+independent_segments+omit_endlist+program_date_time",
-		"-hls_segment_filename", previewSeg,
-		previewPlaylist,
-	)
+	args = append(args, "-preroll", "0.5", "-f", "decklink", openDevice)
+	args = hlsout.AppendAVPreviewOutputs(args, "[vprev]", previewPlaylist, previewSeg)
 
 	cmd := exec.Command(m.ffmpegBin, args...)
 	stderr, err := cmd.StderrPipe()

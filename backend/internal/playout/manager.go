@@ -1273,13 +1273,14 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		}
 		prevFilter :=
 			"[0:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,fps=10,format=yuv420p[vprev];" +
-				fmt.Sprintf("%sasplit=2[aprev][ameter];", prevAudio) +
+				fmt.Sprintf("%s%s,asplit=2[aprevsrc][ameter];", prevAudio, audiox.Discrete8Pan) +
+				audiox.PreviewPairGraph("[aprevsrc]") +
 				"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
 				"ametadata=print,anullsink"
 		previewArgs = append(previewArgs,
 			"-filter_complex", prevFilter,
 		)
-		previewArgs = hlsout.AppendAVPreviewOutputs(previewArgs, "[vprev]", "[aprev]", previewPlaylist, previewSeg)
+		previewArgs = hlsout.AppendAVPreviewOutputs(previewArgs, "[vprev]", previewPlaylist, previewSeg)
 
 		return m.runFileDeckLinkAndPreview(c, stopCh, openDevice, formatCode, w, h, fps, fmtInfo.Interlaced, loop, dlArgs, previewArgs)
 	}
@@ -1289,10 +1290,10 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		filter = vchain + ";" +
 			"[vt]scale=640:360,fps=10,format=yuv420p[vprev];" +
 			fmt.Sprintf(
-				"%s%s,aresample=48000:async=1:first_pts=0,asetnsamples=n=%d:p=0,asplit=3[aout][aprevsrc][ameter];"+
-					"[aprevsrc]pan=stereo|c0=c0|c1=c1[aprev];",
+				"%s%s,aresample=48000:async=1:first_pts=0,asetnsamples=n=%d:p=0,asplit=3[aout][aprevsrc][ameter];",
 				audioSrc, audiox.Discrete8Pan, samplesPerFrame,
 			) +
+			audiox.PreviewPairGraph("[aprevsrc]") +
 			"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
 			"ametadata=print,anullsink"
 		args = append(args,
@@ -1317,17 +1318,18 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			"-preroll", "0.5",
 			"-f", "decklink", openDevice,
 		)
-		args = hlsout.AppendAVPreviewOutputs(args, "[vprev]", "[aprev]", previewPlaylist, previewSeg)
+		args = hlsout.AppendAVPreviewOutputs(args, "[vprev]", previewPlaylist, previewSeg)
 	} else {
 		filter =
 			"[0:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,fps=10,format=yuv420p[vprev];" +
-				fmt.Sprintf("%sasplit=2[aprev][ameter];", audioSrc) +
+				fmt.Sprintf("%s%s,asplit=2[aprevsrc][ameter];", audioSrc, audiox.Discrete8Pan) +
+				audiox.PreviewPairGraph("[aprevsrc]") +
 				"[ameter]astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none," +
 				"ametadata=print,anullsink"
 		args = append(args,
 			"-filter_complex", filter,
 		)
-		args = hlsout.AppendAVPreviewOutputs(args, "[vprev]", "[aprev]", previewPlaylist, previewSeg)
+		args = hlsout.AppendAVPreviewOutputs(args, "[vprev]", previewPlaylist, previewSeg)
 	}
 
 	cmd := exec.Command(m.ffmpegBin, args...)

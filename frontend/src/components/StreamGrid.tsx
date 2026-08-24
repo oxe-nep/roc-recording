@@ -18,6 +18,7 @@ import { useWorkflows } from "@/hooks/useWorkflows";
 import { useDashboard } from "@/hooks/useDashboard";
 import HlsPreview from "@/components/HlsPreview";
 import AudioMeters from "@/components/AudioMeters";
+import ListenButton from "@/components/ListenButton";
 import ChannelSettingsModal from "@/components/ChannelSettingsModal";
 
 function formatElapsed(sec?: number): string {
@@ -48,7 +49,7 @@ export default function StreamGrid() {
   const [error, setError] = useState<string | null>(null);
   const [recBusy, setRecBusy] = useState<Record<number, boolean>>({});
   const [srtBusy, setSrtBusy] = useState<Record<number, boolean>>({});
-  const [listening, setListening] = useState<Record<number, boolean>>({});
+  const [listenPair, setListenPair] = useState<Record<number, number | null>>({});
   const [settingsId, setSettingsId] = useState<number | null>(null);
   const { workflows } = useWorkflows();
 
@@ -107,10 +108,6 @@ export default function StreamGrid() {
     );
   }, [anyRecording]);
 
-  const toggleListen = (id: number) => {
-    setListening((prev) => ({ ...prev, [id]: !prev[id] }));
-  };
-
   const settingsStream = settingsId != null ? streams.find((s) => s.id === settingsId) ?? null : null;
   const visibleStreams = sortByChannelId(streams.filter((s) => showEncodeCard(workflows, s.id)));
 
@@ -140,7 +137,7 @@ export default function StreamGrid() {
           const rec = recordings[s.id];
           const isRecording = rec?.status === "recording";
           const isEncoding = isRecording && !!rec?.encoding;
-          const isListening = !!listening[s.id];
+          const isListeningPair = listenPair[s.id] ?? null;
           const srtOn = srtById[s.id]?.status === "streaming";
           const activePreset = presets.find((p) => p.id === s.encode_preset);
           const cat = rec?.category || "_unsorted";
@@ -154,7 +151,7 @@ export default function StreamGrid() {
                 <div className="card-thumb">
                   <HlsPreview
                     active={captureOn}
-                    listening={isListening}
+                    listenPair={isListeningPair}
                     playlistPath={`/hls/${s.id}/preview.m3u8`}
                   />
                   {tslText && hasSignal && (
@@ -268,13 +265,10 @@ export default function StreamGrid() {
                         </button>
                     </>
                     {captureOn && (
-                      <button
-                        className={`badge listen-btn ${isListening ? "active" : ""}`}
-                        onClick={() => toggleListen(s.id)}
-                        title={isListening ? "Mute preview" : "Unmute preview"}
-                      >
-                        {isListening ? "🔊" : "🔈"}
-                      </button>
+                      <ListenButton
+                        pair={isListeningPair}
+                        onChange={(p) => setListenPair((prev) => ({ ...prev, [s.id]: p }))}
+                      />
                     )}
                     <button
                       type="button"

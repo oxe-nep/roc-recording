@@ -9,6 +9,7 @@ import { useWorkflows } from "@/hooks/useWorkflows";
 import { useDashboard } from "@/hooks/useDashboard";
 import HlsPreview from "@/components/HlsPreview";
 import AudioMeters from "@/components/AudioMeters";
+import ListenButton from "@/components/ListenButton";
 import TcSettingsModal from "@/components/TcSettingsModal";
 import type { TcLoopInfo } from "@/lib/api";
 
@@ -16,7 +17,7 @@ export default function TcGrid() {
   const { loading, streams, tcById, metersPlayout: audio } = useDashboard();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<Record<number, boolean>>({});
-  const [listening, setListening] = useState<Record<number, boolean>>({});
+  const [listenPair, setListenPair] = useState<Record<number, number | null>>({});
   const [settingsId, setSettingsId] = useState<number | null>(null);
   const { workflows } = useWorkflows();
 
@@ -76,7 +77,7 @@ export default function TcGrid() {
               const tc = tcById[s.id];
               const tcOn = tcIsActive(tc);
               const tcLive = tcPreviewHasSignal(tc);
-              const isListening = !!listening[s.id];
+              const listenAt = listenPair[s.id] ?? null;
               const tslText = s.tsl_text?.trim();
               const numClass = tcLive
                 ? "running"
@@ -95,7 +96,7 @@ export default function TcGrid() {
                     <div className="card-thumb">
                       <HlsPreview
                         active={tcOn}
-                        listening={isListening}
+                        listenPair={listenAt}
                         playlistPath={`/hls/playout/${s.id}/preview.m3u8`}
                         sessionKey={`${s.id}-${tc?.status ?? "off"}-${tcOn ? "on" : "off"}`}
                       />
@@ -145,14 +146,10 @@ export default function TcGrid() {
                           </button>
                         )}
                         {tcLive && (
-                          <button
-                            type="button"
-                            className={`badge listen-btn ${isListening ? "active" : ""}`}
-                            onClick={() => setListening((prev) => ({ ...prev, [s.id]: !prev[s.id] }))}
-                            title={isListening ? "Mute" : "Unmute"}
-                          >
-                            {isListening ? "🔊" : "🔈"}
-                          </button>
+                          <ListenButton
+                            pair={listenAt}
+                            onChange={(p) => setListenPair((prev) => ({ ...prev, [s.id]: p }))}
+                          />
                         )}
                         <button
                           type="button"

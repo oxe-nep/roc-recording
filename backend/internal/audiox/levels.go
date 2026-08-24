@@ -34,3 +34,24 @@ func Slice(p [Channels]float64) []float64 {
 	copy(out, p[:])
 	return out
 }
+
+// PreviewPairGraph splits an 8-channel pad into four stereo preview pads [ap0]..[ap3].
+func PreviewPairGraph(srcPad string) string {
+	return srcPad + "asplit=4[a12s][a34s][a56s][a78s];" +
+		"[a12s]pan=stereo|c0=c0|c1=c1[ap0];" +
+		"[a34s]pan=stereo|c0=c2|c1=c3[ap1];" +
+		"[a56s]pan=stereo|c0=c4|c1=c5[ap2];" +
+		"[a78s]pan=stereo|c0=c6|c1=c7[ap3];"
+}
+
+func PreviewPairMaps() []string {
+	return []string{"[ap0]", "[ap1]", "[ap2]", "[ap3]"}
+}
+
+func PreviewPairTitle(i int) string {
+	labels := []string{"1-2", "3-4", "5-6", "7-8"}
+	if i < 0 || i >= len(labels) {
+		return "1-2"
+	}
+	return labels[i]
+}

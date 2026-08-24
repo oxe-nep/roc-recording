@@ -6,7 +6,8 @@ import { mediaURL } from "@/lib/mediaBase";
 
 type Props = {
   active: boolean;
-  listening: boolean;
+  /** Selected stereo pair 0–3, or null when muted. */
+  listenPair: number | null;
   /** Absolute path on backend, e.g. /hls/playout/1/preview.m3u8 */
   playlistPath: string;
   /** Remount/reload key when pipeline restarts (e.g. TC stop→start). */
@@ -14,7 +15,7 @@ type Props = {
 };
 
 /** Low-latency HLS video+audio preview for dashboard cards. */
-export default function HlsPreview({ active, listening, playlistPath, sessionKey }: Props) {
+export default function HlsPreview({ active, listenPair, playlistPath, sessionKey }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
 
@@ -62,7 +63,7 @@ export default function HlsPreview({ active, listening, playlistPath, sessionKey
         hls.loadSource(src);
         hls.attachMedia(el);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
-          el.muted = !listening;
+          applyListen(hls, el, listenPair);
           void el.play().catch(() => {});
         });
         hls.on(Hls.Events.ERROR, (_ev, data) => {
@@ -74,7 +75,7 @@ export default function HlsPreview({ active, listening, playlistPath, sessionKey
         });
       } else if (el.canPlayType("application/vnd.apple.mpegurl")) {
         el.src = src;
-        el.muted = !listening;
+        applyNativeListen(el, listenPair);
         void el.play().catch(() => {});
       }
     };
@@ -85,18 +86,19 @@ export default function HlsPreview({ active, listening, playlistPath, sessionKey
       cancelled = true;
       stop();
     };
-    // listening is applied in a separate effect; omit to avoid full remount on mute toggle
+    // listenPair is applied in a separate effect; omit to avoid full remount on mute/pair toggle
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, playlistPath, sessionKey]);
 
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    video.muted = !listening;
-    if (listening && active) {
+    applyListen(hlsRef.current, video, listenPair);
+    applyNativeListen(video, listenPair);
+    if (listenPair != null && active) {
       void video.play().catch(() => {});
     }
-  }, [listening, active]);
+  }, [listenPair, active]);
 
   return (
     <>
@@ -105,9 +107,26 @@ export default function HlsPreview({ active, listening, playlistPath, sessionKey
         ref={videoRef}
         className={`hls-preview${active ? "" : " hls-preview-off"}`}
         playsInline
-        muted={!listening}
+        muted={listenPair == null}
         autoPlay
       />
     </>
   );
+}
+
+function applyListen(hls: Hls | null, el: HTMLVideoElement, pair: number | null) {
+  el.muted = pair == null;
+  if (!hls || pair == null) return;
+  if (hls.audioTracks.length > pair) {
+    hls.audioTrack = pair;
+  }
+}
+
+function applyNativeListen(el: HTMLVideoElement, pair: number | null) {
+  el.muted = pair == null;
+  const tracks = (el as HTMLVideoElement & { audioTracks?: { length: number; [i: number]: { enabled: boolean } } }).audioTracks;
+  if (!tracks || tracks.length === 0) return;
+  for (let i = 0; i < tracks.length; i++) {
+    tracks[i].enabled = pair != null && i === pair;
+  }
 }

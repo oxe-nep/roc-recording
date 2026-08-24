@@ -5,10 +5,12 @@ const live = new Set<Hls>();
 
 export const HLS_LIVE_CONFIG = {
   enableWorker: false,
-  lowLatencyMode: true,
-  liveSyncDurationCount: 2,
-  liveMaxLatencyDurationCount: 4,
-  maxLiveSyncPlaybackRate: 1.5,
+  lowLatencyMode: false,
+  liveSyncDurationCount: 3,
+  liveMaxLatencyDurationCount: 10,
+  maxLiveSyncPlaybackRate: 1,
+  maxBufferLength: 8,
+  maxMaxBufferLength: 16,
 } as const;
 
 export function attachHls(

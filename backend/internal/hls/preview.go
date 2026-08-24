@@ -19,11 +19,11 @@ func listenPaths(dir string, pair int) (playlist, segmentPattern string) {
 		filepath.Join(dir, fmt.Sprintf("listen_%d_%%03d.ts", pair))
 }
 
-func appendHLSFlags(args []string, playlist, segPattern string) []string {
+func appendHLSFlags(args []string, playlist, segPattern string, segTime string, listSize string) []string {
 	return append(args,
 		"-f", "hls",
-		"-hls_time", "0.5",
-		"-hls_list_size", "4",
+		"-hls_time", segTime,
+		"-hls_list_size", listSize,
 		"-hls_flags", "delete_segments+independent_segments+omit_endlist+program_date_time",
 		"-hls_segment_filename", segPattern,
 		playlist,
@@ -50,7 +50,7 @@ func AppendAVPreviewOutputs(args []string, videoMap, playlist, segPattern string
 		"-bufsize", "400k",
 		"-pix_fmt", "yuv420p",
 	)
-	out = appendHLSFlags(out, playlist, segPattern)
+	out = appendHLSFlags(out, playlist, segPattern, "1", "6")
 
 	dir := filepath.Dir(playlist)
 	for i, pad := range audiox.PreviewPairMaps() {
@@ -59,11 +59,11 @@ func AppendAVPreviewOutputs(args []string, videoMap, playlist, segPattern string
 			"-map", pad,
 			"-vn",
 			"-c:a", "aac",
-			"-b:a", "96k",
+			"-b:a", "128k",
 			"-ar", "48000",
 			"-ac", "2",
 		)
-		out = appendHLSFlags(out, lp, ls)
+		out = appendHLSFlags(out, lp, ls, "1", "6")
 	}
 	return out
 }

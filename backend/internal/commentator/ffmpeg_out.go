@@ -81,15 +81,13 @@ func (m *Manager) runFFmpegOutboundOnce(ctx context.Context, channelID int, rout
 	afilter := fmt.Sprintf("[1:a]asetpts=PTS-STARTPTS,asetnsamples=n=%d:p=0[aout]", samplesPerFrame)
 	filter := vfilter + ";" + afilter
 
-	// Webcam is for monitoring — keep DeckLink OUT buffers small for lip-sync with mic.
-	args := []string{"-hide_banner", "-loglevel", "warning", "-y", "-fflags", "nobuffer+genpts", "-flags", "low_delay"}
+	// Stable DeckLink pacing — aggressive nobuffer/preroll underruns kill both video and mic.
+	args := []string{"-hide_banner", "-loglevel", "warning", "-y", "-fflags", "+genpts"}
 	args = append(args,
-		"-thread_queue_size", "2",
 		"-f", "rawvideo", "-pix_fmt", "yuv420p",
 		"-s", fmt.Sprintf("%dx%d", inboundVideoW, inboundVideoH),
 		"-r", fmt.Sprintf("%g", inboundVideoFPS),
 		"-i", "pipe:0",
-		"-thread_queue_size", "2",
 		"-f", "s16le", "-ac", "8", "-ar", strconv.Itoa(sampleRate),
 		"-i", "pipe:3",
 		"-filter_complex", filter,
@@ -109,7 +107,7 @@ func (m *Manager) runFFmpegOutboundOnce(ctx context.Context, channelID int, rout
 	if formatCode != "" && !isAllDigits(formatCode) {
 		args = append(args, "-format_code", formatCode)
 	}
-	args = append(args, "-preroll", "0.05", "-f", "decklink", openDevice)
+	args = append(args, "-preroll", "0.12", "-f", "decklink", openDevice)
 
 	cmd := exec.CommandContext(ctx, m.ffmpegBin, args...)
 	cmd.Stdin = videoR

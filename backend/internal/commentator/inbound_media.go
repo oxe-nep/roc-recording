@@ -119,11 +119,10 @@ func (m *Manager) requestPLI(ctx context.Context, pc *webrtc.PeerConnection, tr 
 	send := func() {
 		_ = pc.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: uint32(tr.SSRC())}})
 	}
-	// Burst a few PLIs so the browser emits an IDR quickly, then back off.
-	// Continuous 500ms PLI forces huge keyframes and makes the webcam path lag/jitter.
+	// Burst for a quick keyframe, then keep a steady PLI so VP8 can recover after loss.
 	send()
-	deadline := time.Now().Add(1500 * time.Millisecond)
-	burst := time.NewTicker(250 * time.Millisecond)
+	deadline := time.Now().Add(2 * time.Second)
+	burst := time.NewTicker(200 * time.Millisecond)
 	defer burst.Stop()
 	for time.Now().Before(deadline) {
 		select {
@@ -133,7 +132,7 @@ func (m *Manager) requestPLI(ctx context.Context, pc *webrtc.PeerConnection, tr 
 			send()
 		}
 	}
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
@@ -254,20 +253,37 @@ func (m *Manager) runWebcamH264Decoder(ctx context.Context, channelID int, r io.
 }
 
 func (m *Manager) consumeVP8Webcam(ctx context.Context, channelID int, tr *webrtc.TrackRemote, frames chan<- []byte) {
-	builder := samplebuilder.New(12, &codecs.VP8Packet{}, tr.Codec().ClockRate)
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		builder := samplebuilder.New(48, &codecs.VP8Packet{}, tr.Codec().ClockRate)
+		width, height, first, ok := m.waitVP8Keyframe(ctx, channelID, tr, builder)
+		if !ok {
+			return
+		}
+		if err := m.feedVP8Decoder(ctx, channelID, tr, builder, frames, width, height, first); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Printf("[commentator %d] webcam VP8 decoder reset: %v — waiting for next keyframe", channelID, err)
+			continue
+		}
+		return
+	}
+}
 
-	// Do not start FFmpeg until we have a real keyframe — otherwise:
-	// "Discarding interframe without a prior keyframe" and black DeckLink.
-	var (
-		width  uint16 = inboundVideoW
-		height uint16 = inboundVideoH
-		first  []byte
-	)
-waitKey:
+func (m *Manager) waitVP8Keyframe(
+	ctx context.Context,
+	channelID int,
+	tr *webrtc.TrackRemote,
+	builder *samplebuilder.SampleBuilder,
+) (width, height uint16, first []byte, ok bool) {
+	width, height = inboundVideoW, inboundVideoH
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return 0, 0, nil, false
 		default:
 		}
 		pkt, _, err := tr.ReadRTP()
@@ -275,7 +291,7 @@ waitKey:
 			if err != io.EOF {
 				log.Printf("[commentator %d] webcam rtp: %v", channelID, err)
 			}
-			return
+			return 0, 0, nil, false
 		}
 		builder.Push(pkt)
 		for {
@@ -286,15 +302,25 @@ waitKey:
 			if !vp8IsKeyframe(sample.Data) {
 				continue
 			}
-			if w, h, ok := vp8KeyframeSize(sample.Data); ok {
+			if w, h, sizeOK := vp8KeyframeSize(sample.Data); sizeOK {
 				width, height = w, h
 			}
 			first = append([]byte(nil), sample.Data...)
 			log.Printf("[commentator %d] webcam VP8 keyframe %dx%d — starting decoder", channelID, width, height)
-			break waitKey
+			return width, height, first, true
 		}
 	}
+}
 
+func (m *Manager) feedVP8Decoder(
+	ctx context.Context,
+	channelID int,
+	tr *webrtc.TrackRemote,
+	builder *samplebuilder.SampleBuilder,
+	frames chan<- []byte,
+	width, height uint16,
+	first []byte,
+) error {
 	decCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	pr, pw := io.Pipe()
@@ -308,13 +334,13 @@ waitKey:
 	if err := writeIVFFileHeader(pw, width, height); err != nil {
 		_ = pw.Close()
 		wg.Wait()
-		return
+		return err
 	}
-	var pts uint64
+	pts := uint64(0)
 	if err := writeIVFFrame(pw, first, pts); err != nil {
 		_ = pw.Close()
 		wg.Wait()
-		return
+		return err
 	}
 	pts += 3600
 	log.Printf("[commentator %d] webcam VP8 samples → decoder", channelID)
@@ -324,7 +350,7 @@ waitKey:
 		case <-ctx.Done():
 			_ = pw.Close()
 			wg.Wait()
-			return
+			return ctx.Err()
 		default:
 		}
 		pkt, _, err := tr.ReadRTP()
@@ -332,9 +358,9 @@ waitKey:
 			_ = pw.Close()
 			wg.Wait()
 			if err != io.EOF {
-				log.Printf("[commentator %d] webcam rtp: %v", channelID, err)
+				return err
 			}
-			return
+			return nil
 		}
 		builder.Push(pkt)
 		for {
@@ -348,7 +374,7 @@ waitKey:
 			if err := writeIVFFrame(pw, sample.Data, pts); err != nil {
 				_ = pw.Close()
 				wg.Wait()
-				return
+				return err
 			}
 			pts += 3600
 		}
@@ -356,7 +382,11 @@ waitKey:
 }
 
 func vp8IsKeyframe(data []byte) bool {
-	return len(data) >= 10 && data[0]&0x1 == 0
+	// VP8 bitstream: P bit clear + keyframe start code 0x9d012a after the 3-byte frame tag.
+	if len(data) < 10 || data[0]&0x1 != 0 {
+		return false
+	}
+	return data[3] == 0x9d && data[4] == 0x01 && data[5] == 0x2a
 }
 
 func vp8KeyframeSize(data []byte) (w, h uint16, ok bool) {
@@ -406,7 +436,7 @@ func (m *Manager) runWebcamVP8Decoder(ctx context.Context, channelID int, r io.R
 		"-probesize", "32768", "-analyzeduration", "0",
 		"-fflags", "nobuffer+flush_packets",
 		"-flags", "low_delay",
-		"-max_delay", "0",
+		"-err_detect", "ignore_err",
 		"-f", "ivf", "-i", "pipe:0",
 		"-vf", "scale=1280:720:flags=fast_bilinear",
 		"-pix_fmt", "yuv420p",

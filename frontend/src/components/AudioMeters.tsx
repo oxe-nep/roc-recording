@@ -14,7 +14,7 @@ const GREEN = "#3fa34a";
 const YELLOW = "#d4a017";
 const RED = "#e74c3c";
 
-function hasAudioLevel(db?: number): boolean {
+function hasAudioLevel(db?: number): db is number {
   return db !== undefined && !Number.isNaN(db) && db > -89;
 }
 

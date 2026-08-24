@@ -1201,9 +1201,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 	silenceInput := false
 	fileAudioTo8 := ""
 	if source == SourceFile {
-		// Software decode: NVDEC + -stream_loop stalls HEVC at each wrap (audio
-		// keeps going, DeckLink underruns, then video bursts to catch up).
-		args = append(args, "-re")
+		// Software decode: NVDEC + -stream_loop stalls HEVC at each wrap.
 		args = append(args, "-stream_loop", "-1")
 		args = append(args, "-i", filePath)
 		chs, dump := probeAudioChannelsDetailed(m.ffmpegBin, filePath)
@@ -1250,7 +1248,6 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		dlArgs := append([]string{}, args...)
 		dlArgs = append(dlArgs,
 			"-filter_complex", filter,
-			"-filter_complex_threads", "1",
 			"-map", "[v]",
 			"-map", "[a]",
 			"-c:v", "v210",
@@ -1260,7 +1257,6 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 			"-fps_mode", "cfr",
 			"-r", fmt.Sprintf("%g", fps),
 			"-s", fmt.Sprintf("%dx%d", w, h),
-			"-max_interleave_delta", "0",
 		)
 		if fmtInfo.Interlaced {
 			dlArgs = append(dlArgs, "-flags", "+ilme+ildct", "-field_order", "tt")
@@ -1268,7 +1264,7 @@ func (m *Manager) runOnce(c *Client, stopCh <-chan struct{}) error {
 		if formatCode != "" && !isAllDigits(formatCode) {
 			dlArgs = append(dlArgs, "-format_code", strings.TrimSpace(formatCode))
 		}
-		dlArgs = append(dlArgs, "-preroll", "1.5", "-f", "decklink", openDevice)
+		dlArgs = append(dlArgs, "-preroll", "0.5", "-f", "decklink", openDevice)
 
 		previewArgs := []string{
 			"-hide_banner", "-loglevel", "info",

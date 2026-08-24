@@ -181,7 +181,7 @@ export default function DecodeGrid() {
                           {!on || paused ? (
                             <button
                               type="button"
-                              className="ctrl-btn primary"
+                              className="ctrl-btn"
                               disabled={busy[c.id] || (!c.file_id && !paused)}
                               onClick={() =>
                                 withBusy(c.id, async () => {

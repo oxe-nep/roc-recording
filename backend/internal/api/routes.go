@@ -1,8 +1,11 @@
 package api
 
 import (
+	"bufio"
 	"encoding/json"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -903,6 +906,19 @@ func (w *statusWriter) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
+func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if h, ok := w.ResponseWriter.(http.Hijacker); ok {
+		return h.Hijack()
+	}
+	return nil, nil, fmt.Errorf("response writer does not implement http.Hijacker")
+}
+
+func (w *statusWriter) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // quietRequestLogger skips high-frequency polling endpoints to keep logs readable.
 func quietRequestLogger() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -936,7 +952,9 @@ func shouldSkipRequestLog(r *http.Request) bool {
 	case strings.HasPrefix(path, "/thumb/"),
 		strings.HasPrefix(path, "/audio/"),
 		strings.HasPrefix(path, "/hls/"),
-		path == "/ws":
+		path == "/ws",
+		strings.HasPrefix(path, "/ws/commentator/"),
+		strings.HasPrefix(path, "/api/commentator/ws/"):
 		return true
 	case path == "/api/streams", path == "/api/recordings", path == "/api/srt", path == "/api/system", path == "/api/dashboard", path == "/api/encode/presets",
 		path == "/api/encode/options", path == "/api/workflows",

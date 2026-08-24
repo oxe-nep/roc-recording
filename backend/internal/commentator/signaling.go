@@ -165,25 +165,14 @@ func (m *Manager) ServeSignaling(w http.ResponseWriter, r *http.Request, token s
 		}
 		switch msg.Type {
 		case "offer":
-			if err := sess.pc.SetRemoteDescription(webrtc.SessionDescription{
-				Type: webrtc.SDPTypeOffer,
-				SDP:  msg.SDP,
-			}); err != nil {
-				writeJSON(map[string]string{"type": "error", "message": err.Error()})
-				continue
-			}
-			answer, err := sess.pc.CreateAnswer(nil)
+			answerSDP, err := m.negotiateOffer(sess, channelID, msg.SDP)
 			if err != nil {
-				writeJSON(map[string]string{"type": "error", "message": err.Error()})
-				continue
-			}
-			if err := sess.pc.SetLocalDescription(answer); err != nil {
 				writeJSON(map[string]string{"type": "error", "message": err.Error()})
 				continue
 			}
 			remoteSet = true
 			flushICE()
-			writeJSON(signalMsg{Type: "answer", SDP: answer.SDP})
+			writeJSON(signalMsg{Type: "answer", SDP: answerSDP})
 		case "ice":
 			if len(msg.Candidate) == 0 {
 				continue

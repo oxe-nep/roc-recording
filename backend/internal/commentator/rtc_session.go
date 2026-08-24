@@ -12,10 +12,13 @@ type rtcSession struct {
 	channelID   int
 	token       string
 	pc          *webrtc.PeerConnection
+	ctx         context.Context
 	cancel      context.CancelFunc
 	router      *AudioRouter
 	videoFrames chan []byte
 	stopOnce    sync.Once
+	negotiated  bool
+	negotiateMu sync.Mutex
 }
 
 func (m *Manager) newPeerConnection() (*webrtc.PeerConnection, error) {
@@ -53,67 +56,10 @@ func (m *Manager) startRTCSession(channelID int, token string) (*rtcSession, err
 		channelID:   channelID,
 		token:       token,
 		pc:          pc,
+		ctx:         ctx,
 		cancel:      cancel,
 		router:      router,
 		videoFrames: videoFrames,
-	}
-
-	videoTrack, err := webrtc.NewTrackLocalStaticSample(
-		webrtc.RTPCodecCapability{
-			MimeType:    webrtc.MimeTypeH264,
-			ClockRate:   90000,
-			SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
-		},
-		"video",
-		"program",
-	)
-	if err != nil {
-		_ = pc.Close()
-		cancel()
-		return nil, err
-	}
-	if _, err := pc.AddTrack(videoTrack); err != nil {
-		_ = pc.Close()
-		cancel()
-		return nil, err
-	}
-
-	pgmTrack, err := webrtc.NewTrackLocalStaticSample(
-		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus},
-		"audio",
-		"pgm",
-	)
-	if err != nil {
-		_ = pc.Close()
-		cancel()
-		return nil, err
-	}
-	if _, err := pc.AddTrack(pgmTrack); err != nil {
-		_ = pc.Close()
-		cancel()
-		return nil, err
-	}
-
-	settings := m.GetSettings(channelID)
-	enabled := enabledIntercom(settings)
-	intercomTracks := make([]*webrtc.TrackLocalStaticSample, 0, len(enabled))
-	for _, slot := range enabled {
-		t, err := webrtc.NewTrackLocalStaticSample(
-			webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus},
-			fmt.Sprintf("intercom%d", slot.ID),
-			fmt.Sprintf("intercom%d", slot.ID),
-		)
-		if err != nil {
-			_ = pc.Close()
-			cancel()
-			return nil, err
-		}
-		if _, err := pc.AddTrack(t); err != nil {
-			_ = pc.Close()
-			cancel()
-			return nil, err
-		}
-		intercomTracks = append(intercomTracks, t)
 	}
 
 	pc.OnTrack(func(tr *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
@@ -131,12 +77,98 @@ func (m *Manager) startRTCSession(channelID int, token string) (*rtcSession, err
 	m.rtcByChannel[channelID] = sess
 	m.mu.Unlock()
 
-	silenceCtx, silenceCancel := context.WithCancel(ctx)
-	go m.runSilenceFallback(silenceCtx, pgmTrack, intercomTracks)
-	go m.runFFmpegInbound(ctx, channelID, videoTrack, pgmTrack, enabled, intercomTracks, silenceCancel)
-	go m.runFFmpegOutbound(ctx, channelID, router, videoFrames)
-
 	return sess, nil
+}
+
+// negotiateOffer applies the browser offer, attaches outgoing tracks, and returns the SDP answer.
+// Outgoing tracks are added only after SetRemoteDescription so m-line order matches the offer.
+func (m *Manager) negotiateOffer(sess *rtcSession, channelID int, offerSDP string) (string, error) {
+	sess.negotiateMu.Lock()
+	defer sess.negotiateMu.Unlock()
+	if sess.negotiated {
+		return "", fmt.Errorf("offer already negotiated")
+	}
+
+	if err := sess.pc.SetRemoteDescription(webrtc.SessionDescription{
+		Type: webrtc.SDPTypeOffer,
+		SDP:  offerSDP,
+	}); err != nil {
+		return "", err
+	}
+
+	videoTrack, pgmTrack, intercomTracks, enabled, err := m.addCommentatorOutgoingTracks(sess.pc, channelID)
+	if err != nil {
+		return "", err
+	}
+
+	answer, err := sess.pc.CreateAnswer(nil)
+	if err != nil {
+		return "", err
+	}
+	if err := sess.pc.SetLocalDescription(answer); err != nil {
+		return "", err
+	}
+
+	silenceCtx, silenceCancel := context.WithCancel(sess.ctx)
+	go m.runSilenceFallback(silenceCtx, pgmTrack, intercomTracks)
+	go m.runFFmpegInbound(sess.ctx, channelID, videoTrack, pgmTrack, enabled, intercomTracks, silenceCancel)
+	go m.runFFmpegOutbound(sess.ctx, channelID, sess.router, sess.videoFrames)
+
+	sess.negotiated = true
+	return answer.SDP, nil
+}
+
+func (m *Manager) addCommentatorOutgoingTracks(
+	pc *webrtc.PeerConnection,
+	channelID int,
+) (*webrtc.TrackLocalStaticSample, *webrtc.TrackLocalStaticSample, []*webrtc.TrackLocalStaticSample, []IntercomSlot, error) {
+	videoTrack, err := webrtc.NewTrackLocalStaticSample(
+		webrtc.RTPCodecCapability{
+			MimeType:    webrtc.MimeTypeH264,
+			ClockRate:   90000,
+			SDPFmtpLine: "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
+		},
+		"video",
+		"program",
+	)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	if _, err := pc.AddTrack(videoTrack); err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	pgmTrack, err := webrtc.NewTrackLocalStaticSample(
+		webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus},
+		"audio",
+		"pgm",
+	)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	if _, err := pc.AddTrack(pgmTrack); err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	settings := m.GetSettings(channelID)
+	enabled := enabledIntercom(settings)
+	intercomTracks := make([]*webrtc.TrackLocalStaticSample, 0, len(enabled))
+	for _, slot := range enabled {
+		t, err := webrtc.NewTrackLocalStaticSample(
+			webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeOpus},
+			fmt.Sprintf("intercom%d", slot.ID),
+			fmt.Sprintf("intercom%d", slot.ID),
+		)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		if _, err := pc.AddTrack(t); err != nil {
+			return nil, nil, nil, nil, err
+		}
+		intercomTracks = append(intercomTracks, t)
+	}
+
+	return videoTrack, pgmTrack, intercomTracks, enabled, nil
 }
 
 func (m *Manager) endRTCSession(channelID int, sess *rtcSession) {

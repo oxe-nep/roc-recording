@@ -225,12 +225,6 @@ func probeFormats(ffmpegBin, device string) ([]Format, string) {
 	}); len(f) > 0 {
 		return f, combined.String()
 	}
-	if f := try("indev-duplex-full", []string{
-		"-hide_banner", "-loglevel", "info",
-		"-f", "decklink", "-duplex_mode", "full", "-list_formats", "1", "-i", device,
-	}); len(f) > 0 {
-		return f, combined.String()
-	}
 	return nil, combined.String()
 }
 

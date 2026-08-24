@@ -69,6 +69,7 @@ func NewRouter(mgr *capture.Manager, recMgr *recording.Manager, srtMgr *srt.Mana
 	hub := ws.NewHub(allowedOrigins)
 	startDashboardWS(hub, mgr, recMgr, srtMgr, playMgr, tcMgr, commMgr, tslMgr, wfStore, hlsBaseURL)
 	registerDashboardWS(r, hub, apiKey)
+	registerCommentatorPublicRoutes(r, commMgr)
 	r.Mount("/hls/", hlsHandler)
 	r.Get("/audio/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.Atoi(chi.URLParam(r, "id"))

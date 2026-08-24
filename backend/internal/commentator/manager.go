@@ -59,15 +59,26 @@ type Manager struct {
 	mu            sync.Mutex
 	settings      *Store
 	publicBaseURL string
+	ffmpegBin     string
+	channelInputs map[int]string
+	ice           ICEConfig
 	byID          map[int]*channel
+	rtcByChannel  map[int]*rtcSession
 }
 
-func NewManager(settings *Store, publicBaseURL string) *Manager {
+func NewManager(settings *Store, publicBaseURL string, ffmpegBin string, channelInputs map[int]string, ice ICEConfig) *Manager {
 	publicBaseURL = strings.TrimRight(strings.TrimSpace(publicBaseURL), "/")
+	if channelInputs == nil {
+		channelInputs = make(map[int]string)
+	}
 	return &Manager{
 		settings:      settings,
 		publicBaseURL: publicBaseURL,
+		ffmpegBin:     ffmpegBin,
+		channelInputs: channelInputs,
+		ice:           ice,
 		byID:          make(map[int]*channel),
+		rtcByChannel:  make(map[int]*rtcSession),
 	}
 }
 
@@ -115,17 +126,22 @@ func (m *Manager) Enable(id int) {
 
 func (m *Manager) Disable(id int) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	ch, ok := m.byID[id]
-	if !ok {
+	if ok {
+		ch.enabled = false
+		ch.status = StatusOff
+		ch.connected = false
+		ch.pttChannel = 0
+		ch.session = nil
+		ch.errorText = ""
+	}
+	if sess, ok := m.rtcByChannel[id]; ok {
+		delete(m.rtcByChannel, id)
+		m.mu.Unlock()
+		sess.stop()
 		return
 	}
-	ch.enabled = false
-	ch.status = StatusOff
-	ch.connected = false
-	ch.pttChannel = 0
-	ch.session = nil
-	ch.errorText = ""
+	m.mu.Unlock()
 }
 
 func (m *Manager) Stop(id int) {
@@ -134,7 +150,11 @@ func (m *Manager) Stop(id int) {
 
 func (m *Manager) StopAll() {
 	m.mu.Lock()
-	defer m.mu.Unlock()
+	sessions := make([]*rtcSession, 0, len(m.rtcByChannel))
+	for _, sess := range m.rtcByChannel {
+		sessions = append(sessions, sess)
+	}
+	m.rtcByChannel = make(map[int]*rtcSession)
 	for id := range m.byID {
 		if ch := m.byID[id]; ch != nil {
 			ch.enabled = false
@@ -144,6 +164,10 @@ func (m *Manager) StopAll() {
 			ch.session = nil
 			ch.errorText = ""
 		}
+	}
+	m.mu.Unlock()
+	for _, sess := range sessions {
+		sess.stop()
 	}
 }
 
@@ -186,15 +210,20 @@ func (m *Manager) CreateSession(id int) (SessionInfo, error) {
 
 func (m *Manager) RevokeSession(id int) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	ch, ok := m.byID[id]
-	if !ok || !ch.enabled {
+	if ok && ch.enabled {
+		ch.session = nil
+		ch.connected = false
+		ch.pttChannel = 0
+		ch.status = StatusWaiting
+	}
+	if sess, ok := m.rtcByChannel[id]; ok {
+		delete(m.rtcByChannel, id)
+		m.mu.Unlock()
+		sess.stop()
 		return
 	}
-	ch.session = nil
-	ch.connected = false
-	ch.pttChannel = 0
-	ch.status = StatusWaiting
+	m.mu.Unlock()
 }
 
 func (m *Manager) SetPTT(id int, channel int) {

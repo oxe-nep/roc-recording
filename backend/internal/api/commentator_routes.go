@@ -9,6 +9,24 @@ import (
 	"github.com/roc-recording/backend/internal/commentator"
 )
 
+func registerCommentatorPublicRoutes(r chi.Router, commMgr *commentator.Manager) {
+	if commMgr == nil {
+		return
+	}
+	r.Get("/api/commentator/join/{token}", func(w http.ResponseWriter, r *http.Request) {
+		token := chi.URLParam(r, "token")
+		info, err := commMgr.JoinInfo(token)
+		if err != nil {
+			jsonError(w, err.Error(), http.StatusUnauthorized)
+			return
+		}
+		jsonOK(w, info)
+	})
+	r.Get("/ws/commentator/{token}", func(w http.ResponseWriter, r *http.Request) {
+		commMgr.ServeSignaling(w, r, chi.URLParam(r, "token"))
+	})
+}
+
 func registerCommentatorRoutes(r chi.Router, commMgr *commentator.Manager) {
 	if commMgr == nil {
 		return

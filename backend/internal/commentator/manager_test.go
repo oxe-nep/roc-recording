@@ -16,7 +16,7 @@ func TestDefaultChannelSettings(t *testing.T) {
 }
 
 func TestManagerCreateSessionRequiresEnabled(t *testing.T) {
-	m := NewManager(NewStore(""), "")
+	m := NewManager(NewStore(""), "", "", nil, ICEConfig{})
 	m.EnsureChannel(1)
 	_, err := m.CreateSession(1)
 	if err == nil {
@@ -37,7 +37,7 @@ func TestManagerCreateSessionRequiresEnabled(t *testing.T) {
 }
 
 func TestManagerPTTRoutingState(t *testing.T) {
-	m := NewManager(NewStore(""), "")
+	m := NewManager(NewStore(""), "", "", nil, ICEConfig{})
 	m.Enable(2)
 	m.SetPTT(2, 3)
 	got := m.Get(2)

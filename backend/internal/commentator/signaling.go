@@ -150,7 +150,6 @@ func (m *Manager) ServeSignaling(w http.ResponseWriter, r *http.Request, token s
 	defer m.endRTCSession(channelID, sess)
 	defer m.SetConnected(channelID, false)
 
-	settings := m.GetSettings(channelID)
 	var writeMu sync.Mutex
 	writeJSON := func(v any) {
 		writeMu.Lock()

@@ -2557,38 +2557,28 @@ body:has(.commentator-root) .container {
 }
 
 .commentator-main {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
-  gap: 14px;
-  align-items: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   flex: 1 1 auto;
   min-height: 0;
 }
 
-@media (max-width: 1180px) {
-  .commentator-main {
-    grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, 1fr) auto;
-  }
-
-  .commentator-controls {
-    max-height: 42vh;
-  }
-}
-
 .commentator-video-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
+  flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .commentator-video-wrap {
   position: relative;
-  flex: 1 1 auto;
-  min-height: 0;
-  width: 100%;
+  aspect-ratio: 16 / 9;
+  height: 100%;
+  width: auto;
+  max-width: 100%;
   border-radius: 10px;
   overflow: hidden;
   border: 1px solid var(--border-strong);
@@ -2680,17 +2670,14 @@ body:has(.commentator-root) .container {
 
 .commentator-controls-below {
   width: 100%;
-  min-height: 0;
-  height: 100%;
+  flex-shrink: 0;
 }
 
 .commentator-mix-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 10px;
-  flex: 1 1 auto;
-  min-height: 0;
-  align-content: stretch;
+  align-items: stretch;
 }
 
 .commentator-channel-card-hosta {
@@ -2703,12 +2690,13 @@ body:has(.commentator-root) .container {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 4px;
   width: 100%;
-  flex: 1 1 auto;
-  min-height: 5.5rem;
-  aspect-ratio: 1;
-  max-height: none;
+  flex: 0 0 auto;
+  height: 7.5rem;
+  min-height: 7.5rem;
+  aspect-ratio: unset;
+  max-height: 7.5rem;
   padding: 12px;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.14);
@@ -2806,11 +2794,25 @@ body:has(.commentator-root) .container {
 .commentator-channel-card-pgm {
   border-color: rgba(91, 159, 212, 0.28);
   background: rgba(91, 159, 212, 0.06);
-  justify-content: center;
 }
 
 .commentator-channel-card-pgm .commentator-range {
-  margin-top: 8px;
+  margin: 0;
+}
+
+.commentator-pgm-face {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 7.5rem;
+  border-radius: 12px;
+  border: 1px dashed rgba(91, 159, 212, 0.35);
+  background: rgba(91, 159, 212, 0.08);
+  color: #9ec9ff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .commentator-channel-head {
@@ -2846,20 +2848,19 @@ body:has(.commentator-root) .container {
 .commentator-controls {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  min-height: 0;
-  height: 100%;
-  padding: 12px;
+  gap: 8px;
+  flex-shrink: 0;
+  padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid var(--border-subtle);
   background: rgba(42, 42, 42, 0.72);
   backdrop-filter: blur(6px);
-  overflow: auto;
+  overflow: visible;
 }
 
 .commentator-controls-title {
   flex-shrink: 0;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--text-secondary);

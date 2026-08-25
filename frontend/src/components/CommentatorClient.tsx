@@ -334,6 +334,9 @@ export default function CommentatorClient({ token }: Props) {
                 onChange={(e) => setPgmVol(Number(e.target.value))}
                 aria-label="PGM volume"
               />
+              <div className="commentator-pgm-face" aria-hidden>
+                <span>Program</span>
+              </div>
             </div>
 
             {intercom.map((slot) => {

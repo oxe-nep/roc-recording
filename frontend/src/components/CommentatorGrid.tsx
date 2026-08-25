@@ -97,7 +97,9 @@ export default function CommentatorGrid() {
                     <div className="card-identity">
                       <span className={`card-channel-num ${numClass}`}>{s.id}</span>
                       <div className="card-identity-text">
-                        <span className="card-name">{s.name || "Commentator"}</span>
+                        <span className="card-name" title={info?.display_name?.trim() || s.name || `Channel ${s.id}`}>
+                          {info?.display_name?.trim() || s.name || `Channel ${s.id}`}
+                        </span>
                         <div className="card-meta">
                           <span className="card-meta-item">{commentatorCardMeta(info)}</span>
                         </div>

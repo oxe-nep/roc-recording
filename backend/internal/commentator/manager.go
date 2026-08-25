@@ -47,6 +47,7 @@ type Info struct {
 	Error            string         `json:"error,omitempty"`
 	OutputFormat     string         `json:"output_format,omitempty"`
 	OutputDevice     string         `json:"output_device,omitempty"`
+	DisplayName      string         `json:"display_name,omitempty"`
 }
 
 type SessionInfo struct {
@@ -329,14 +330,15 @@ func (m *Manager) infoLocked(ch *channel) Info {
 		settings = m.settings.Get(ch.id)
 	}
 	info := Info{
-		ID:             ch.id,
-		Enabled:        ch.enabled,
-		Status:         ch.status,
-		Connected:      ch.connected,
-		PTTChannel:     ch.pttChannel,
-		Intercom:       settings.Intercom[:],
-		Error:          ch.errorText,
-		OutputFormat:   strings.TrimSpace(settings.OutputFormat),
+		ID:           ch.id,
+		Enabled:      ch.enabled,
+		Status:       ch.status,
+		Connected:    ch.connected,
+		PTTChannel:   ch.pttChannel,
+		Intercom:     settings.Intercom[:],
+		Error:        ch.errorText,
+		OutputFormat: strings.TrimSpace(settings.OutputFormat),
+		DisplayName:  strings.TrimSpace(settings.DisplayName),
 	}
 	if !ch.enabled {
 		info.Status = StatusOff

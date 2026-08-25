@@ -765,6 +765,7 @@ export interface CommentatorInfo {
   intercom: CommentatorIntercomSlot[];
   output_format?: string;
   output_device?: string;
+  display_name?: string;
   error?: string;
 }
 

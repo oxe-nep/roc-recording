@@ -24,7 +24,7 @@ export default function TcSettingsModal({ open, channelId, onClose, onSaved }: P
   const [tcStatus, setTcStatus] = useState<"off" | "running" | "restarting" | "error">("off");
   const [tcSource, setTcSource] = useState<TcLoopSource>("tod");
   const [tcUdpPort, setTcUdpPort] = useState(0);
-  const [tcFontSize, setTcFontSize] = useState(120);
+  const [tcFontSize, setTcFontSize] = useState(96);
   const [tcOpacity, setTcOpacity] = useState(0.9);
   const [tcPosition, setTcPosition] = useState<TcLoopPosition>("top_left");
   const [tcError, setTcError] = useState("");
@@ -45,7 +45,7 @@ export default function TcSettingsModal({ open, channelId, onClose, onSaved }: P
         setTcStatus(tc.status);
         setTcSource(tc.source === "external" ? "external" : "tod");
         setTcUdpPort(tc.udp_port || defaultTcUdpPort(channelId));
-        setTcFontSize(tc.fontsize || 120);
+        setTcFontSize(tc.fontsize || 96);
         setTcOpacity(tc.opacity ?? 0.9);
         setTcPosition(tc.position || "top_left");
         setTcError(tc.error || "");
@@ -81,7 +81,7 @@ export default function TcSettingsModal({ open, channelId, onClose, onSaved }: P
       setTcStatus(tc.status);
       setTcSource(tc.source === "external" ? "external" : "tod");
       setTcUdpPort(tc.udp_port || defaultTcUdpPort(channelId));
-      setTcFontSize(tc.fontsize || 120);
+      setTcFontSize(tc.fontsize || 96);
       setTcOpacity(tc.opacity ?? 0.9);
       setTcPosition(tc.position || "top_left");
       setTcError(tc.error || "");
@@ -199,7 +199,7 @@ export default function TcSettingsModal({ open, channelId, onClose, onSaved }: P
                       min={12}
                       max={200}
                       value={tcFontSize}
-                      onChange={(e) => setTcFontSize(Number(e.target.value) || 120)}
+                      onChange={(e) => setTcFontSize(Number(e.target.value) || 96)}
                       disabled={busy}
                     />
                   </label>
@@ -222,11 +222,11 @@ export default function TcSettingsModal({ open, channelId, onClose, onSaved }: P
                       onChange={(e) => setTcPosition(e.target.value as TcLoopPosition)}
                       disabled={busy}
                     >
-                      <option value="bottom_right">Bottom right</option>
-                      <option value="bottom_left">Bottom left</option>
-                      <option value="top_right">Top right</option>
                       <option value="top_left">Top left</option>
+                      <option value="top_right">Top right</option>
                       <option value="center">Center</option>
+                      <option value="bottom_left">Bottom left</option>
+                      <option value="bottom_right">Bottom right</option>
                     </select>
                   </label>
                 </div>

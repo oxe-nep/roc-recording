@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -67,6 +68,43 @@ func enabledIntercom(s ChannelSettings) []IntercomSlot {
 	return out
 }
 
+func enabledIntercomIDs(slots []IntercomSlot) []int {
+	ids := make([]int, 0, len(slots))
+	for _, slot := range slots {
+		if slot.Enabled {
+			ids = append(ids, slot.ID)
+		}
+	}
+	sort.Ints(ids)
+	return ids
+}
+
+func intercomTracksStale(previous, current []IntercomSlot) bool {
+	a := enabledIntercomIDs(previous)
+	b := enabledIntercomIDs(current)
+	if len(a) != len(b) {
+		return true
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Manager) pushConfigMessage(sess *rtcSession, channelID int, writeJSON func(any)) {
+	settings := m.GetSettings(channelID)
+	intercom := enabledIntercom(settings)
+	reconnect := intercomTracksStale(sess.enabledIntercom, intercom)
+	writeJSON(map[string]any{
+		"type":               "config",
+		"channel_id":         channelID,
+		"intercom":           intercom,
+		"reconnect_required": reconnect,
+	})
+}
+
 func (m *Manager) validateToken(token string) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -113,12 +151,6 @@ func (m *Manager) ServeSignaling(w http.ResponseWriter, r *http.Request, token s
 	defer m.SetConnected(channelID, false)
 
 	settings := m.GetSettings(channelID)
-	_ = conn.WriteJSON(map[string]any{
-		"type":       "config",
-		"channel_id": channelID,
-		"intercom":   enabledIntercom(settings),
-	})
-
 	var writeMu sync.Mutex
 	writeJSON := func(v any) {
 		writeMu.Lock()
@@ -128,6 +160,18 @@ func (m *Manager) ServeSignaling(w http.ResponseWriter, r *http.Request, token s
 			log.Printf("[commentator %d] ws write: %v", channelID, err)
 		}
 	}
+
+	sess.setPushConfig(func(slots []IntercomSlot) {
+		reconnect := intercomTracksStale(sess.enabledIntercom, slots)
+		writeJSON(map[string]any{
+			"type":               "config",
+			"channel_id":         channelID,
+			"intercom":           slots,
+			"reconnect_required": reconnect,
+		})
+	})
+
+	m.pushConfigMessage(sess, channelID, writeJSON)
 
 	sess.pc.OnICECandidate(func(c *webrtc.ICECandidate) {
 		if c == nil {

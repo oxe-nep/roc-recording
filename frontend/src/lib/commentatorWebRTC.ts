@@ -1,4 +1,5 @@
 import type { CommentatorIntercomSlot } from "@/lib/api";
+import type { CommentatorDevicePrefs } from "@/lib/commentatorPrefs";
 
 export type CommentatorJoinInfo = {
   channel_id: number;
@@ -34,6 +35,12 @@ export type CommentatorRTCStats = {
   candidatePair: string;
 };
 
+export type CommentatorSessionOptions = {
+  devices?: CommentatorDevicePrefs;
+  initialPgmVolume?: number;
+  initialIntercomVolumes?: Record<number, number>;
+};
+
 /** Commentator page always talks to backend via same origin (nginx proxy). */
 function commentatorOrigin(): string {
   if (typeof window !== "undefined") return window.location.origin;
@@ -57,7 +64,6 @@ function preferSendCodec(transceiver: RTCRtpTransceiver, mimeType: string) {
   const want = mimeType.toLowerCase();
   const preferred = caps.codecs.filter((c) => c.mimeType.toLowerCase() === want);
   if (preferred.length === 0) return;
-  // Keep VP8/others as fallback — H264-only breaks some browsers / encoders.
   const rest = caps.codecs.filter((c) => c.mimeType.toLowerCase() !== want);
   try {
     transceiver.setCodecPreferences([...preferred, ...rest]);
@@ -83,6 +89,25 @@ async function constrainWebcamSender(sender: RTCRtpSender) {
   }
 }
 
+function mediaConstraints(devices?: CommentatorDevicePrefs): MediaStreamConstraints {
+  const audio: MediaTrackConstraints = {
+    echoCancellation: true,
+    noiseSuppression: true,
+  };
+  const video: MediaTrackConstraints = {
+    width: { ideal: 1280 },
+    height: { ideal: 720 },
+    frameRate: { ideal: 25, max: 30 },
+  };
+  if (devices?.micId) {
+    audio.deviceId = { exact: devices.micId };
+  }
+  if (devices?.camId) {
+    video.deviceId = { exact: devices.camId };
+  }
+  return { audio, video };
+}
+
 export async function fetchCommentatorJoin(token: string): Promise<CommentatorJoinInfo> {
   const base = commentatorOrigin();
   const res = await fetch(`${base}/api/commentator/join/${encodeURIComponent(token)}`);
@@ -99,6 +124,7 @@ type SignalMsg = {
   channel?: number;
   candidate?: RTCIceCandidateInit;
   intercom?: CommentatorIntercomSlot[];
+  reconnect_required?: boolean;
   channel_id?: number;
   message?: string;
 };
@@ -118,6 +144,10 @@ export class CommentatorSession {
   private iceTimer: ReturnType<typeof setTimeout> | null = null;
   private statsTimer: ReturnType<typeof setInterval> | null = null;
   private audioUnlocked = false;
+  private pgmVolume = 1;
+  private intercomVolumes = new Map<number, number>();
+  private hostaActive = false;
+  private readonly devices: CommentatorDevicePrefs;
   private prevStats: {
     ts: number;
     bytesReceived: number;
@@ -128,11 +158,23 @@ export class CommentatorSession {
   onState?: (state: CommentatorConnectionState) => void;
   onError?: (message: string) => void;
   onIntercom?: (slots: CommentatorIntercomSlot[]) => void;
+  onReconnectRequired?: (required: boolean) => void;
   onRemoteVideo?: (stream: MediaStream) => void;
   onAudioLocked?: (locked: boolean) => void;
   onStats?: (stats: CommentatorRTCStats) => void;
 
-  constructor(private readonly token: string) {}
+  constructor(
+    private readonly token: string,
+    options: CommentatorSessionOptions = {},
+  ) {
+    this.devices = options.devices ?? { micId: "", camId: "" };
+    this.pgmVolume = options.initialPgmVolume ?? 1;
+    if (options.initialIntercomVolumes) {
+      for (const [id, vol] of Object.entries(options.initialIntercomVolumes)) {
+        this.intercomVolumes.set(Number(id), vol);
+      }
+    }
+  }
 
   async start(): Promise<void> {
     this.stopped = false;
@@ -153,7 +195,7 @@ export class CommentatorSession {
     if (this.stopped || this.reconnectAttempts >= this.maxReconnects) {
       this.onState?.("failed");
       this.onError?.(
-        "WebRTC connection failed. Check WEBRTC_PUBLIC_HOST (and TURN if remote) on the capture host, then click Reconnect."
+        "WebRTC connection failed. Check WEBRTC_PUBLIC_HOST (and TURN if remote) on the capture host, then click Reconnect.",
       );
       return;
     }
@@ -190,8 +232,8 @@ export class CommentatorSession {
               : "";
           reject(
             new Error(
-              `Signaling WebSocket closed (${ev.code}${ev.reason ? `: ${ev.reason}` : ""}). URL: ${url}.${hint}`
-            )
+              `Signaling WebSocket closed (${ev.code}${ev.reason ? `: ${ev.reason}` : ""}). URL: ${url}.${hint}`,
+            ),
           );
         }
       };
@@ -199,8 +241,8 @@ export class CommentatorSession {
         if (!settled) {
           reject(
             new Error(
-              `Signaling WebSocket failed (${url}). If the dashboard works but this does not, redeploy frontend + capture host and create a new invite.`
-            )
+              `Signaling WebSocket failed (${url}). If the dashboard works but this does not, redeploy frontend + capture host and create a new invite.`,
+            ),
           );
         }
       };
@@ -216,6 +258,7 @@ export class CommentatorSession {
     this.reconnectAttempts = 0;
     this.onState?.("connected");
     void this.unlockAudio();
+    this.applyAllVolumes();
     this.startStatsPolling();
   }
 
@@ -232,9 +275,9 @@ export class CommentatorSession {
       const report = await this.pc.getStats();
       let inboundVideo: RTCInboundRtpStreamStats | undefined;
       let inboundAudio: RTCInboundRtpStreamStats | undefined;
-      let codecMap = new Map<string, string>();
+      const codecMap = new Map<string, string>();
       let pairLabel = "";
-      let iceState = this.pc.iceConnectionState;
+      const iceState = this.pc.iceConnectionState;
 
       report.forEach((r) => {
         if (r.type === "codec") {
@@ -316,7 +359,7 @@ export class CommentatorSession {
       const ice = this.pc?.iceConnectionState;
       if (ice === "connected" || ice === "completed") return;
       this.onError?.(
-        "Media connection timed out (ICE). On the capture host set WEBRTC_PUBLIC_HOST to a reachable IP/hostname and configure TURN for remote commentators."
+        "Media connection timed out (ICE). On the capture host set WEBRTC_PUBLIC_HOST to a reachable IP/hostname and configure TURN for remote commentators.",
       );
       this.onState?.("failed");
     }, 25000);
@@ -336,12 +379,30 @@ export class CommentatorSession {
     this.onAudioLocked?.(!this.audioUnlocked && this.audioEls.size > 0);
   }
 
+  private applyVolumeToElement(id: string, el: HTMLAudioElement) {
+    if (id.includes("pgm") || id === "audio") {
+      el.volume = this.pgmVolume;
+      return;
+    }
+    const m = id.match(/intercom(\d+)/);
+    if (m) {
+      const slotId = Number(m[1]);
+      el.volume = this.intercomVolumes.get(slotId) ?? 0.8;
+    }
+  }
+
+  private applyAllVolumes() {
+    for (const [id, el] of this.audioEls) {
+      this.applyVolumeToElement(id, el);
+    }
+  }
+
   private bindRemoteAudio(track: MediaStreamTrack, stream: MediaStream) {
-    // Prefer MSID from server (pgm / intercomN) — track.id is a random UUID in Chrome.
     const id = stream.id || track.id || track.label || `audio-${this.audioEls.size}`;
     const existing = this.audioEls.get(id);
     if (existing) {
       existing.srcObject = new MediaStream([track]);
+      this.applyVolumeToElement(id, existing);
       void existing.play().catch(() => this.onAudioLocked?.(true));
       return;
     }
@@ -349,8 +410,7 @@ export class CommentatorSession {
     el.autoplay = true;
     el.setAttribute("playsinline", "true");
     el.srcObject = new MediaStream([track]);
-    const isPgm = id.includes("pgm") || id === "audio";
-    el.volume = isPgm ? 1 : 0.8;
+    this.applyVolumeToElement(id, el);
     el.style.display = "none";
     document.body.appendChild(el);
     this.audioEls.set(id, el);
@@ -383,6 +443,22 @@ export class CommentatorSession {
     };
   }
 
+  private async acquireLocalStream() {
+    if (this.localStream) {
+      this.localStream.getTracks().forEach((t) => t.stop());
+      this.localStream = null;
+    }
+    this.localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints(this.devices));
+    this.applyHosta();
+  }
+
+  private applyHosta() {
+    const track = this.localStream?.getAudioTracks()[0];
+    if (track) {
+      track.enabled = !this.hostaActive;
+    }
+  }
+
   private async handleOffer(sdp: string) {
     if (this.answering || this.stopped) return;
     this.answering = true;
@@ -391,16 +467,7 @@ export class CommentatorSession {
       this.pc = new RTCPeerConnection({ iceServers: this.iceServers });
       this.bindPeerConnectionHandlers();
 
-      if (!this.localStream) {
-        this.localStream = await navigator.mediaDevices.getUserMedia({
-          audio: { echoCancellation: true, noiseSuppression: true },
-          video: {
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            frameRate: { ideal: 25, max: 30 },
-          },
-        });
-      }
+      await this.acquireLocalStream();
 
       this.pc.onicecandidate = (ev) => {
         if (ev.candidate) {
@@ -419,13 +486,11 @@ export class CommentatorSession {
       await this.pc.setRemoteDescription({ type: "offer", sdp });
       this.remoteDescSet = true;
 
-      // addTrack reuses the server's recvonly m-lines (safer than addTransceiver).
-      const videoTrack = this.localStream.getVideoTracks()[0];
-      const audioTrack = this.localStream.getAudioTracks()[0];
-      if (videoTrack) this.pc.addTrack(videoTrack, this.localStream);
-      if (audioTrack) this.pc.addTrack(audioTrack, this.localStream);
+      const videoTrack = this.localStream!.getVideoTracks()[0];
+      const audioTrack = this.localStream!.getAudioTracks()[0];
+      if (videoTrack) this.pc.addTrack(videoTrack, this.localStream!);
+      if (audioTrack) this.pc.addTrack(audioTrack, this.localStream!);
 
-      // Prefer H264 for webcam — VP8 is supported but needs a clean keyframe start.
       for (const tx of this.pc.getTransceivers()) {
         if (tx.sender.track?.kind !== "video") continue;
         preferSendCodec(tx, "video/H264");
@@ -439,7 +504,7 @@ export class CommentatorSession {
       this.startIceTimeout();
 
       for (const c of this.pendingRemoteICE) {
-        await this.pc.addIceCandidate(c);
+        await this.pc.addICECandidate(c);
       }
       this.pendingRemoteICE = [];
     } catch (e) {
@@ -453,6 +518,7 @@ export class CommentatorSession {
     switch (msg.type) {
       case "config":
         if (msg.intercom) this.onIntercom?.(msg.intercom);
+        this.onReconnectRequired?.(!!msg.reconnect_required);
         return;
       case "offer":
         if (msg.sdp) await this.handleOffer(msg.sdp);
@@ -467,23 +533,30 @@ export class CommentatorSession {
           this.pendingRemoteICE.push(msg.candidate);
           return;
         }
-        await this.pc.addIceCandidate(msg.candidate);
+        await this.pc.addICECandidate(msg.candidate);
         break;
     }
   }
 
   setPGMVolume(value: number) {
+    this.pgmVolume = value;
     void this.unlockAudio();
-    for (const [id, el] of this.audioEls) {
-      if (id.includes("pgm") || id === "audio") el.volume = value;
-    }
+    this.applyAllVolumes();
   }
 
   setIntercomVolume(slotId: number, value: number) {
+    this.intercomVolumes.set(slotId, value);
     void this.unlockAudio();
     for (const [id, el] of this.audioEls) {
-      if (id.includes(`intercom${slotId}`)) el.volume = value;
+      if (id.includes(`intercom${slotId}`)) {
+        el.volume = value;
+      }
     }
+  }
+
+  setHosta(active: boolean) {
+    this.hostaActive = active;
+    this.applyHosta();
   }
 
   setPTT(channel: number) {
@@ -532,4 +605,18 @@ export function absoluteInviteURL(url: string): string {
     return `${window.location.origin}${u.startsWith("/") ? u : `/${u}`}`;
   }
   return u;
+}
+
+export async function listMediaDevices(): Promise<{
+  mics: MediaDeviceInfo[];
+  cams: MediaDeviceInfo[];
+}> {
+  if (!navigator.mediaDevices?.enumerateDevices) {
+    return { mics: [], cams: [] };
+  }
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  return {
+    mics: devices.filter((d) => d.kind === "audioinput"),
+    cams: devices.filter((d) => d.kind === "videoinput"),
+  };
 }

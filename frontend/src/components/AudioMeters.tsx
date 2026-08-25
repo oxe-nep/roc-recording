@@ -85,17 +85,19 @@ function drawBank(canvas: HTMLCanvasElement, dbs: number[]) {
 }
 
 function MeterBank({ dbs, labels, title }: { dbs: number[]; labels: string[]; title: string }) {
+  const bankRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const dbsRef = useRef(dbs);
   dbsRef.current = dbs;
 
   useEffect(() => {
+    const bank = bankRef.current;
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!bank || !canvas) return;
     const paint = () => drawBank(canvas, dbsRef.current);
     paint();
     const ro = new ResizeObserver(paint);
-    ro.observe(canvas);
+    ro.observe(bank);
     return () => ro.disconnect();
   }, []);
 
@@ -113,7 +115,7 @@ function MeterBank({ dbs, labels, title }: { dbs: number[]; labels: string[]; ti
     .join(" · ");
 
   return (
-    <div className="audio-bank" title={`${title}. Green ≤ -18 · Yellow ≤ -9 · Red above -9. ${tip}`}>
+    <div ref={bankRef} className="audio-bank" title={`${title}. Green ≤ -18 · Yellow ≤ -9 · Red above -9. ${tip}`}>
       <canvas ref={canvasRef} className="audio-meter-canvas" aria-hidden />
       <div className="audio-meter-labels">
         {labels.map((label) => (

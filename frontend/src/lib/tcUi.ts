@@ -84,5 +84,5 @@ const POSITION_GRID: Record<TcLoopPosition, string> = {
 };
 
 export function tcPositionCell(pos: TcLoopPosition): string {
-  return POSITION_GRID[pos] ?? "br";
+  return POSITION_GRID[pos] ?? "tl";
 }

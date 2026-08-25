@@ -1,12 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CommentatorIntercomSlot } from "@/lib/api";
 import {
+  loadCommentatorDebug,
+  loadCommentatorDevices,
+  loadCommentatorVolumes,
+  saveCommentatorDebug,
+  saveCommentatorDevices,
+  saveCommentatorVolumes,
+  type CommentatorDevicePrefs,
+} from "@/lib/commentatorPrefs";
+import {
   CommentatorSession,
+  listMediaDevices,
   type CommentatorConnectionState,
   type CommentatorRTCStats,
 } from "@/lib/commentatorWebRTC";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 
 type Props = {
   token: string;
@@ -22,81 +33,84 @@ const STATE_LABELS: Record<CommentatorConnectionState, string> = {
   failed: "Failed",
 };
 
-type SavedVolumes = {
-  pgm: number;
-  intercom: Record<string, number>;
-};
-
-function volumesKey(token: string) {
-  return `roc-commentator-volumes:${token}`;
-}
-
-function loadVolumes(token: string): SavedVolumes {
-  try {
-    const raw = localStorage.getItem(volumesKey(token));
-    if (!raw) return { pgm: 1, intercom: {} };
-    const parsed = JSON.parse(raw) as Partial<SavedVolumes>;
-    const pgm = typeof parsed.pgm === "number" ? Math.min(1, Math.max(0, parsed.pgm)) : 1;
-    const intercom: Record<string, number> = {};
-    if (parsed.intercom && typeof parsed.intercom === "object") {
-      for (const [id, v] of Object.entries(parsed.intercom)) {
-        if (typeof v === "number") intercom[id] = Math.min(1, Math.max(0, v));
-      }
-    }
-    return { pgm, intercom };
-  } catch {
-    return { pgm: 1, intercom: {} };
+function parseIntercomVolumes(saved: Record<string, number>): Record<number, number> {
+  const out: Record<number, number> = {};
+  for (const [id, v] of Object.entries(saved)) {
+    const n = Number(id);
+    if (Number.isFinite(n)) out[n] = v;
   }
-}
-
-function saveVolumes(token: string, pgm: number, intercom: Record<number, number>) {
-  try {
-    const payload: SavedVolumes = {
-      pgm,
-      intercom: Object.fromEntries(Object.entries(intercom).map(([k, v]) => [k, v])),
-    };
-    localStorage.setItem(volumesKey(token), JSON.stringify(payload));
-  } catch {
-    /* private mode / quota */
-  }
+  return out;
 }
 
 export default function CommentatorClient({ token }: Props) {
+  const savedVolumes = useMemo(() => loadCommentatorVolumes(token), [token]);
   const sessionRef = useRef<CommentatorSession | null>(null);
   const [state, setState] = useState<CommentatorConnectionState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [intercom, setIntercom] = useState<CommentatorIntercomSlot[]>([]);
-  const [pgmVol, setPgmVol] = useState(1);
-  const [intercomVol, setIntercomVol] = useState<Record<number, number>>({});
-  const [volsHydrated, setVolsHydrated] = useState(false);
+  const [pgmVol, setPgmVol] = useState(savedVolumes.pgm);
+  const [intercomVol, setIntercomVol] = useState<Record<number, number>>(() =>
+    parseIntercomVolumes(savedVolumes.intercom),
+  );
   const [pttActive, setPttActive] = useState<number | null>(null);
+  const [hostaActive, setHostaActive] = useState(false);
   const [audioLocked, setAudioLocked] = useState(false);
   const [rtcStats, setRtcStats] = useState<CommentatorRTCStats | null>(null);
+  const [showDebug, setShowDebug] = useState(() => loadCommentatorDebug(token));
+  const [reconnectRequired, setReconnectRequired] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [devices, setDevices] = useState<CommentatorDevicePrefs>(() => loadCommentatorDevices());
+  const [deviceLists, setDeviceLists] = useState<{ mics: MediaDeviceInfo[]; cams: MediaDeviceInfo[] }>({
+    mics: [],
+    cams: [],
+  });
+  const [deviceError, setDeviceError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const pgmVolRef = useRef(pgmVol);
+  const intercomVolRef = useRef(intercomVol);
+  pgmVolRef.current = pgmVol;
+  intercomVolRef.current = intercomVol;
+
+  useBodyScrollLock(settingsOpen);
 
   useEffect(() => {
-    const saved = loadVolumes(token);
+    const saved = loadCommentatorVolumes(token);
     setPgmVol(saved.pgm);
-    const out: Record<number, number> = {};
-    for (const [id, v] of Object.entries(saved.intercom)) {
-      const n = Number(id);
-      if (Number.isFinite(n)) out[n] = v;
-    }
-    setIntercomVol(out);
-    setVolsHydrated(true);
+    setIntercomVol(parseIntercomVolumes(saved.intercom));
+    setShowDebug(loadCommentatorDebug(token));
   }, [token]);
+
+  useEffect(() => {
+    saveCommentatorVolumes(token, pgmVol, intercomVol);
+  }, [token, pgmVol, intercomVol]);
+
+  useEffect(() => {
+    saveCommentatorDebug(token, showDebug);
+  }, [token, showDebug]);
+
+  const sessionOptions = useMemo(() => {
+    const saved = loadCommentatorVolumes(token);
+    return {
+      devices,
+      initialPgmVolume: saved.pgm,
+      initialIntercomVolumes: parseIntercomVolumes(saved.intercom),
+    };
+  }, [token, devices]);
 
   const bindSession = useCallback((session: CommentatorSession) => {
     session.onState = setState;
     session.onError = (msg) => setError(msg);
     session.onAudioLocked = setAudioLocked;
     session.onStats = setRtcStats;
+    session.onReconnectRequired = setReconnectRequired;
     session.onIntercom = (slots) => {
       setIntercom(slots);
       setIntercomVol((prev) => {
-        const next = { ...prev };
+        const next: Record<number, number> = {};
         for (const s of slots) {
-          if (next[s.id] == null) next[s.id] = 0.8;
+          const vol = prev[s.id] ?? intercomVolRef.current[s.id] ?? 0.8;
+          next[s.id] = vol;
+          session.setIntercomVolume(s.id, vol);
         }
         return next;
       });
@@ -112,7 +126,7 @@ export default function CommentatorClient({ token }: Props) {
   }, []);
 
   useEffect(() => {
-    const session = new CommentatorSession(token);
+    const session = new CommentatorSession(token, sessionOptions);
     sessionRef.current = session;
     bindSession(session);
 
@@ -125,12 +139,13 @@ export default function CommentatorClient({ token }: Props) {
       session.stop();
       sessionRef.current = null;
     };
-  }, [token, bindSession]);
+  }, [token, sessionOptions, bindSession]);
 
   const reconnect = () => {
     sessionRef.current?.stop();
     setError(null);
-    const session = new CommentatorSession(token);
+    setReconnectRequired(false);
+    const session = new CommentatorSession(token, sessionOptions);
     sessionRef.current = session;
     bindSession(session);
     void session.start().catch((e) => {
@@ -152,9 +167,8 @@ export default function CommentatorClient({ token }: Props) {
   }, [intercomVol]);
 
   useEffect(() => {
-    if (!volsHydrated) return;
-    saveVolumes(token, pgmVol, intercomVol);
-  }, [token, pgmVol, intercomVol, volsHydrated]);
+    sessionRef.current?.setHosta(hostaActive);
+  }, [hostaActive]);
 
   const bindPTT = (channelId: number) => ({
     onPointerDown: (e: React.PointerEvent) => {
@@ -176,6 +190,38 @@ export default function CommentatorClient({ token }: Props) {
     },
   });
 
+  const bindHosta = () => ({
+    onPointerDown: (e: React.PointerEvent) => {
+      e.preventDefault();
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      setHostaActive(true);
+    },
+    onPointerUp: (e: React.PointerEvent) => {
+      e.preventDefault();
+      setHostaActive(false);
+    },
+    onPointerLeave: () => setHostaActive(false),
+  });
+
+  const openSettings = async () => {
+    setDeviceError(null);
+    setSettingsOpen(true);
+    try {
+      await navigator.mediaDevices.getUserMedia({ audio: true, video: true }).then((s) => {
+        s.getTracks().forEach((t) => t.stop());
+      });
+      setDeviceLists(await listMediaDevices());
+    } catch (e) {
+      setDeviceError(String(e));
+    }
+  };
+
+  const applyDevices = () => {
+    saveCommentatorDevices(devices);
+    setSettingsOpen(false);
+    reconnect();
+  };
+
   const statusClass =
     state === "connected"
       ? "commentator-status--ok"
@@ -191,8 +237,19 @@ export default function CommentatorClient({ token }: Props) {
           <h1>Remote Commentator</h1>
         </div>
         <div className="commentator-header-actions">
+          <label className="commentator-toggle" title="Show WebRTC debug overlay on video">
+            <input
+              type="checkbox"
+              checked={showDebug}
+              onChange={(e) => setShowDebug(e.target.checked)}
+            />
+            <span>Debug</span>
+          </label>
+          <button type="button" className="commentator-btn" onClick={() => void openSettings()}>
+            Settings
+          </button>
           <span className={`commentator-status-pill ${statusClass}`}>{STATE_LABELS[state]}</span>
-          {(state === "failed" || state === "reconnecting") && (
+          {(state === "failed" || state === "reconnecting" || reconnectRequired) && (
             <button type="button" className="commentator-btn commentator-btn-primary" onClick={reconnect}>
               Reconnect
             </button>
@@ -201,6 +258,11 @@ export default function CommentatorClient({ token }: Props) {
       </header>
 
       {error && <div className="commentator-alert">{error}</div>}
+      {reconnectRequired && state === "connected" && (
+        <div className="commentator-alert commentator-alert-warn">
+          Intercom channels changed on the producer side. Reconnect to update audio tracks.
+        </div>
+      )}
       {audioLocked && (
         <button
           type="button"
@@ -212,16 +274,16 @@ export default function CommentatorClient({ token }: Props) {
         </button>
       )}
 
-      <div className="commentator-main">
+      <div className="commentator-main commentator-main-stack">
         <section className="commentator-video-panel">
-          <div className="commentator-video-wrap">
+          <div className="commentator-video-wrap commentator-video-wrap-large">
             <video ref={videoRef} className="commentator-program-video" autoPlay playsInline muted />
             {state !== "connected" && (
               <div className="commentator-video-overlay">
                 <span>{STATE_LABELS[state]}</span>
               </div>
             )}
-            {state === "connected" && rtcStats && (
+            {state === "connected" && showDebug && rtcStats && (
               <div className="commentator-stats-overlay" title="WebRTC receive stats for program video">
                 <div>
                   {rtcStats.videoCodec} · {rtcStats.videoInKbps} kb/s · {rtcStats.videoInFps} fps
@@ -252,63 +314,137 @@ export default function CommentatorClient({ token }: Props) {
           </p>
         </section>
 
-        <aside className="commentator-controls">
-          <h2 className="commentator-controls-title">Audio mix</h2>
-
-          <div className="commentator-fader-row">
-            <div className="commentator-fader-head">
-              <label htmlFor="pgm-vol">PGM / mix-minus</label>
-              <span className="commentator-fader-val">{Math.round(pgmVol * 100)}%</span>
+        <section className="commentator-controls commentator-controls-below">
+          <div className="commentator-mix-toolbar">
+            <h2 className="commentator-controls-title">Audio mix</h2>
+            <div className="commentator-mix-toolbar-actions">
+              <button
+                type="button"
+                className={`commentator-hosta${hostaActive ? " active" : ""}`}
+                {...bindHosta()}
+                title="Hold to mute outgoing mic (cough mute)"
+              >
+                HOSTA
+              </button>
             </div>
-            <input
-              id="pgm-vol"
-              className="commentator-range"
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={pgmVol}
-              onChange={(e) => setPgmVol(Number(e.target.value))}
-            />
           </div>
 
-          {intercom.map((slot) => (
-            <div key={slot.id} className="commentator-fader-row">
-              <div className="commentator-fader-head">
-                <label htmlFor={`ic-${slot.id}`}>{slot.name}</label>
-                <span className="commentator-fader-val">
-                  {Math.round((intercomVol[slot.id] ?? 0.8) * 100)}%
-                </span>
+          <div className="commentator-pgm-row">
+            <div className="commentator-channel-card commentator-channel-card-pgm">
+              <div className="commentator-channel-head">
+                <span className="commentator-channel-name">PGM / mix-minus</span>
+                <span className="commentator-fader-val">{Math.round(pgmVol * 100)}%</span>
               </div>
-              <div className="commentator-fader-actions">
-                <input
-                  id={`ic-${slot.id}`}
-                  className="commentator-range"
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={intercomVol[slot.id] ?? 0.8}
-                  onChange={(e) =>
-                    setIntercomVol((prev) => ({ ...prev, [slot.id]: Number(e.target.value) }))
-                  }
-                />
-                <button
-                  type="button"
-                  className={`commentator-ptt${pttActive === slot.id ? " active" : ""}`}
-                  {...bindPTT(slot.id)}
-                >
-                  PTT
-                </button>
-              </div>
+              <input
+                id="pgm-vol"
+                className="commentator-range commentator-range-accent"
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={pgmVol}
+                onChange={(e) => setPgmVol(Number(e.target.value))}
+              />
             </div>
-          ))}
+          </div>
 
-          {intercom.length === 0 && (
+          {intercom.length > 0 ? (
+            <div className="commentator-intercom-grid">
+              {intercom.map((slot) => {
+                const vol = intercomVol[slot.id] ?? 0.8;
+                return (
+                  <div key={slot.id} className="commentator-channel-card">
+                    <div className="commentator-channel-head">
+                      <span className="commentator-channel-name">{slot.name}</span>
+                      <span className="commentator-fader-val">{Math.round(vol * 100)}%</span>
+                    </div>
+                    <input
+                      id={`ic-${slot.id}`}
+                      className="commentator-range"
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={vol}
+                      onChange={(e) =>
+                        setIntercomVol((prev) => ({ ...prev, [slot.id]: Number(e.target.value) }))
+                      }
+                      aria-label={`${slot.name} volume`}
+                    />
+                    <button
+                      type="button"
+                      className={`commentator-ptt commentator-ptt-named${pttActive === slot.id ? " active" : ""}`}
+                      {...bindPTT(slot.id)}
+                    >
+                      {slot.name}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
             <p className="commentator-empty-hint">No intercom channels enabled in producer settings.</p>
           )}
-        </aside>
+        </section>
       </div>
+
+      {settingsOpen && (
+        <div className="modal-backdrop" onClick={() => setSettingsOpen(false)} role="presentation">
+          <div
+            className="modal-panel commentator-settings-panel"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-label="Commentator device settings"
+          >
+            <div className="modal-header">
+              <h2>Input devices</h2>
+              <button type="button" className="modal-close" onClick={() => setSettingsOpen(false)} aria-label="Close">
+                ×
+              </button>
+            </div>
+            {deviceError && <div className="commentator-alert">{deviceError}</div>}
+            <p className="channel-settings-hint">
+              Device choices are saved in this browser. Reconnect applies a new mic/camera.
+            </p>
+            <label className="presets-field">
+              <span>Microphone</span>
+              <select
+                value={devices.micId}
+                onChange={(e) => setDevices((d) => ({ ...d, micId: e.target.value }))}
+              >
+                <option value="">System default</option>
+                {deviceLists.mics.map((d) => (
+                  <option key={d.deviceId} value={d.deviceId}>
+                    {d.label || `Mic ${d.deviceId.slice(0, 8)}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="presets-field">
+              <span>Camera</span>
+              <select
+                value={devices.camId}
+                onChange={(e) => setDevices((d) => ({ ...d, camId: e.target.value }))}
+              >
+                <option value="">System default</option>
+                {deviceLists.cams.map((d) => (
+                  <option key={d.deviceId} value={d.deviceId}>
+                    {d.label || `Camera ${d.deviceId.slice(0, 8)}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="channel-settings-actions">
+              <button type="button" className="commentator-btn" onClick={() => setSettingsOpen(false)}>
+                Cancel
+              </button>
+              <button type="button" className="commentator-btn commentator-btn-primary" onClick={applyDevices}>
+                Save &amp; reconnect
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

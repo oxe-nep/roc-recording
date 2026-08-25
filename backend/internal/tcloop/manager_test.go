@@ -5,6 +5,31 @@ import (
 	"testing"
 )
 
+func TestDefaultSettings(t *testing.T) {
+	got := defaultSettings()
+	if got.FontSize != 96 {
+		t.Fatalf("fontsize: got %d want 96", got.FontSize)
+	}
+	if got.Position != PosTopLeft {
+		t.Fatalf("position: got %s want %s", got.Position, PosTopLeft)
+	}
+}
+
+func TestPositionXYDefaultsTopLeft(t *testing.T) {
+	x, y := positionXY(PosTopLeft)
+	if x != "40" || y != "40" {
+		t.Fatalf("top_left: got x=%s y=%s", x, y)
+	}
+	x, y = positionXY("")
+	if x != "40" || y != "40" {
+		t.Fatalf("empty position should be top_left, got x=%s y=%s", x, y)
+	}
+	x, y = positionXY(PosBottomRight)
+	if x != "w-tw-40" || y != "h-th-40" {
+		t.Fatalf("bottom_right: got x=%s y=%s", x, y)
+	}
+}
+
 func TestBuildDrawtextUsesTextfile(t *testing.T) {
 	got := buildDrawtext(Settings{FontSize: 48, Opacity: 0.9, Position: PosTopLeft}, "/tmp/roc-tcloop-1-tod.txt")
 	if !strings.Contains(got, "textfile=/tmp/roc-tcloop-1-tod.txt") {

@@ -572,10 +572,18 @@ html {
 }
 
 .card-stage {
-  display: flex;
-  flex-direction: row;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
   align-items: stretch;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  min-height: 0;
   min-width: 0;
+}
+
+.card-stage > .card-thumb:only-child {
+  grid-column: 1 / -1;
 }
 
 .card-panel.running {
@@ -598,9 +606,10 @@ html {
 }
 
 .card-thumb {
-  flex: 1;
   min-width: 0;
-  aspect-ratio: 16/9;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
   background: var(--bg-elevated);
   display: flex;
   align-items: center;
@@ -1329,9 +1338,12 @@ html {
   align-items: stretch;
   gap: 3px;
   flex-shrink: 0;
-  align-self: stretch;
+  height: 100%;
+  min-height: 0;
+  width: clamp(28px, 9%, 44px);
   padding: 6px 4px;
   background: rgba(0, 0, 0, 0.18);
+  box-sizing: border-box;
 }
 
 .audio-meter-left {
@@ -1340,10 +1352,13 @@ html {
 
 .audio-meter-stereo {
   border-right: 1px solid var(--border-subtle);
+  width: clamp(22px, 7%, 34px);
 }
 
 .audio-meter-stereo .audio-meter-canvas {
-  width: 22px;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
 }
 
 .audio-bank {
@@ -1357,8 +1372,9 @@ html {
 
 .audio-meter-canvas {
   display: block;
-  flex: 1;
-  width: 33px;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
 }
 
@@ -2510,10 +2526,19 @@ body:has(.commentator-root) .container {
   align-items: start;
 }
 
+.commentator-main-stack {
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
 @media (max-width: 960px) {
   .commentator-main {
     grid-template-columns: 1fr;
   }
+}
+
+.commentator-video-wrap-large {
+  max-height: min(72vh, 900px);
 }
 
 .commentator-video-panel {
@@ -2585,6 +2610,137 @@ body:has(.commentator-root) .container {
   color: #ffb86b;
   text-transform: none;
   letter-spacing: 0;
+}
+
+.commentator-alert-warn {
+  border-color: rgba(212, 160, 23, 0.45);
+  background: rgba(212, 160, 23, 0.12);
+  color: #ffe8b8;
+}
+
+.commentator-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.commentator-toggle input {
+  accent-color: var(--accent);
+}
+
+.commentator-controls-below {
+  width: 100%;
+}
+
+.commentator-mix-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.commentator-mix-toolbar-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.commentator-hosta {
+  min-width: 5rem;
+  height: 2.4rem;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: linear-gradient(180deg, #444, #333);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+  transition: var(--transition);
+}
+
+.commentator-hosta.active {
+  border-color: rgba(155, 89, 182, 0.65);
+  background: linear-gradient(180deg, #8e44ad, #6c3483);
+  color: #fff;
+  box-shadow: 0 0 0 2px rgba(155, 89, 182, 0.25);
+}
+
+.commentator-pgm-row {
+  margin-bottom: 4px;
+}
+
+.commentator-intercom-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.commentator-channel-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.22);
+}
+
+.commentator-channel-card-pgm {
+  border-color: rgba(91, 159, 212, 0.28);
+  background: rgba(91, 159, 212, 0.06);
+}
+
+.commentator-channel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.commentator-channel-name {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.commentator-range-accent {
+  accent-color: #5b9fd4;
+}
+
+.commentator-ptt-named {
+  width: 100%;
+  min-width: 0;
+  height: 2.6rem;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.commentator-settings-panel {
+  max-width: 420px;
+  width: calc(100vw - 32px);
+}
+
+.commentator-settings-panel .channel-settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
 }
 
 .commentator-controls {

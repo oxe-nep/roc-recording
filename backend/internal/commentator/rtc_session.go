@@ -22,10 +22,27 @@ type rtcSession struct {
 	pgmTrack        *webrtc.TrackLocalStaticSample
 	intercomTracks  []*webrtc.TrackLocalStaticSample
 	enabledIntercom []IntercomSlot
+	pushConfig      func([]IntercomSlot)
 	stopOnce        sync.Once
 	negotiated      bool
 	mediaStarted    sync.Once
 	negotiateMu     sync.Mutex
+	pushConfigMu    sync.Mutex
+}
+
+func (s *rtcSession) setPushConfig(fn func([]IntercomSlot)) {
+	s.pushConfigMu.Lock()
+	s.pushConfig = fn
+	s.pushConfigMu.Unlock()
+}
+
+func (s *rtcSession) notifyConfig(slots []IntercomSlot) {
+	s.pushConfigMu.Lock()
+	fn := s.pushConfig
+	s.pushConfigMu.Unlock()
+	if fn != nil {
+		fn(slots)
+	}
 }
 
 func (m *Manager) newPeerConnection() (*webrtc.PeerConnection, error) {

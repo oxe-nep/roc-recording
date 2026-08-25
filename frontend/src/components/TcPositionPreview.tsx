@@ -20,7 +20,7 @@ const CELLS: { id: TcLoopPosition; label: string }[] = [
 export default function TcPositionPreview({ position, fontsize, opacity }: Props) {
   const active = tcPositionCell(position);
   const sample = "12:34:56";
-  const fontScale = Math.max(0.45, Math.min(1, fontsize / 120));
+  const fontScale = Math.max(0.45, Math.min(1, fontsize / 96));
 
   return (
     <div className="tc-preview-wrap" aria-hidden>

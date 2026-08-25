@@ -209,7 +209,23 @@ func (m *Manager) UpdateSettings(id int, in SettingsUpdateInput) (ChannelSetting
 	if m.settings == nil {
 		return DefaultChannelSettings(), fmt.Errorf("settings store not configured")
 	}
-	return m.settings.Set(id, in)
+	cfg, err := m.settings.Set(id, in)
+	if err != nil {
+		return cfg, err
+	}
+	m.notifyCommentatorConfig(id)
+	return cfg, nil
+}
+
+func (m *Manager) notifyCommentatorConfig(id int) {
+	settings := m.GetSettings(id)
+	intercom := enabledIntercom(settings)
+	m.mu.Lock()
+	sess := m.rtcByChannel[id]
+	m.mu.Unlock()
+	if sess != nil {
+		sess.notifyConfig(intercom)
+	}
 }
 
 func (m *Manager) CreateSession(id int) (SessionInfo, error) {

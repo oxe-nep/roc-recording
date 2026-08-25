@@ -54,7 +54,7 @@ type Settings struct {
 	Enabled  bool     `json:"enabled"`
 	Source   Source   `json:"source"`   // tod | external, default tod
 	UDPPort  int      `json:"udp_port"` // external TC listen port; default 9300+N
-	FontSize int      `json:"fontsize"` // px, default 120
+	FontSize int      `json:"fontsize"` // px, default 96
 	Opacity  float64  `json:"opacity"`  // 0..1 text opacity, default 0.9
 	Position Position `json:"position"` // default top_left
 }
@@ -147,7 +147,7 @@ func defaultSettings() Settings {
 		Enabled:  false,
 		Source:   SourceTOD,
 		UDPPort:  0,
-		FontSize: 120,
+		FontSize: 96,
 		Opacity:  0.9,
 		Position: PosTopLeft,
 	}
@@ -935,14 +935,14 @@ func positionXY(pos Position) (x, y string) {
 	switch pos {
 	case PosBottomLeft:
 		return fmt.Sprintf("%d", margin), fmt.Sprintf("h-th-%d", margin)
+	case PosBottomRight:
+		return fmt.Sprintf("w-tw-%d", margin), fmt.Sprintf("h-th-%d", margin)
 	case PosTopRight:
 		return fmt.Sprintf("w-tw-%d", margin), fmt.Sprintf("%d", margin)
-	case PosTopLeft:
-		return fmt.Sprintf("%d", margin), fmt.Sprintf("%d", margin)
 	case PosCenter:
 		return "(w-tw)/2", "(h-th)/2"
-	default: // bottom_right
-		return fmt.Sprintf("w-tw-%d", margin), fmt.Sprintf("h-th-%d", margin)
+	default: // top_left
+		return fmt.Sprintf("%d", margin), fmt.Sprintf("%d", margin)
 	}
 }
 

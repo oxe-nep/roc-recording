@@ -2435,13 +2435,17 @@ body:has(.commentator-root) .container {
 }
 
 .commentator-shell {
+  --comm-header-h: 44px;
+  --comm-mix-h: 168px;
+  --comm-gap: 8px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--comm-gap);
   height: 100%;
+  width: 100%;
   max-width: 1920px;
   margin: 0 auto;
-  padding: 12px clamp(12px, 1.5vw, 24px) 14px;
+  padding: 10px 16px 12px;
   box-sizing: border-box;
   overflow: hidden;
 }
@@ -2451,9 +2455,11 @@ body:has(.commentator-root) .container {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   flex-shrink: 0;
-  padding-bottom: 8px;
+  height: var(--comm-header-h);
+  min-height: var(--comm-header-h);
+  padding-bottom: 0;
   border-bottom: 1px solid var(--border-subtle);
 }
 
@@ -2559,26 +2565,29 @@ body:has(.commentator-root) .container {
 .commentator-main {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--comm-gap);
   flex: 1 1 auto;
   min-height: 0;
 }
 
+/* Video fills remaining height; wrap is exact 16:9 inside that box (target ~1920×980). */
 .commentator-video-panel {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: grid;
+  place-items: center;
+  container-type: size;
+  container-name: comm-video;
 }
 
 .commentator-video-wrap {
   position: relative;
   aspect-ratio: 16 / 9;
-  height: 100%;
-  width: auto;
+  width: min(100cqw, calc(100cqh * 16 / 9));
+  height: auto;
   max-width: 100%;
+  max-height: 100%;
   border-radius: 10px;
   overflow: hidden;
   border: 1px solid var(--border-strong);
@@ -2586,10 +2595,19 @@ body:has(.commentator-root) .container {
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
 }
 
+@supports not (width: 1cqw) {
+  .commentator-video-wrap {
+    height: 100%;
+    width: auto;
+    max-width: 100%;
+  }
+}
+
 .commentator-program-video {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  object-position: center;
   background: #000;
 }
 
@@ -2671,13 +2689,16 @@ body:has(.commentator-root) .container {
 .commentator-controls-below {
   width: 100%;
   flex-shrink: 0;
+  height: var(--comm-mix-h);
+  max-height: var(--comm-mix-h);
 }
 
 .commentator-mix-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 10px;
   align-items: stretch;
+  height: calc(var(--comm-mix-h) - 28px);
 }
 
 .commentator-channel-card-hosta {
@@ -2692,12 +2713,12 @@ body:has(.commentator-root) .container {
   justify-content: center;
   gap: 4px;
   width: 100%;
-  flex: 0 0 auto;
-  height: 7.5rem;
-  min-height: 7.5rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
   aspect-ratio: unset;
-  max-height: 7.5rem;
-  padding: 12px;
+  max-height: none;
+  padding: 10px;
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: linear-gradient(180deg, #3a3a3a, #2a2a2a);
@@ -2783,12 +2804,14 @@ body:has(.commentator-root) .container {
 .commentator-channel-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   min-height: 0;
-  padding: 10px 12px;
+  height: 100%;
+  padding: 8px 10px;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(0, 0, 0, 0.22);
+  box-sizing: border-box;
 }
 
 .commentator-channel-card-pgm {
@@ -2804,7 +2827,8 @@ body:has(.commentator-root) .container {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 7.5rem;
+  flex: 1 1 auto;
+  min-height: 0;
   border-radius: 12px;
   border: 1px dashed rgba(91, 159, 212, 0.35);
   background: rgba(91, 159, 212, 0.08);
@@ -2848,23 +2872,34 @@ body:has(.commentator-root) .container {
 .commentator-controls {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
-  padding: 10px 12px;
+  height: 100%;
+  padding: 8px 10px;
   border-radius: 10px;
   border: 1px solid var(--border-subtle);
   background: rgba(42, 42, 42, 0.72);
   backdrop-filter: blur(6px);
-  overflow: visible;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 
 .commentator-controls-title {
   flex-shrink: 0;
-  font-size: 0.68rem;
+  font-size: 0.65rem;
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--text-secondary);
   margin: 0;
+  line-height: 1;
+}
+
+/* Compact chrome on shorter viewports while keeping 16:9 video fit. */
+@media (max-height: 860px) {
+  .commentator-shell {
+    --comm-mix-h: 148px;
+    --comm-header-h: 40px;
+  }
 }
 
 .commentator-fader-row {

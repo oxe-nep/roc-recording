@@ -22,7 +22,8 @@ type rtcSession struct {
 	pgmTrack        *webrtc.TrackLocalStaticSample
 	intercomTracks  []*webrtc.TrackLocalStaticSample
 	enabledIntercom []IntercomSlot
-	pushConfig      func([]IntercomSlot)
+	quality         QualitySettings
+	pushConfig      func()
 	stopOnce        sync.Once
 	negotiated      bool
 	mediaStarted    sync.Once
@@ -30,18 +31,18 @@ type rtcSession struct {
 	pushConfigMu    sync.Mutex
 }
 
-func (s *rtcSession) setPushConfig(fn func([]IntercomSlot)) {
+func (s *rtcSession) setPushConfig(fn func()) {
 	s.pushConfigMu.Lock()
 	s.pushConfig = fn
 	s.pushConfigMu.Unlock()
 }
 
-func (s *rtcSession) notifyConfig(slots []IntercomSlot) {
+func (s *rtcSession) notifyConfig() {
 	s.pushConfigMu.Lock()
 	fn := s.pushConfig
 	s.pushConfigMu.Unlock()
 	if fn != nil {
-		fn(slots)
+		fn()
 	}
 }
 
@@ -123,6 +124,7 @@ func (m *Manager) startRTCSession(channelID int, token string) (*rtcSession, err
 	sess.pgmTrack = pgmTrack
 	sess.intercomTracks = intercomTracks
 	sess.enabledIntercom = enabled
+	sess.quality = m.GetSettings(channelID).Quality
 
 	// Receive webcam + mic from the commentator browser (server is SDP offerer).
 	webcamTr, err := pc.AddTransceiverFromKind(

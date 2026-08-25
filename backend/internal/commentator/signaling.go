@@ -23,11 +23,12 @@ type signalMsg struct {
 }
 
 type joinResponse struct {
-	ChannelID   int              `json:"channel_id"`
-	DisplayName string           `json:"display_name,omitempty"`
-	ICEServers  []map[string]any `json:"ice_servers"`
+	ChannelID   int               `json:"channel_id"`
+	DisplayName string            `json:"display_name,omitempty"`
+	ICEServers  []map[string]any  `json:"ice_servers"`
 	Intercom    []IntercomSlot   `json:"intercom"`
-	WSPath      string           `json:"ws_path"`
+	Quality     QualityClientView `json:"quality"`
+	WSPath      string            `json:"ws_path"`
 }
 
 var signalingUpgrader = websocket.Upgrader{
@@ -55,7 +56,8 @@ func (m *Manager) JoinInfo(token string) (joinResponse, error) {
 		ChannelID:   id,
 		DisplayName: strings.TrimSpace(settings.DisplayName),
 		ICEServers:  m.ice.ClientICEServers(),
-		Intercom:   enabledIntercom(settings),
+		Intercom:    enabledIntercom(settings),
+		Quality:     qualityClientView(settings.Quality),
 		// Use /ws/commentator/ so nginx can proxy via the existing /ws WebSocket location.
 		WSPath: "/ws/commentator/" + token,
 	}, nil
@@ -99,11 +101,15 @@ func intercomTracksStale(previous, current []IntercomSlot) bool {
 func (m *Manager) pushConfigMessage(sess *rtcSession, channelID int, writeJSON func(any)) {
 	settings := m.GetSettings(channelID)
 	intercom := enabledIntercom(settings)
-	reconnect := intercomTracksStale(sess.enabledIntercom, intercom)
+	quality := normalizeQuality(settings.Quality)
+	reconnect := intercomTracksStale(sess.enabledIntercom, intercom) || !qualityEqual(sess.quality, quality)
+	sess.enabledIntercom = intercom
+	sess.quality = quality
 	writeJSON(map[string]any{
 		"type":               "config",
 		"channel_id":         channelID,
 		"intercom":           intercom,
+		"quality":            qualityClientView(quality),
 		"reconnect_required": reconnect,
 	})
 }
@@ -163,14 +169,8 @@ func (m *Manager) ServeSignaling(w http.ResponseWriter, r *http.Request, token s
 		}
 	}
 
-	sess.setPushConfig(func(slots []IntercomSlot) {
-		reconnect := intercomTracksStale(sess.enabledIntercom, slots)
-		writeJSON(map[string]any{
-			"type":               "config",
-			"channel_id":         channelID,
-			"intercom":           slots,
-			"reconnect_required": reconnect,
-		})
+	sess.setPushConfig(func() {
+		m.pushConfigMessage(sess, channelID, writeJSON)
 	})
 
 	m.pushConfigMessage(sess, channelID, writeJSON)

@@ -98,13 +98,20 @@ func (m *Manager) runFFmpegInboundOnce(
 	intercomTracks []*webrtc.TrackLocalStaticSample,
 	onStarted func(),
 ) error {
+	quality := DefaultQualitySettings()
+	if m.settings != nil {
+		quality = m.GetSettings(channelID).Quality
+	}
+	vq := outboundVideoFor(quality.ToCommentatorVideo)
+	aqBitrate := outboundAudioBitrate(quality.ToCommentatorAudio)
+
 	args := []string{"-hide_banner", "-loglevel", "warning", "-y"}
 	args = append(args, ensureDeckLinkChannels(shellSplit(input), 8)...)
 	args = append(args, "-analyzeduration", "0", "-probesize", "32")
 
 	filters := []string{
 		// DeckLink Hi50/Hi25 are interlaced — deinterlace before scale or the browser shows striped frames.
-		"[0:v]yadif=0:-1:0,scale=1280:720,fps=25,format=yuv420p[vout]",
+		fmt.Sprintf("[0:v]yadif=0:-1:0,scale=%d:%d,fps=%d,format=yuv420p[vout]", vq.Width, vq.Height, vq.FPS),
 		"[0:a]pan=8c|c0=c0|c1=c1|c2=c2|c3=c3|c4=c4|c5=c5|c6=c6|c7=c7[a8]",
 		// Mono PGM — stereo Opus without matching SDP stereo flags sounds wrong in Chrome.
 		"[a8]pan=mono|c0=0.5*c0+0.5*c1[pgm]",
@@ -133,17 +140,17 @@ func (m *Manager) runFFmpegInboundOnce(
 		"-map", "[vout]",
 		"-c:v", "libx264",
 		"-profile:v", "baseline",
-		"-level", "3.1",
+		"-level", vq.Level,
 		"-preset", "veryfast",
 		"-tune", "zerolatency",
-		"-b:v", "2500k",
-		"-maxrate", "3000k",
-		"-bufsize", "500k",
-		"-g", "25",
-		"-keyint_min", "25",
+		"-b:v", vq.Bitrate,
+		"-maxrate", vq.Maxrate,
+		"-bufsize", vq.Bufsize,
+		"-g", fmt.Sprintf("%d", vq.FPS),
+		"-keyint_min", fmt.Sprintf("%d", vq.FPS),
 		"-bf", "0",
 		"-slices", "1",
-		"-x264-params", "repeat-headers=1:annexb=1:scenecut=0:keyint=25:min-keyint=25:rc-lookahead=0:sync-lookahead=0:sliced-threads=0:threads=4",
+		"-x264-params", fmt.Sprintf("repeat-headers=1:annexb=1:scenecut=0:keyint=%d:min-keyint=%d:rc-lookahead=0:sync-lookahead=0:sliced-threads=0:threads=4", vq.FPS, vq.FPS),
 		"-f", "h264",
 		"pipe:1",
 	)
@@ -223,7 +230,8 @@ func (m *Manager) runFFmpegInboundOnce(
 	if onStarted != nil {
 		onStarted()
 	}
-	log.Printf("[commentator %d] ffmpeg inbound started", channelID)
+	log.Printf("[commentator %d] ffmpeg inbound started (%dx%d @ %dfps %s, opus %d)",
+		channelID, vq.Width, vq.Height, vq.FPS, vq.Bitrate, aqBitrate)
 
 	pipeCtx, pipeCancel := context.WithCancel(ctx)
 	defer pipeCancel()
@@ -237,7 +245,7 @@ func (m *Manager) runFFmpegInboundOnce(
 
 	go m.pipeH264ToTrack(pipeCtx, stdout, videoTrack, channelID)
 	for _, p := range pipes {
-		go m.pipePCMToOpusTrack(pipeCtx, p.reader, p.track, p.stereo)
+		go m.pipePCMToOpusTrack(pipeCtx, p.reader, p.track, p.stereo, aqBitrate)
 	}
 
 	err = cmd.Wait()
@@ -396,9 +404,12 @@ func findAnnexBStart(buf []byte, from int) int {
 	return -1
 }
 
-func (m *Manager) pipePCMToOpusTrack(ctx context.Context, r io.Reader, track *webrtc.TrackLocalStaticSample, stereo bool) {
+func (m *Manager) pipePCMToOpusTrack(ctx context.Context, r io.Reader, track *webrtc.TrackLocalStaticSample, stereo bool, bitrate int) {
 	if r == nil {
 		return
+	}
+	if bitrate <= 0 {
+		bitrate = 48000
 	}
 	channels := 1
 	if stereo {
@@ -409,7 +420,7 @@ func (m *Manager) pipePCMToOpusTrack(ctx context.Context, r io.Reader, track *we
 		log.Printf("[commentator] opus encoder: %v", err)
 		return
 	}
-	_ = enc.SetBitrate(48000)
+	_ = enc.SetBitrate(bitrate)
 	_ = enc.SetInBandFEC(true)
 	_ = enc.SetPacketLossPerc(20)
 	frameSamples := samplesPerFrame * channels

@@ -219,13 +219,11 @@ func (m *Manager) UpdateSettings(id int, in SettingsUpdateInput) (ChannelSetting
 }
 
 func (m *Manager) notifyCommentatorConfig(id int) {
-	settings := m.GetSettings(id)
-	intercom := enabledIntercom(settings)
 	m.mu.Lock()
 	sess := m.rtcByChannel[id]
 	m.mu.Unlock()
 	if sess != nil {
-		sess.notifyConfig(intercom)
+		sess.notifyConfig()
 	}
 }
 

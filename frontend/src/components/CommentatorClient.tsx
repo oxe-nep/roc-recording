@@ -261,7 +261,7 @@ export default function CommentatorClient({ token }: Props) {
       {error && <div className="commentator-alert">{error}</div>}
       {reconnectRequired && state === "connected" && (
         <div className="commentator-alert commentator-alert-warn">
-          Intercom channels changed on the producer side. Reconnect to update audio tracks.
+          Intercom channels changed or quality settings updated. Reconnect to apply.
         </div>
       )}
       {audioLocked && (

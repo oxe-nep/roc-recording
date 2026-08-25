@@ -10,6 +10,7 @@ import {
   updateCommentatorSettings,
   type CommentatorInfo,
   type CommentatorIntercomSlot,
+  type CommentatorQualitySettings,
   type PlayoutDevice,
 } from "@/lib/api";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
@@ -18,6 +19,27 @@ import { absoluteInviteURL } from "@/lib/commentatorWebRTC";
 import { commentatorIsActive, commentatorStatusLabel, commentatorStatusPillClass } from "@/lib/commentatorUi";
 
 const SLOT_COUNT = 6;
+
+const VIDEO_PRESETS = [
+  { value: "monitoring", label: "Monitoring (lower bandwidth)" },
+  { value: "standard", label: "Standard" },
+  { value: "high", label: "High" },
+] as const;
+
+const AUDIO_PRESETS = [
+  { value: "voice", label: "Voice" },
+  { value: "standard", label: "Standard" },
+  { value: "broadcast", label: "Broadcast" },
+] as const;
+
+function defaultQuality(): CommentatorQualitySettings {
+  return {
+    to_commentator_video: "standard",
+    to_commentator_audio: "standard",
+    from_commentator_video: "standard",
+    from_commentator_audio: "voice",
+  };
+}
 
 type Props = {
   open: boolean;
@@ -64,6 +86,7 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
   const [error, setError] = useState<string | null>(null);
   const [intercom, setIntercom] = useState<CommentatorIntercomSlot[]>(defaultSlots());
   const [displayName, setDisplayName] = useState("");
+  const [quality, setQuality] = useState<CommentatorQualitySettings>(defaultQuality);
   const [outputFormat, setOutputFormat] = useState("");
   const [devices, setDevices] = useState<PlayoutDevice[]>([]);
   const [inviteURL, setInviteURL] = useState("");
@@ -98,6 +121,7 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
       .then(([settings, info, devs]) => {
         setIntercom(settings.intercom?.length ? settings.intercom : defaultSlots());
         setDisplayName(settings.display_name?.trim() ?? "");
+        setQuality({ ...defaultQuality(), ...settings.quality });
         setOutputFormat(
           settings.output_format?.trim() ||
             info.output_format?.trim() ||
@@ -150,9 +174,11 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
         intercom,
         display_name: displayName.trim(),
         output_format: outputFormat.trim(),
+        quality,
       });
       setIntercom(saved.intercom);
       setDisplayName(saved.display_name?.trim() ?? displayName.trim());
+      setQuality({ ...defaultQuality(), ...saved.quality });
       setOutputFormat(saved.output_format?.trim() ?? outputFormat.trim());
       onSaved();
     } catch (e) {
@@ -330,6 +356,73 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
                   {probeLog}
                 </pre>
               )}
+            </label>
+          </div>
+        </div>
+
+        <div className="channel-settings-srt">
+          <div className="channel-settings-srt-head">
+            <h3>WebRTC quality</h3>
+          </div>
+          <p className="channel-settings-hint">
+            Presets apply on the next commentator connection (or after Reconnect). Lower presets help over VPN.
+          </p>
+          <div className="channel-settings-form">
+            <label className="presets-field">
+              <span>Program → commentator (video)</span>
+              <select
+                value={quality.to_commentator_video}
+                disabled={busy}
+                onChange={(e) => setQuality((q) => ({ ...q, to_commentator_video: e.target.value }))}
+              >
+                {VIDEO_PRESETS.map((p) => (
+                  <option key={p.value} value={p.value}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="presets-field">
+              <span>Program → commentator (audio)</span>
+              <select
+                value={quality.to_commentator_audio}
+                disabled={busy}
+                onChange={(e) => setQuality((q) => ({ ...q, to_commentator_audio: e.target.value }))}
+              >
+                {AUDIO_PRESETS.map((p) => (
+                  <option key={p.value} value={p.value}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="presets-field">
+              <span>Commentator webcam → studio</span>
+              <select
+                value={quality.from_commentator_video}
+                disabled={busy}
+                onChange={(e) => setQuality((q) => ({ ...q, from_commentator_video: e.target.value }))}
+              >
+                {VIDEO_PRESETS.map((p) => (
+                  <option key={p.value} value={p.value}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="presets-field">
+              <span>Commentator mic → studio</span>
+              <select
+                value={quality.from_commentator_audio}
+                disabled={busy}
+                onChange={(e) => setQuality((q) => ({ ...q, from_commentator_audio: e.target.value }))}
+              >
+                {AUDIO_PRESETS.map((p) => (
+                  <option key={p.value} value={p.value}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
             </label>
           </div>
         </div>

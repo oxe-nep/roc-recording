@@ -2,6 +2,33 @@ package commentator
 
 import "testing"
 
+func TestStoreQuality(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir + "/commentator-settings.json")
+	store.Ensure([]int{1})
+
+	got, err := store.Set(1, SettingsUpdateInput{
+		Quality: &QualitySettings{
+			ToCommentatorVideo:   VideoQualityMonitoring,
+			ToCommentatorAudio:   AudioQualityVoice,
+			FromCommentatorVideo: VideoQualityHigh,
+			FromCommentatorAudio: AudioQualityBroadcast,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Quality.ToCommentatorVideo != VideoQualityMonitoring {
+		t.Fatalf("to video = %q", got.Quality.ToCommentatorVideo)
+	}
+	reloaded := NewStore(dir + "/commentator-settings.json")
+	reloaded.Load()
+	q := reloaded.Get(1).Quality
+	if q.FromCommentatorVideo != VideoQualityHigh || q.ToCommentatorAudio != AudioQualityVoice {
+		t.Fatalf("persisted quality: %+v", q)
+	}
+}
+
 func TestStoreDisplayName(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir + "/commentator-settings.json")

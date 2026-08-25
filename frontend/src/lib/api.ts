@@ -768,10 +768,18 @@ export interface CommentatorInfo {
   error?: string;
 }
 
+export interface CommentatorQualitySettings {
+  to_commentator_video: string;
+  to_commentator_audio: string;
+  from_commentator_video: string;
+  from_commentator_audio: string;
+}
+
 export interface CommentatorSettings {
   intercom: CommentatorIntercomSlot[];
   output_format?: string;
   display_name?: string;
+  quality?: CommentatorQualitySettings;
 }
 
 export interface CommentatorSessionInfo {
@@ -794,7 +802,12 @@ export async function fetchCommentatorSettings(id: number): Promise<CommentatorS
 
 export async function updateCommentatorSettings(
   id: number,
-  body: { intercom?: CommentatorIntercomSlot[]; output_format?: string; display_name?: string },
+  body: {
+    intercom?: CommentatorIntercomSlot[];
+    output_format?: string;
+    display_name?: string;
+    quality?: CommentatorQualitySettings;
+  },
 ): Promise<CommentatorSettings> {
   const res = await apiFetch(`/api/commentator/${id}/settings`, {
     method: "PUT",

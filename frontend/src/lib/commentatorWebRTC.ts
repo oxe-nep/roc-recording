@@ -1,11 +1,27 @@
 import type { CommentatorIntercomSlot } from "@/lib/api";
 import type { CommentatorDevicePrefs } from "@/lib/commentatorPrefs";
 
+export type CommentatorWebcamQuality = {
+  width: number;
+  height: number;
+  frame_rate: number;
+  max_bitrate: number;
+};
+
+export type CommentatorQuality = {
+  to_commentator_video: string;
+  to_commentator_audio: string;
+  from_commentator_video: string;
+  from_commentator_audio: string;
+  webcam?: CommentatorWebcamQuality;
+};
+
 export type CommentatorJoinInfo = {
   channel_id: number;
   display_name?: string;
   ice_servers: RTCIceServer[];
   intercom: CommentatorIntercomSlot[];
+  quality?: CommentatorQuality;
   ws_path: string;
 };
 
@@ -73,16 +89,18 @@ function preferSendCodec(transceiver: RTCRtpTransceiver, mimeType: string) {
   }
 }
 
-/** Cap webcam bitrate — monitoring quality, lower encode latency over VPN. */
-async function constrainWebcamSender(sender: RTCRtpSender) {
+/** Cap webcam bitrate/framerate from producer quality preset. */
+async function constrainWebcamSender(sender: RTCRtpSender, webcam?: CommentatorWebcamQuality) {
   try {
     const params = sender.getParameters();
     if (!params.encodings?.length) {
       params.encodings = [{}];
     }
+    const maxBitrate = webcam?.max_bitrate || 1_200_000;
+    const maxFramerate = webcam?.frame_rate || 25;
     for (const enc of params.encodings) {
-      enc.maxBitrate = 1_200_000;
-      enc.maxFramerate = 25;
+      enc.maxBitrate = maxBitrate;
+      enc.maxFramerate = maxFramerate;
     }
     await sender.setParameters(params);
   } catch {
@@ -90,15 +108,21 @@ async function constrainWebcamSender(sender: RTCRtpSender) {
   }
 }
 
-function mediaConstraints(devices?: CommentatorDevicePrefs): MediaStreamConstraints {
+function mediaConstraints(
+  devices?: CommentatorDevicePrefs,
+  webcam?: CommentatorWebcamQuality,
+): MediaStreamConstraints {
+  const width = webcam?.width || 1280;
+  const height = webcam?.height || 720;
+  const fps = webcam?.frame_rate || 25;
   const audio: MediaTrackConstraints = {
     echoCancellation: true,
     noiseSuppression: true,
   };
   const video: MediaTrackConstraints = {
-    width: { ideal: 1280 },
-    height: { ideal: 720 },
-    frameRate: { ideal: 25, max: 30 },
+    width: { ideal: width },
+    height: { ideal: height },
+    frameRate: { ideal: fps, max: Math.max(fps, 30) },
   };
   if (devices?.micId) {
     audio.deviceId = { exact: devices.micId };
@@ -125,6 +149,7 @@ type SignalMsg = {
   channel?: number;
   candidate?: RTCIceCandidateInit;
   intercom?: CommentatorIntercomSlot[];
+  quality?: CommentatorQuality;
   reconnect_required?: boolean;
   channel_id?: number;
   message?: string;
@@ -148,6 +173,7 @@ export class CommentatorSession {
   private pgmVolume = 1;
   private intercomVolumes = new Map<number, number>();
   private hostaActive = false;
+  private webcamQuality: CommentatorWebcamQuality | undefined;
   private readonly devices: CommentatorDevicePrefs;
   private prevStats: {
     ts: number;
@@ -190,6 +216,9 @@ export class CommentatorSession {
     this.onIntercom?.(join.intercom);
     if (join.display_name?.trim()) {
       this.onDisplayName?.(join.display_name.trim());
+    }
+    if (join.quality?.webcam) {
+      this.webcamQuality = join.quality.webcam;
     }
 
     this.onState?.("connecting");
@@ -453,7 +482,9 @@ export class CommentatorSession {
       this.localStream.getTracks().forEach((t) => t.stop());
       this.localStream = null;
     }
-    this.localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints(this.devices));
+    this.localStream = await navigator.mediaDevices.getUserMedia(
+      mediaConstraints(this.devices, this.webcamQuality),
+    );
     this.applyHosta();
   }
 
@@ -499,7 +530,7 @@ export class CommentatorSession {
       for (const tx of this.pc.getTransceivers()) {
         if (tx.sender.track?.kind !== "video") continue;
         preferSendCodec(tx, "video/H264");
-        if (tx.sender) await constrainWebcamSender(tx.sender);
+        if (tx.sender) await constrainWebcamSender(tx.sender, this.webcamQuality);
       }
 
       const answer = await this.pc.createAnswer();
@@ -523,6 +554,7 @@ export class CommentatorSession {
     switch (msg.type) {
       case "config":
         if (msg.intercom) this.onIntercom?.(msg.intercom);
+        if (msg.quality?.webcam) this.webcamQuality = msg.quality.webcam;
         this.onReconnectRequired?.(!!msg.reconnect_required);
         return;
       case "offer":

@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +24,7 @@ type signalMsg struct {
 
 type joinResponse struct {
 	ChannelID   int              `json:"channel_id"`
+	DisplayName string           `json:"display_name,omitempty"`
 	ICEServers  []map[string]any `json:"ice_servers"`
 	Intercom    []IntercomSlot   `json:"intercom"`
 	WSPath      string           `json:"ws_path"`
@@ -50,8 +52,9 @@ func (m *Manager) JoinInfo(token string) (joinResponse, error) {
 	}
 	settings := m.GetSettings(id)
 	return joinResponse{
-		ChannelID:  id,
-		ICEServers: m.ice.ClientICEServers(),
+		ChannelID:   id,
+		DisplayName: strings.TrimSpace(settings.DisplayName),
+		ICEServers:  m.ice.ClientICEServers(),
 		Intercom:   enabledIntercom(settings),
 		// Use /ws/commentator/ so nginx can proxy via the existing /ws WebSocket location.
 		WSPath: "/ws/commentator/" + token,
@@ -112,7 +115,7 @@ func (m *Manager) validateToken(token string) (int, error) {
 		if ch.session == nil || ch.session.token != token {
 			continue
 		}
-		if time.Now().After(ch.session.expiresAt) {
+		if !ch.session.expiresAt.IsZero() && time.Now().After(ch.session.expiresAt) {
 			return 0, errExpiredToken
 		}
 		if !ch.enabled {

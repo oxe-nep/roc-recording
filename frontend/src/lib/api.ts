@@ -771,6 +771,7 @@ export interface CommentatorInfo {
 export interface CommentatorSettings {
   intercom: CommentatorIntercomSlot[];
   output_format?: string;
+  display_name?: string;
 }
 
 export interface CommentatorSessionInfo {
@@ -793,7 +794,7 @@ export async function fetchCommentatorSettings(id: number): Promise<CommentatorS
 
 export async function updateCommentatorSettings(
   id: number,
-  body: { intercom?: CommentatorIntercomSlot[]; output_format?: string },
+  body: { intercom?: CommentatorIntercomSlot[]; output_format?: string; display_name?: string },
 ): Promise<CommentatorSettings> {
   const res = await apiFetch(`/api/commentator/${id}/settings`, {
     method: "PUT",

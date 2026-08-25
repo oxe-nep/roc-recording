@@ -3,6 +3,7 @@ import type { CommentatorDevicePrefs } from "@/lib/commentatorPrefs";
 
 export type CommentatorJoinInfo = {
   channel_id: number;
+  display_name?: string;
   ice_servers: RTCIceServer[];
   intercom: CommentatorIntercomSlot[];
   ws_path: string;
@@ -162,6 +163,7 @@ export class CommentatorSession {
   onRemoteVideo?: (stream: MediaStream) => void;
   onAudioLocked?: (locked: boolean) => void;
   onStats?: (stats: CommentatorRTCStats) => void;
+  onDisplayName?: (name: string) => void;
 
   constructor(
     private readonly token: string,
@@ -186,6 +188,9 @@ export class CommentatorSession {
     const join = await fetchCommentatorJoin(this.token);
     this.iceServers = join.ice_servers;
     this.onIntercom?.(join.intercom);
+    if (join.display_name?.trim()) {
+      this.onDisplayName?.(join.display_name.trim());
+    }
 
     this.onState?.("connecting");
     await this.connectSignaling(join.ws_path);

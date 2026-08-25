@@ -57,6 +57,7 @@ export default function CommentatorClient({ token }: Props) {
   const [audioLocked, setAudioLocked] = useState(false);
   const [rtcStats, setRtcStats] = useState<CommentatorRTCStats | null>(null);
   const [showDebug, setShowDebug] = useState(() => loadCommentatorDebug(token));
+  const [displayName, setDisplayName] = useState("");
   const [reconnectRequired, setReconnectRequired] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [devices, setDevices] = useState<CommentatorDevicePrefs>(() => loadCommentatorDevices());
@@ -88,6 +89,11 @@ export default function CommentatorClient({ token }: Props) {
     saveCommentatorDebug(token, showDebug);
   }, [token, showDebug]);
 
+  useEffect(() => {
+    const title = displayName.trim();
+    document.title = title || "Commentator";
+  }, [displayName]);
+
   const sessionOptions = useMemo(() => {
     const saved = loadCommentatorVolumes(token);
     return {
@@ -103,6 +109,7 @@ export default function CommentatorClient({ token }: Props) {
     session.onAudioLocked = setAudioLocked;
     session.onStats = setRtcStats;
     session.onReconnectRequired = setReconnectRequired;
+    session.onDisplayName = setDisplayName;
     session.onIntercom = (slots) => {
       setIntercom(slots);
       setIntercomVol((prev) => {
@@ -232,19 +239,13 @@ export default function CommentatorClient({ token }: Props) {
   return (
     <div className="commentator-shell">
       <header className="commentator-header">
-        <div className="commentator-header-text">
-          <p className="commentator-eyebrow">ROC Recording</p>
-          <h1>Remote Commentator</h1>
+        <div className="commentator-header-brand">
+          <img src="/nep-logo.svg" alt="NEP" className="nep-logo commentator-logo" />
+          <div className="commentator-header-text">
+            <h1>{displayName.trim() || "Commentator"}</h1>
+          </div>
         </div>
         <div className="commentator-header-actions">
-          <label className="commentator-toggle" title="Show WebRTC debug overlay on video">
-            <input
-              type="checkbox"
-              checked={showDebug}
-              onChange={(e) => setShowDebug(e.target.checked)}
-            />
-            <span>Debug</span>
-          </label>
           <button type="button" className="commentator-btn" onClick={() => void openSettings()}>
             Settings
           </button>
@@ -315,24 +316,12 @@ export default function CommentatorClient({ token }: Props) {
         </section>
 
         <section className="commentator-controls commentator-controls-below">
-          <div className="commentator-mix-toolbar">
-            <h2 className="commentator-controls-title">Audio mix</h2>
-            <div className="commentator-mix-toolbar-actions">
-              <button
-                type="button"
-                className={`commentator-hosta${hostaActive ? " active" : ""}`}
-                {...bindHosta()}
-                title="Hold to mute outgoing mic (cough mute)"
-              >
-                HOSTA
-              </button>
-            </div>
-          </div>
+          <h2 className="commentator-controls-title">Audio mix</h2>
 
-          <div className="commentator-pgm-row">
+          <div className="commentator-mix-grid">
             <div className="commentator-channel-card commentator-channel-card-pgm">
               <div className="commentator-channel-head">
-                <span className="commentator-channel-name">PGM / mix-minus</span>
+                <span className="commentator-channel-name">PGM</span>
                 <span className="commentator-fader-val">{Math.round(pgmVol * 100)}%</span>
               </div>
               <input
@@ -344,45 +333,60 @@ export default function CommentatorClient({ token }: Props) {
                 step={0.01}
                 value={pgmVol}
                 onChange={(e) => setPgmVol(Number(e.target.value))}
+                aria-label="PGM volume"
               />
+            </div>
+
+            {intercom.map((slot) => {
+              const vol = intercomVol[slot.id] ?? 0.8;
+              return (
+                <div key={slot.id} className="commentator-channel-card">
+                  <div className="commentator-channel-head">
+                    <span className="commentator-channel-name">{slot.name}</span>
+                    <span className="commentator-fader-val">{Math.round(vol * 100)}%</span>
+                  </div>
+                  <input
+                    id={`ic-${slot.id}`}
+                    className="commentator-range"
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={vol}
+                    onChange={(e) =>
+                      setIntercomVol((prev) => ({ ...prev, [slot.id]: Number(e.target.value) }))
+                    }
+                    aria-label={`${slot.name} volume`}
+                  />
+                  <button
+                    type="button"
+                    className={`commentator-action-btn commentator-action-btn-ptt${pttActive === slot.id ? " active" : ""}`}
+                    {...bindPTT(slot.id)}
+                  >
+                    <span className="commentator-action-btn-label">PTT</span>
+                    <span className="commentator-action-btn-sub">{slot.name}</span>
+                  </button>
+                </div>
+              );
+            })}
+
+            <div className="commentator-channel-card commentator-channel-card-hosta">
+              <div className="commentator-channel-head">
+                <span className="commentator-channel-name">Mic</span>
+              </div>
+              <button
+                type="button"
+                className={`commentator-action-btn commentator-action-btn-hosta${hostaActive ? " active" : ""}`}
+                {...bindHosta()}
+                title="Hold to mute outgoing mic (cough mute)"
+              >
+                <span className="commentator-action-btn-label">HOSTA</span>
+                <span className="commentator-action-btn-sub">Hold to mute</span>
+              </button>
             </div>
           </div>
 
-          {intercom.length > 0 ? (
-            <div className="commentator-intercom-grid">
-              {intercom.map((slot) => {
-                const vol = intercomVol[slot.id] ?? 0.8;
-                return (
-                  <div key={slot.id} className="commentator-channel-card">
-                    <div className="commentator-channel-head">
-                      <span className="commentator-channel-name">{slot.name}</span>
-                      <span className="commentator-fader-val">{Math.round(vol * 100)}%</span>
-                    </div>
-                    <input
-                      id={`ic-${slot.id}`}
-                      className="commentator-range"
-                      type="range"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={vol}
-                      onChange={(e) =>
-                        setIntercomVol((prev) => ({ ...prev, [slot.id]: Number(e.target.value) }))
-                      }
-                      aria-label={`${slot.name} volume`}
-                    />
-                    <button
-                      type="button"
-                      className={`commentator-ptt commentator-ptt-named${pttActive === slot.id ? " active" : ""}`}
-                      {...bindPTT(slot.id)}
-                    >
-                      {slot.name}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
+          {intercom.length === 0 && (
             <p className="commentator-empty-hint">No intercom channels enabled in producer settings.</p>
           )}
         </section>
@@ -397,12 +401,20 @@ export default function CommentatorClient({ token }: Props) {
             aria-label="Commentator device settings"
           >
             <div className="modal-header">
-              <h2>Input devices</h2>
+              <h2>Settings</h2>
               <button type="button" className="modal-close" onClick={() => setSettingsOpen(false)} aria-label="Close">
                 ×
               </button>
             </div>
             {deviceError && <div className="commentator-alert">{deviceError}</div>}
+            <label className="commentator-toggle commentator-settings-debug" title="Show WebRTC debug overlay on video">
+              <input
+                type="checkbox"
+                checked={showDebug}
+                onChange={(e) => setShowDebug(e.target.checked)}
+              />
+              <span>Show WebRTC debug overlay</span>
+            </label>
             <p className="channel-settings-hint">
               Device choices are saved in this browser. Reconnect applies a new mic/camera.
             </p>

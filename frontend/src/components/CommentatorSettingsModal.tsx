@@ -63,6 +63,7 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [intercom, setIntercom] = useState<CommentatorIntercomSlot[]>(defaultSlots());
+  const [displayName, setDisplayName] = useState("");
   const [outputFormat, setOutputFormat] = useState("");
   const [devices, setDevices] = useState<PlayoutDevice[]>([]);
   const [inviteURL, setInviteURL] = useState("");
@@ -96,6 +97,7 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
     ])
       .then(([settings, info, devs]) => {
         setIntercom(settings.intercom?.length ? settings.intercom : defaultSlots());
+        setDisplayName(settings.display_name?.trim() ?? "");
         setOutputFormat(
           settings.output_format?.trim() ||
             info.output_format?.trim() ||
@@ -146,9 +148,11 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
     try {
       const saved = await updateCommentatorSettings(channelId, {
         intercom,
+        display_name: displayName.trim(),
         output_format: outputFormat.trim(),
       });
       setIntercom(saved.intercom);
+      setDisplayName(saved.display_name?.trim() ?? displayName.trim());
       setOutputFormat(saved.output_format?.trim() ?? outputFormat.trim());
       onSaved();
     } catch (e) {
@@ -235,8 +239,24 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
           </div>
           <p className="channel-settings-hint">
             Remote commentator uses WebRTC for low-latency return video and audio. PGM uses DeckLink tracks 1–2;
-            intercom channels use tracks 3–8.
+            intercom channels use tracks 3–8. The invite link is persistent until you revoke it or the server is
+            reconfigured.
           </p>
+
+          <div className="channel-settings-form" style={{ marginBottom: 12 }}>
+            <label className="presets-field">
+              <span>Commentator name</span>
+              <input
+                value={displayName}
+                disabled={busy}
+                placeholder="e.g. Studio A — Match 1"
+                onChange={(e) => setDisplayName(e.target.value)}
+              />
+            </label>
+            <p className="channel-settings-hint" style={{ marginTop: 4 }}>
+              Shown in the commentator browser header instead of a generic title.
+            </p>
+          </div>
 
           {displayInvite ? (
             <div className="srt-url-row">
@@ -250,14 +270,16 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
                 Open
               </button>
             </div>
+          ) : enabled ? (
+            <p className="channel-settings-hint">Invite link will appear when remote commentator is active.</p>
           ) : (
-            <p className="channel-settings-hint">No active invite. Create a link for the commentator to join.</p>
+            <p className="channel-settings-hint">Enable remote commentator workflow to get a persistent invite link.</p>
           )}
 
           <div className="channel-settings-actions">
             {!sessionActive ? (
               <button type="button" className="tc-start-btn" disabled={busy || !enabled} onClick={() => void createInvite()}>
-                {busy ? "…" : "Create invite"}
+                {busy ? "…" : "Ensure invite link"}
               </button>
             ) : (
               <button type="button" className="tc-stop-btn" disabled={busy} onClick={() => void revokeInvite()}>

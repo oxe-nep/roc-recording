@@ -18,8 +18,6 @@ const (
 	StatusConnected     Status = "connected"
 )
 
-const defaultSessionTTL = 8 * time.Hour
-
 type session struct {
 	token     string
 	expiresAt time.Time
@@ -54,12 +52,13 @@ type Info struct {
 type SessionInfo struct {
 	Token     string    `json:"token"`
 	InviteURL string    `json:"invite_url"`
-	ExpiresAt time.Time `json:"expires_at"`
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
 }
 
 type Manager struct {
 	mu            sync.Mutex
 	settings      *Store
+	sessions      *SessionStore
 	publicBaseURL string
 	ffmpegBin     string
 	channelInputs map[int]string
@@ -70,13 +69,14 @@ type Manager struct {
 	rtcByChannel  map[int]*rtcSession
 }
 
-func NewManager(settings *Store, publicBaseURL string, ffmpegBin string, channelInputs map[int]string, ice ICEConfig, playout PlayoutBridge) *Manager {
+func NewManager(settings *Store, sessions *SessionStore, publicBaseURL string, ffmpegBin string, channelInputs map[int]string, ice ICEConfig, playout PlayoutBridge) *Manager {
 	publicBaseURL = strings.TrimRight(strings.TrimSpace(publicBaseURL), "/")
 	if channelInputs == nil {
 		channelInputs = make(map[int]string)
 	}
 	return &Manager{
 		settings:      settings,
+		sessions:      sessions,
 		publicBaseURL: publicBaseURL,
 		ffmpegBin:     ffmpegBin,
 		channelInputs: channelInputs,
@@ -128,6 +128,7 @@ func (m *Manager) Enable(id int) {
 		ch.status = StatusWaiting
 	}
 	ch.errorText = ""
+	_ = m.ensureSessionLocked(ch)
 }
 
 func (m *Manager) Disable(id int) {
@@ -235,30 +236,25 @@ func (m *Manager) CreateSession(id int) (SessionInfo, error) {
 	if !ch.enabled {
 		return SessionInfo{}, fmt.Errorf("remote commentator is not enabled on channel %d", id)
 	}
-	token, err := newToken()
-	if err != nil {
+	if err := m.ensureSessionLocked(ch); err != nil {
 		return SessionInfo{}, err
 	}
-	exp := time.Now().Add(defaultSessionTTL)
-	ch.session = &session{token: token, expiresAt: exp}
-	ch.status = StatusSessionActive
-	ch.connected = false
-	ch.pttChannel = 0
-	return SessionInfo{
-		Token:     token,
-		InviteURL: m.inviteURLLocked(token),
-		ExpiresAt: exp,
-	}, nil
+	return m.sessionInfoLocked(ch), nil
 }
 
 func (m *Manager) RevokeSession(id int) {
 	m.mu.Lock()
 	ch, ok := m.byID[id]
-	if ok && ch.enabled {
+	if ok {
 		ch.session = nil
 		ch.connected = false
 		ch.pttChannel = 0
-		ch.status = StatusWaiting
+		if ch.enabled {
+			ch.status = StatusWaiting
+		}
+	}
+	if m.sessions != nil {
+		_ = m.sessions.Delete(id)
 	}
 	if sess, ok := m.rtcByChannel[id]; ok {
 		delete(m.rtcByChannel, id)
@@ -349,8 +345,10 @@ func (m *Manager) infoLocked(ch *channel) Info {
 	}
 	if ch.session != nil {
 		info.SessionActive = true
-		exp := ch.session.expiresAt
-		info.SessionExpiresAt = &exp
+		if !ch.session.expiresAt.IsZero() {
+			exp := ch.session.expiresAt
+			info.SessionExpiresAt = &exp
+		}
 		info.InviteURL = m.inviteURLLocked(ch.session.token)
 	}
 	if device, format, err := m.OutputSink(ch.id); err == nil {
@@ -375,4 +373,50 @@ func newToken() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b[:]), nil
+}
+
+// ensureSessionLocked restores a persisted token or creates a new one. Caller holds m.mu.
+func (m *Manager) ensureSessionLocked(ch *channel) error {
+	if ch.session != nil && ch.session.token != "" {
+		if !ch.connected {
+			ch.status = StatusSessionActive
+		}
+		return nil
+	}
+	if m.sessions != nil {
+		if ps, ok := m.sessions.Get(ch.id); ok {
+			ch.session = &session{token: ps.Token}
+			if !ch.connected {
+				ch.status = StatusSessionActive
+			}
+			return nil
+		}
+	}
+	token, err := newToken()
+	if err != nil {
+		return err
+	}
+	ch.session = &session{token: token}
+	if !ch.connected {
+		ch.status = StatusSessionActive
+	}
+	ch.connected = false
+	ch.pttChannel = 0
+	if m.sessions != nil {
+		if err := m.sessions.Set(ch.id, token); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *Manager) sessionInfoLocked(ch *channel) SessionInfo {
+	info := SessionInfo{
+		Token:     ch.session.token,
+		InviteURL: m.inviteURLLocked(ch.session.token),
+	}
+	if !ch.session.expiresAt.IsZero() {
+		info.ExpiresAt = ch.session.expiresAt
+	}
+	return info
 }

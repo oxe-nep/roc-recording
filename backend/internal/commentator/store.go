@@ -22,6 +22,7 @@ type IntercomSlot struct {
 type ChannelSettings struct {
 	Intercom     [intercomSlots]IntercomSlot `json:"intercom"`
 	OutputFormat string                      `json:"output_format,omitempty"`
+	DisplayName  string                      `json:"display_name,omitempty"`
 }
 
 func defaultSlot(id int) IntercomSlot {
@@ -52,6 +53,8 @@ func normalizeSettings(s ChannelSettings) ChannelSettings {
 		}
 		out.Intercom[i] = slot
 	}
+	out.OutputFormat = strings.TrimSpace(s.OutputFormat)
+	out.DisplayName = strings.TrimSpace(s.DisplayName)
 	return out
 }
 
@@ -130,6 +133,7 @@ func (s *Store) All() map[int]ChannelSettings {
 type SettingsUpdateInput struct {
 	Intercom     *[intercomSlots]IntercomSlot `json:"intercom"`
 	OutputFormat *string                      `json:"output_format"`
+	DisplayName  *string                      `json:"display_name"`
 }
 
 func (s *Store) Set(id int, in SettingsUpdateInput) (ChannelSettings, error) {
@@ -147,6 +151,9 @@ func (s *Store) Set(id int, in SettingsUpdateInput) (ChannelSettings, error) {
 	}
 	if in.OutputFormat != nil {
 		cfg.OutputFormat = strings.TrimSpace(*in.OutputFormat)
+	}
+	if in.DisplayName != nil {
+		cfg.DisplayName = strings.TrimSpace(*in.DisplayName)
 	}
 	s.byID[id] = cfg
 	if err := s.saveLocked(); err != nil {

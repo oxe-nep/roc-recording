@@ -162,12 +162,14 @@ func main() {
 	commSettings := commentator.NewStore(filepath.Join(configDir, "commentator-settings.json"))
 	commSettings.Load()
 	commSettings.Ensure(channelIDs)
+	commSessions := commentator.NewSessionStore(filepath.Join(configDir, "commentator-sessions.json"))
+	commSessions.Load()
 	channelInputs := make(map[int]string, len(cfg.Channels))
 	for _, ch := range cfg.Channels {
 		channelInputs[ch.ID] = ch.FFmpegInput
 	}
 	iceCfg := commentator.ICEConfigFromEnv(hlsBase)
-	commMgr := commentator.NewManager(commSettings, commentatorPublicURL, cfg.FFmpegBin, channelInputs, iceCfg, commentatorPlayoutBridge{playMgr})
+	commMgr := commentator.NewManager(commSettings, commSessions, commentatorPublicURL, cfg.FFmpegBin, channelInputs, iceCfg, commentatorPlayoutBridge{playMgr})
 	for _, ch := range cfg.Channels {
 		commMgr.EnsureChannel(ch.ID)
 		if wfStore.Get(ch.ID).Mode == workflow.ModeRemoteCommentator {

@@ -275,9 +275,9 @@ export default function CommentatorClient({ token }: Props) {
         </button>
       )}
 
-      <div className="commentator-main commentator-main-stack">
+      <div className="commentator-main">
         <section className="commentator-video-panel">
-          <div className="commentator-video-wrap commentator-video-wrap-large">
+          <div className="commentator-video-wrap">
             <video ref={videoRef} className="commentator-program-video" autoPlay playsInline muted />
             {state !== "connected" && (
               <div className="commentator-video-overlay">
@@ -303,16 +303,15 @@ export default function CommentatorClient({ token }: Props) {
                 <div className="commentator-stats-pair">{rtcStats.candidatePair}</div>
               </div>
             )}
+            <p className="commentator-video-caption" aria-live="polite">
+              {rtcStats && rtcStats.videoLossPct >= 2 && (
+                <span className="commentator-stats-warn">High packet loss (VPN/UDP?)</span>
+              )}
+              {rtcStats && rtcStats.videoLossPct < 1 && rtcStats.videoInKbps > 0 && rtcStats.videoInKbps < 800 && (
+                <span className="commentator-stats-warn">Low bitrate / encoder starved</span>
+              )}
+            </p>
           </div>
-          <p className="commentator-video-caption">
-            Program feed
-            {rtcStats && rtcStats.videoLossPct >= 2 && (
-              <span className="commentator-stats-warn"> — high packet loss (VPN/UDP?)</span>
-            )}
-            {rtcStats && rtcStats.videoLossPct < 1 && rtcStats.videoInKbps > 0 && rtcStats.videoInKbps < 800 && (
-              <span className="commentator-stats-warn"> — low bitrate / encoder starved</span>
-            )}
-          </p>
         </section>
 
         <section className="commentator-controls commentator-controls-below">

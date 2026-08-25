@@ -504,7 +504,7 @@ export class CommentatorSession {
       this.startIceTimeout();
 
       for (const c of this.pendingRemoteICE) {
-        await this.pc.addICECandidate(c);
+        await this.pc.addIceCandidate(c);
       }
       this.pendingRemoteICE = [];
     } catch (e) {
@@ -533,7 +533,7 @@ export class CommentatorSession {
           this.pendingRemoteICE.push(msg.candidate);
           return;
         }
-        await this.pc.addICECandidate(msg.candidate);
+        await this.pc.addIceCandidate(msg.candidate);
         break;
     }
   }

@@ -58,8 +58,10 @@ function drawBank(canvas: HTMLCanvasElement, dbs: number[]) {
   if (w < 1 || h < 1) return;
   const pixelW = Math.round(w * dpr);
   const pixelH = Math.round(h * dpr);
-  if (canvas.width !== pixelW) canvas.width = pixelW;
-  if (canvas.height !== pixelH) canvas.height = pixelH;
+  if (canvas.width !== pixelW || canvas.height !== pixelH) {
+    canvas.width = pixelW;
+    canvas.height = pixelH;
+  }
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);

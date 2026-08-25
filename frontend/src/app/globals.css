@@ -574,7 +574,7 @@ html {
 .card-stage {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-rows: minmax(0, auto);
+  grid-template-rows: auto;
   align-items: stretch;
   width: 100%;
   min-height: 0;
@@ -606,8 +606,10 @@ html {
 
 .card-thumb {
   aspect-ratio: 16 / 9;
+  align-self: start;
   min-width: 0;
   width: 100%;
+  height: auto;
   background: var(--bg-elevated);
   display: flex;
   align-items: center;
@@ -1339,12 +1341,15 @@ html {
   align-items: stretch;
   gap: 3px;
   flex-shrink: 0;
-  height: 100%;
+  align-self: stretch;
+  height: auto;
+  max-height: 100%;
   min-height: 0;
-  width: clamp(28px, 9%, 44px);
+  width: 36px;
   padding: 6px 4px;
   background: rgba(0, 0, 0, 0.18);
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 .audio-meter-left {
@@ -1353,7 +1358,7 @@ html {
 
 .audio-meter-stereo {
   border-right: 1px solid var(--border-subtle);
-  width: clamp(22px, 7%, 34px);
+  width: 28px;
 }
 
 .audio-meter-stereo .audio-meter-canvas {
@@ -1369,12 +1374,14 @@ html {
   gap: 4px;
   height: 100%;
   min-height: 0;
+  overflow: hidden;
 }
 
 .audio-meter-canvas {
   display: block;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   width: 100%;
+  height: 0;
   min-width: 0;
   min-height: 0;
 }

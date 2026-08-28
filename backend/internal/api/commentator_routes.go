@@ -2,30 +2,60 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/roc-recording/backend/internal/commentator"
 )
 
+type commentatorJoinBody struct {
+	Pin string `json:"pin"`
+}
+
+func commentatorJoinError(w http.ResponseWriter, err error) {
+	body := map[string]any{"error": err.Error()}
+	switch {
+	case errors.Is(err, commentator.ErrPinRequired):
+		body["pin_required"] = true
+	case errors.Is(err, commentator.ErrInvalidPin):
+		body["invalid_pin"] = true
+	case errors.Is(err, commentator.ErrExpiredToken):
+		body["expired"] = true
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	_ = json.NewEncoder(w).Encode(body)
+}
+
 func registerCommentatorPublicRoutes(r chi.Router, commMgr *commentator.Manager) {
 	if commMgr == nil {
 		return
 	}
-	r.Get("/api/commentator/join/{token}", func(w http.ResponseWriter, r *http.Request) {
+	joinHandler := func(w http.ResponseWriter, r *http.Request) {
 		if !commMgr.AllowJoin(r) {
 			jsonError(w, "rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
 		token := chi.URLParam(r, "token")
-		info, err := commMgr.JoinInfo(token)
+		pin := strings.TrimSpace(r.URL.Query().Get("pin"))
+		if pin == "" && r.Method == http.MethodPost {
+			var body commentatorJoinBody
+			if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+				pin = strings.TrimSpace(body.Pin)
+			}
+		}
+		info, err := commMgr.JoinInfo(token, pin)
 		if err != nil {
-			jsonError(w, err.Error(), http.StatusUnauthorized)
+			commentatorJoinError(w, err)
 			return
 		}
 		jsonOK(w, info)
-	})
+	}
+	r.Get("/api/commentator/join/{token}", joinHandler)
+	r.Post("/api/commentator/join/{token}", joinHandler)
 	serveCommentatorWS := func(w http.ResponseWriter, r *http.Request) {
 		commMgr.ServeSignaling(w, r, chi.URLParam(r, "token"))
 	}

@@ -23,7 +23,8 @@ Optional **SRT** output per channel remuxes the same UDP master (`-c copy`) as l
 
 - **DeckLink IN** → program video + PGM (1–2) + up to 6 intercom mono (3–8) → WebRTC to browser
 - **DeckLink OUT** ← commentator webcam + mic (on air 1–2, or PTT to intercom 3–8)
-- Kommentator-UI: `https://recording.nepsweden.tech/commentator/{token}` (invite link from dashboard)
+- Kommentator-UI: `https://commentator.nepsweden.tech/commentator/{token}` (invite link from dashboard; PIN shown in settings)
+- Dashboard: `https://recording.nepsweden.tech`
 - Media går **direkt** browser ↔ capture host (+ TURN); signaling proxas via k3s frontend
 
 **FFmpeg:** din befintliga DeckLink-build räcker troligen — **ingen full ombyggnad** om `libopus` redan finns:
@@ -37,7 +38,8 @@ Commentator-ljud **ut** till webbläsaren kodas med `-c:a libopus`. DeckLink OUT
 **WebRTC env** (`/etc/roc-recording.env`):
 
 ```
-COMMENTATOR_PUBLIC_URL=https://recording.nepsweden.tech
+COMMENTATOR_PUBLIC_URL=https://commentator.nepsweden.tech
+COMMENTATOR_SESSION_TTL=24h
 WEBRTC_STUN_URLS=stun:stun.l.google.com:19302
 WEBRTC_TURN_URLS=turn:YOUR_HOST:3478?transport=udp
 WEBRTC_TURN_USERNAME=commentator
@@ -121,9 +123,11 @@ Same pattern as `roc-wg-monitor`:
 
 ```bash
 kubectl apply -f k8s-deployment.yaml
+kubectl apply -f k8s-commentator-deployment.yaml
 ```
 
-- Hostname: `recording.nepsweden.tech`
+- Dashboard: `recording.nepsweden.tech`
+- Commentator: `commentator.nepsweden.tech` (same image; set `COMMENTATOR_PUBLIC_URL` on capture host)
 - Secret `roc-recording-secrets`: `API_KEY`, `BACKEND_HOST`, `BACKEND_PORT`
 - nginx injects `X-API-Key` on proxied `/api/` calls (key is not baked into the image)
 

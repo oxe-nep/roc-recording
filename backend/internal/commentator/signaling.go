@@ -46,8 +46,8 @@ func (m *Manager) AllowJoin(r *http.Request) bool {
 	return m.joinLimit.allow(clientIP(r))
 }
 
-func (m *Manager) JoinInfo(token string) (joinResponse, error) {
-	id, err := m.validateToken(token)
+func (m *Manager) JoinInfo(token, pin string) (joinResponse, error) {
+	id, err := m.validateTokenAndPIN(token, pin)
 	if err != nil {
 		return joinResponse{}, err
 	}
@@ -115,21 +115,31 @@ func (m *Manager) pushConfigMessage(sess *rtcSession, channelID int, writeJSON f
 }
 
 func (m *Manager) validateToken(token string) (int, error) {
+	return m.validateTokenAndPIN(token, "")
+}
+
+func (m *Manager) validateTokenAndPIN(token, pin string) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for id, ch := range m.byID {
 		if ch.session == nil || ch.session.token != token {
 			continue
 		}
-		if !ch.session.expiresAt.IsZero() && time.Now().After(ch.session.expiresAt) {
-			return 0, errExpiredToken
+		if m.sessionExpired(ch.session) {
+			return 0, ErrExpiredToken
 		}
 		if !ch.enabled {
-			return 0, errSessionDisabled
+			return 0, ErrSessionDisabled
+		}
+		if pin == "" {
+			return 0, ErrPinRequired
+		}
+		if !pinMatches(ch.session.pin, pin) {
+			return 0, ErrInvalidPin
 		}
 		return id, nil
 	}
-	return 0, errInvalidToken
+	return 0, ErrInvalidToken
 }
 
 func (m *Manager) ServeSignaling(w http.ResponseWriter, r *http.Request, token string) {
@@ -137,7 +147,8 @@ func (m *Manager) ServeSignaling(w http.ResponseWriter, r *http.Request, token s
 		http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 		return
 	}
-	channelID, err := m.validateToken(token)
+	pin := strings.TrimSpace(r.URL.Query().Get("pin"))
+	channelID, err := m.validateTokenAndPIN(token, pin)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return

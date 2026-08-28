@@ -11,7 +11,9 @@ import (
 // PersistedSession is a durable invite token for one channel.
 type PersistedSession struct {
 	Token     string    `json:"token"`
+	Pin       string    `json:"pin,omitempty"`
 	CreatedAt time.Time `json:"created_at,omitempty"`
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
 }
 
 type SessionStore struct {
@@ -74,13 +76,13 @@ func (s *SessionStore) Get(id int) (PersistedSession, bool) {
 	return ps, ok && ps.Token != ""
 }
 
-func (s *SessionStore) Set(id int, token string) error {
+func (s *SessionStore) Set(id int, ps PersistedSession) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.byID[id] = PersistedSession{
-		Token:     token,
-		CreatedAt: time.Now().UTC(),
+	if ps.CreatedAt.IsZero() {
+		ps.CreatedAt = time.Now().UTC()
 	}
+	s.byID[id] = ps
 	return s.saveLocked()
 }
 

@@ -86,6 +86,32 @@ export function saveCommentatorDevices(prefs: CommentatorDevicePrefs): void {
   }
 }
 
+const pinKey = (token: string) => `roc-commentator-pin:${token}`;
+
+export function loadCommentatorPin(token: string): string {
+  try {
+    return sessionStorage.getItem(pinKey(token)) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function saveCommentatorPin(token: string, pin: string): void {
+  try {
+    sessionStorage.setItem(pinKey(token), pin.trim());
+  } catch {
+    /* ignore */
+  }
+}
+
+export function clearCommentatorPin(token: string): void {
+  try {
+    sessionStorage.removeItem(pinKey(token));
+  } catch {
+    /* ignore */
+  }
+}
+
 function clamp01(v: number): number {
   return Math.min(1, Math.max(0, v));
 }

@@ -20,6 +20,7 @@ const (
 
 type session struct {
 	token     string
+	pin       string
 	expiresAt time.Time
 }
 
@@ -43,6 +44,7 @@ type Info struct {
 	PTTChannel       int            `json:"ptt_channel"`
 	InviteURL        string         `json:"invite_url,omitempty"`
 	SessionExpiresAt *time.Time     `json:"session_expires_at,omitempty"`
+	SessionPIN       string         `json:"session_pin,omitempty"`
 	Intercom         []IntercomSlot `json:"intercom"`
 	Error            string         `json:"error,omitempty"`
 	OutputFormat     string         `json:"output_format,omitempty"`
@@ -53,6 +55,7 @@ type Info struct {
 type SessionInfo struct {
 	Token     string    `json:"token"`
 	InviteURL string    `json:"invite_url"`
+	Pin       string    `json:"pin"`
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
 }
 
@@ -66,14 +69,18 @@ type Manager struct {
 	ice           ICEConfig
 	playout       PlayoutBridge
 	joinLimit     *joinLimiter
+	sessionTTL    time.Duration
 	byID          map[int]*channel
 	rtcByChannel  map[int]*rtcSession
 }
 
-func NewManager(settings *Store, sessions *SessionStore, publicBaseURL string, ffmpegBin string, channelInputs map[int]string, ice ICEConfig, playout PlayoutBridge) *Manager {
+func NewManager(settings *Store, sessions *SessionStore, publicBaseURL string, ffmpegBin string, channelInputs map[int]string, ice ICEConfig, playout PlayoutBridge, sessionTTL time.Duration) *Manager {
 	publicBaseURL = strings.TrimRight(strings.TrimSpace(publicBaseURL), "/")
 	if channelInputs == nil {
 		channelInputs = make(map[int]string)
+	}
+	if sessionTTL <= 0 {
+		sessionTTL = defaultSessionTTL
 	}
 	return &Manager{
 		settings:      settings,
@@ -84,6 +91,7 @@ func NewManager(settings *Store, sessions *SessionStore, publicBaseURL string, f
 		ice:           ice,
 		playout:       playout,
 		joinLimit:     newJoinLimiter(),
+		sessionTTL:    sessionTTL,
 		byID:          make(map[int]*channel),
 		rtcByChannel:  make(map[int]*rtcSession),
 	}
@@ -350,6 +358,7 @@ func (m *Manager) infoLocked(ch *channel) Info {
 			info.SessionExpiresAt = &exp
 		}
 		info.InviteURL = m.inviteURLLocked(ch.session.token)
+		info.SessionPIN = ch.session.pin
 	}
 	if device, format, err := m.OutputSink(ch.id); err == nil {
 		if info.OutputFormat == "" {
@@ -375,48 +384,109 @@ func newToken() (string, error) {
 	return hex.EncodeToString(b[:]), nil
 }
 
+func (m *Manager) sessionInfoLocked(ch *channel) SessionInfo {
+	info := SessionInfo{
+		Token:     ch.session.token,
+		InviteURL: m.inviteURLLocked(ch.session.token),
+		Pin:       ch.session.pin,
+	}
+	if !ch.session.expiresAt.IsZero() {
+		info.ExpiresAt = ch.session.expiresAt
+	}
+	return info
+}
+
+func (m *Manager) saveSessionLocked(id int, sess *session) error {
+	if m.sessions == nil || sess == nil {
+		return nil
+	}
+	return m.sessions.Set(id, PersistedSession{
+		Token:     sess.token,
+		Pin:       sess.pin,
+		ExpiresAt: sess.expiresAt,
+	})
+}
+
+func (m *Manager) sessionExpired(sess *session) bool {
+	return sess != nil && !sess.expiresAt.IsZero() && time.Now().After(sess.expiresAt)
+}
+
+func (m *Manager) newSessionLocked() (*session, error) {
+	token, err := newToken()
+	if err != nil {
+		return nil, err
+	}
+	pin, err := newSessionPIN()
+	if err != nil {
+		return nil, err
+	}
+	return &session{
+		token:     token,
+		pin:       pin,
+		expiresAt: time.Now().UTC().Add(m.sessionTTL),
+	}, nil
+}
+
 // ensureSessionLocked restores a persisted token or creates a new one. Caller holds m.mu.
 func (m *Manager) ensureSessionLocked(ch *channel) error {
 	if ch.session != nil && ch.session.token != "" {
-		if !ch.connected {
-			ch.status = StatusSessionActive
-		}
-		return nil
-	}
-	if m.sessions != nil {
-		if ps, ok := m.sessions.Get(ch.id); ok {
-			ch.session = &session{token: ps.Token}
+		if m.sessionExpired(ch.session) {
+			ch.session = nil
+			if m.sessions != nil {
+				_ = m.sessions.Delete(ch.id)
+			}
+		} else {
 			if !ch.connected {
 				ch.status = StatusSessionActive
 			}
 			return nil
 		}
 	}
-	token, err := newToken()
+	if m.sessions != nil {
+		if ps, ok := m.sessions.Get(ch.id); ok {
+			sess := &session{
+				token:     ps.Token,
+				pin:       ps.Pin,
+				expiresAt: ps.ExpiresAt,
+			}
+			if m.sessionExpired(sess) {
+				_ = m.sessions.Delete(ch.id)
+			} else {
+				migrated := false
+				if sess.pin == "" {
+					pin, err := newSessionPIN()
+					if err != nil {
+						return err
+					}
+					sess.pin = pin
+					migrated = true
+				}
+				if sess.expiresAt.IsZero() {
+					sess.expiresAt = time.Now().UTC().Add(m.sessionTTL)
+					migrated = true
+				}
+				ch.session = sess
+				if migrated {
+					if err := m.saveSessionLocked(ch.id, sess); err != nil {
+						return err
+					}
+				}
+				if !ch.connected {
+					ch.status = StatusSessionActive
+				}
+				return nil
+			}
+		}
+	}
+	sess, err := m.newSessionLocked()
 	if err != nil {
 		return err
 	}
-	ch.session = &session{token: token}
+	ch.session = sess
 	if !ch.connected {
 		ch.status = StatusSessionActive
 	}
 	ch.connected = false
 	ch.pttChannel = 0
-	if m.sessions != nil {
-		if err := m.sessions.Set(ch.id, token); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (m *Manager) sessionInfoLocked(ch *channel) SessionInfo {
-	info := SessionInfo{
-		Token:     ch.session.token,
-		InviteURL: m.inviteURLLocked(ch.session.token),
-	}
-	if !ch.session.expiresAt.IsZero() {
-		info.ExpiresAt = ch.session.expiresAt
-	}
-	return info
+	return m.saveSessionLocked(ch.id, sess)
 }

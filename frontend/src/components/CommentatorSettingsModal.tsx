@@ -90,6 +90,8 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
   const [outputFormat, setOutputFormat] = useState("");
   const [devices, setDevices] = useState<PlayoutDevice[]>([]);
   const [inviteURL, setInviteURL] = useState("");
+  const [sessionPin, setSessionPin] = useState("");
+  const [sessionExpiresAt, setSessionExpiresAt] = useState("");
   const [enabled, setEnabled] = useState(false);
   const [sessionActive, setSessionActive] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -130,6 +132,8 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
         );
         setDevices(devs);
         setInviteURL(info.invite_url ?? "");
+        setSessionPin(info.session_pin ?? "");
+        setSessionExpiresAt(info.session_expires_at ?? "");
         setEnabled(!!info.enabled);
         setSessionActive(!!info.session_active);
         setConnected(!!info.connected);
@@ -188,12 +192,30 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
     }
   };
 
+  const copyPin = async () => {
+    if (!sessionPin) return;
+    try {
+      await navigator.clipboard.writeText(sessionPin);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const formatExpiry = (iso: string) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toLocaleString();
+  };
+
   const createInvite = async () => {
     setBusy(true);
     setError(null);
     try {
       const session = await createCommentatorSession(channelId);
       setInviteURL(session.invite_url);
+      setSessionPin(session.pin ?? "");
+      setSessionExpiresAt(session.expires_at ?? "");
       setSessionActive(true);
       setStatus("session_active");
       onSaved();
@@ -210,6 +232,8 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
     try {
       const info = await revokeCommentatorSession(channelId);
       setInviteURL(info.invite_url ?? "");
+      setSessionPin(info.session_pin ?? "");
+      setSessionExpiresAt(info.session_expires_at ?? "");
       setSessionActive(!!info.session_active);
       setConnected(!!info.connected);
       setStatus(info.status);
@@ -265,8 +289,8 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
           </div>
           <p className="channel-settings-hint">
             Remote commentator uses WebRTC for low-latency return video and audio. PGM uses DeckLink tracks 1–2;
-            intercom channels use tracks 3–8. The invite link is persistent until you revoke it or the server is
-            reconfigured.
+            intercom channels use tracks 3–8. Share the invite link and PIN with the commentator. Invites expire
+            automatically (default 24h, configurable via COMMENTATOR_SESSION_TTL on the capture host).
           </p>
 
           <div className="channel-settings-form" style={{ marginBottom: 12 }}>
@@ -290,7 +314,7 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
                 {displayInvite}
               </code>
               <button type="button" className="badge" disabled={busy} onClick={() => void copyInvite()}>
-                Copy
+                Copy link
               </button>
               <button type="button" className="badge" disabled={busy} onClick={openInvite}>
                 Open
@@ -299,7 +323,24 @@ export default function CommentatorSettingsModal({ open, channelId, onClose, onS
           ) : enabled ? (
             <p className="channel-settings-hint">Invite link will appear when remote commentator is active.</p>
           ) : (
-            <p className="channel-settings-hint">Enable remote commentator workflow to get a persistent invite link.</p>
+            <p className="channel-settings-hint">Enable remote commentator workflow to get an invite link.</p>
+          )}
+
+          {sessionActive && sessionPin && (
+            <div className="commentator-session-pin-row">
+              <span className="channel-settings-hint">PIN for commentator</span>
+              <div className="srt-url-row">
+                <code className="srt-url commentator-pin-code">{sessionPin}</code>
+                <button type="button" className="badge" disabled={busy} onClick={() => void copyPin()}>
+                  Copy PIN
+                </button>
+              </div>
+              {sessionExpiresAt && (
+                <p className="channel-settings-hint" style={{ marginTop: 4 }}>
+                  Expires {formatExpiry(sessionExpiresAt)}
+                </p>
+              )}
+            </div>
           )}
 
           <div className="channel-settings-actions">

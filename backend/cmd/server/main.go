@@ -169,7 +169,7 @@ func main() {
 		channelInputs[ch.ID] = ch.FFmpegInput
 	}
 	iceCfg := commentator.ICEConfigFromEnv(hlsBase)
-	commMgr := commentator.NewManager(commSettings, commSessions, commentatorPublicURL, cfg.FFmpegBin, channelInputs, iceCfg, commentatorPlayoutBridge{playMgr})
+	commMgr := commentator.NewManager(commSettings, commSessions, commentatorPublicURL, cfg.FFmpegBin, channelInputs, iceCfg, commentatorPlayoutBridge{playMgr}, commentator.SessionTTLFromEnv())
 	for _, ch := range cfg.Channels {
 		commMgr.EnsureChannel(ch.ID)
 		if wfStore.Get(ch.ID).Mode == workflow.ModeRemoteCommentator {

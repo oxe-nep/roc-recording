@@ -762,6 +762,7 @@ export interface CommentatorInfo {
   ptt_channel: number;
   invite_url?: string;
   session_expires_at?: string;
+  session_pin?: string;
   intercom: CommentatorIntercomSlot[];
   output_format?: string;
   output_device?: string;
@@ -786,6 +787,7 @@ export interface CommentatorSettings {
 export interface CommentatorSessionInfo {
   token: string;
   invite_url: string;
+  pin: string;
   expires_at: string;
 }
 

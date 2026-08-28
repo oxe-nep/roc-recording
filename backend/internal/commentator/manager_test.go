@@ -3,11 +3,13 @@ package commentator
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestManagerCreateSessionRequiresEnabled(t *testing.T) {
-	m := NewManager(NewStore(""), NewSessionStore(""), "", "", nil, ICEConfig{})
+	m := NewManager(NewStore(""), NewSessionStore(""), "", "", nil, ICEConfig{}, nil, 0)
 	m.EnsureChannel(1)
 	_, err := m.CreateSession(1)
 	if err == nil {
@@ -18,8 +20,11 @@ func TestManagerCreateSessionRequiresEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateSession: %v", err)
 	}
-	if info.Token == "" || info.InviteURL == "" {
-		t.Fatal("expected token and invite url")
+	if info.Token == "" || info.InviteURL == "" || info.Pin == "" {
+		t.Fatal("expected token, invite url, and pin")
+	}
+	if info.ExpiresAt.IsZero() {
+		t.Fatal("expected session expiry")
 	}
 	got := m.Get(1)
 	if !got.SessionActive || got.Status != StatusSessionActive {
@@ -28,7 +33,7 @@ func TestManagerCreateSessionRequiresEnabled(t *testing.T) {
 }
 
 func TestManagerCreateSessionIdempotent(t *testing.T) {
-	m := NewManager(NewStore(""), NewSessionStore(""), "", "", nil, ICEConfig{})
+	m := NewManager(NewStore(""), NewSessionStore(""), "", "", nil, ICEConfig{}, nil, 0)
 	m.Enable(1)
 	first, err := m.CreateSession(1)
 	if err != nil {
@@ -47,7 +52,7 @@ func TestManagerEnableRestoresPersistedSession(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "commentator-sessions.json")
 	store := NewSessionStore(path)
-	m1 := NewManager(NewStore(""), store, "", "", nil, ICEConfig{})
+	m1 := NewManager(NewStore(""), store, "", "", nil, ICEConfig{}, nil, 0)
 	m1.Enable(1)
 	info, err := m1.CreateSession(1)
 	if err != nil {
@@ -56,7 +61,7 @@ func TestManagerEnableRestoresPersistedSession(t *testing.T) {
 
 	m2Store := NewSessionStore(path)
 	m2Store.Load()
-	m2 := NewManager(NewStore(""), m2Store, "", "", nil, ICEConfig{})
+	m2 := NewManager(NewStore(""), m2Store, "", "", nil, ICEConfig{}, nil, 0)
 	m2.Enable(1)
 	got := m2.Get(1)
 	if !got.SessionActive {
@@ -78,7 +83,7 @@ func TestManagerRevokeSessionClearsPersistence(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "commentator-sessions.json")
 	store := NewSessionStore(path)
-	m := NewManager(NewStore(""), store, "", "", nil, ICEConfig{})
+	m := NewManager(NewStore(""), store, "", "", nil, ICEConfig{}, nil, 0)
 	m.Enable(1)
 	first, err := m.CreateSession(1)
 	if err != nil {
@@ -113,7 +118,7 @@ func TestManagerDisableKeepsPersistedToken(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "commentator-sessions.json")
 	store := NewSessionStore(path)
-	m := NewManager(NewStore(""), store, "", "", nil, ICEConfig{})
+	m := NewManager(NewStore(""), store, "", "", nil, ICEConfig{}, nil, 0)
 	m.Enable(1)
 	first, err := m.CreateSession(1)
 	if err != nil {
@@ -134,8 +139,36 @@ func TestManagerDisableKeepsPersistedToken(t *testing.T) {
 	}
 }
 
+func TestManagerJoinRequiresPIN(t *testing.T) {
+	m := NewManager(NewStore(""), NewSessionStore(""), "", "", nil, ICEConfig{}, nil, time.Hour)
+	m.Enable(1)
+	_, err := m.CreateSession(1)
+	if err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+	got := m.Get(1)
+	if _, err := m.JoinInfo(got.InviteURL[len(got.InviteURL)-48:], ""); err != ErrPinRequired {
+		t.Fatalf("JoinInfo without pin = %v, want ErrPinRequired", err)
+	}
+	if _, err := m.JoinInfo(got.InviteURL[len(got.InviteURL)-48:], "000000"); err != ErrInvalidPin {
+		t.Fatalf("JoinInfo wrong pin = %v, want ErrInvalidPin", err)
+	}
+	info, err := m.JoinInfo(extractToken(got.InviteURL), got.SessionPIN)
+	if err != nil {
+		t.Fatalf("JoinInfo with pin: %v", err)
+	}
+	if info.ChannelID != 1 {
+		t.Fatalf("channel = %d, want 1", info.ChannelID)
+	}
+}
+
+func extractToken(inviteURL string) string {
+	parts := strings.Split(strings.TrimRight(inviteURL, "/"), "/")
+	return parts[len(parts)-1]
+}
+
 func TestManagerPTTRoutingState(t *testing.T) {
-	m := NewManager(NewStore(""), NewSessionStore(""), "", "", nil, ICEConfig{})
+	m := NewManager(NewStore(""), NewSessionStore(""), "", "", nil, ICEConfig{}, nil, 0)
 	m.Enable(2)
 	m.SetPTT(2, 3)
 	got := m.Get(2)

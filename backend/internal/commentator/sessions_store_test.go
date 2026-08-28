@@ -10,7 +10,7 @@ func TestSessionStoreRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "commentator-sessions.json")
 	store := NewSessionStore(path)
-	if err := store.Set(3, "abc123"); err != nil {
+	if err := store.Set(3, PersistedSession{Token: "abc123"}); err != nil {
 		t.Fatalf("Set: %v", err)
 	}
 	reloaded := NewSessionStore(path)

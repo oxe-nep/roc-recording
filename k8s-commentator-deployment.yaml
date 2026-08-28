@@ -1,0 +1,103 @@
+# ROC Recording – commentator frontend (k3s)
+# Hostname: commentator.nepsweden.tech
+#
+# Same Docker image as the dashboard frontend; only the Ingress hostname differs.
+# nginx in the pod proxies /api/commentator/join/ and /ws/commentator/ to the capture host.
+#
+# Backend env on capture host:
+#   COMMENTATOR_PUBLIC_URL=https://commentator.nepsweden.tech
+#
+# Apply after dashboard deployment (reuses roc-recording-secrets):
+#   kubectl apply -f k8s-commentator-deployment.yaml
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: roc-recording-commentator
+  labels:
+    app: roc-recording-commentator
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: roc-recording-commentator
+  template:
+    metadata:
+      labels:
+        app: roc-recording-commentator
+    spec:
+      imagePullSecrets:
+        - name: ghcr-creds
+      containers:
+        - name: frontend
+          image: ghcr.io/oxe-nep/roc-recording-frontend:latest
+          imagePullPolicy: Always
+          envFrom:
+            - secretRef:
+                name: roc-recording-secrets
+          ports:
+            - name: http
+              containerPort: 80
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: roc-recording-commentator
+spec:
+  selector:
+    app: roc-recording-commentator
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: roc-recording-commentator-http
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`commentator.nepsweden.tech`)
+      kind: Rule
+      services:
+        - name: roc-recording-commentator
+          port: 80
+      middlewares:
+        - name: https-redirect
+          namespace: default
+
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: roc-recording-commentator-https
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: Host(`commentator.nepsweden.tech`)
+      kind: Rule
+      services:
+        - name: roc-recording-commentator
+          port: 80
+  tls:
+    certResolver: letsencrypt

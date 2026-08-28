@@ -5,13 +5,17 @@ import type { CommentatorIntercomSlot } from "@/lib/api";
 import {
   loadCommentatorDebug,
   loadCommentatorDevices,
+  loadCommentatorPin,
   loadCommentatorVolumes,
   saveCommentatorDebug,
   saveCommentatorDevices,
+  saveCommentatorPin,
   saveCommentatorVolumes,
+  clearCommentatorPin,
   type CommentatorDevicePrefs,
 } from "@/lib/commentatorPrefs";
 import {
+  CommentatorJoinError,
   CommentatorSession,
   listMediaDevices,
   type CommentatorConnectionState,
@@ -66,6 +70,10 @@ export default function CommentatorClient({ token }: Props) {
     cams: [],
   });
   const [deviceError, setDeviceError] = useState<string | null>(null);
+  const [pin, setPin] = useState(() => loadCommentatorPin(token));
+  const [pinInput, setPinInput] = useState("");
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [authenticated, setAuthenticated] = useState(() => !!loadCommentatorPin(token));
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const pgmVolRef = useRef(pgmVol);
   const intercomVolRef = useRef(intercomVol);
@@ -79,6 +87,11 @@ export default function CommentatorClient({ token }: Props) {
     setPgmVol(saved.pgm);
     setIntercomVol(parseIntercomVolumes(saved.intercom));
     setShowDebug(loadCommentatorDebug(token));
+    const savedPin = loadCommentatorPin(token);
+    setPin(savedPin);
+    setAuthenticated(!!savedPin);
+    setPinInput("");
+    setPinError(null);
   }, [token]);
 
   useEffect(() => {
@@ -132,33 +145,69 @@ export default function CommentatorClient({ token }: Props) {
     };
   }, []);
 
+  const startSession = useCallback(
+    (sessionPin: string) => {
+      sessionRef.current?.stop();
+      const session = new CommentatorSession(token, sessionPin, sessionOptions);
+      sessionRef.current = session;
+      bindSession(session);
+      void session.start().catch((e) => {
+        if (e instanceof CommentatorJoinError) {
+          if (e.code === "invalid_pin") {
+            clearCommentatorPin(token);
+            setPin("");
+            setAuthenticated(false);
+            setPinError("Wrong PIN. Ask the producer for the current code.");
+            setState("idle");
+            return;
+          }
+          if (e.code === "expired") {
+            clearCommentatorPin(token);
+            setPin("");
+            setAuthenticated(false);
+            setPinError("This invite has expired. Ask the producer for a new link.");
+            setState("idle");
+            return;
+          }
+        }
+        setError(String(e));
+        setState("failed");
+      });
+    },
+    [token, sessionOptions, bindSession],
+  );
+
   useEffect(() => {
-    const session = new CommentatorSession(token, sessionOptions);
-    sessionRef.current = session;
-    bindSession(session);
-
-    void session.start().catch((e) => {
-      setError(String(e));
-      setState("failed");
-    });
-
+    if (!authenticated || !pin.trim()) return;
+    startSession(pin);
     return () => {
-      session.stop();
+      sessionRef.current?.stop();
       sessionRef.current = null;
     };
-  }, [token, sessionOptions, bindSession]);
+  }, [authenticated, pin, startSession]);
+
+  const submitPin = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = pinInput.trim();
+    if (!/^\d{6}$/.test(trimmed)) {
+      setPinError("Enter the 6-digit PIN from the producer.");
+      return;
+    }
+    setPinError(null);
+    saveCommentatorPin(token, trimmed);
+    setPin(trimmed);
+    setAuthenticated(true);
+  };
 
   const reconnect = () => {
-    sessionRef.current?.stop();
+    if (!pin.trim()) {
+      setAuthenticated(false);
+      setPinError("Enter the PIN to reconnect.");
+      return;
+    }
     setError(null);
     setReconnectRequired(false);
-    const session = new CommentatorSession(token, sessionOptions);
-    sessionRef.current = session;
-    bindSession(session);
-    void session.start().catch((e) => {
-      setError(String(e));
-      setState("failed");
-    });
+    startSession(pin);
   };
 
   useEffect(() => {
@@ -235,6 +284,46 @@ export default function CommentatorClient({ token }: Props) {
       : state === "failed"
         ? "commentator-status--err"
         : "commentator-status--pending";
+
+  if (!authenticated) {
+    return (
+      <div className="commentator-shell commentator-shell--pin">
+        <header className="commentator-header">
+          <div className="commentator-header-brand">
+            <img src="/nep-logo.svg" alt="NEP" className="nep-logo commentator-logo" />
+            <div className="commentator-header-text">
+              <h1>Commentator</h1>
+              <p className="commentator-eyebrow">Remote commentator access</p>
+            </div>
+          </div>
+        </header>
+        <main className="commentator-pin-panel">
+          <h2>Enter PIN</h2>
+          <p className="commentator-pin-hint">
+            Ask the producer for the 6-digit PIN that goes with your invite link.
+          </p>
+          {pinError && <div className="commentator-alert">{pinError}</div>}
+          <form className="commentator-pin-form" onSubmit={submitPin}>
+            <input
+              className="commentator-pin-input"
+              type="text"
+              inputMode="numeric"
+              pattern="\d{6}"
+              maxLength={6}
+              autoComplete="one-time-code"
+              placeholder="000000"
+              value={pinInput}
+              onChange={(e) => setPinInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              autoFocus
+            />
+            <button type="submit" className="commentator-btn commentator-btn-primary" disabled={pinInput.length !== 6}>
+              Join session
+            </button>
+          </form>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="commentator-shell">

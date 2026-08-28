@@ -133,14 +133,34 @@ function mediaConstraints(
   return { audio, video };
 }
 
-export async function fetchCommentatorJoin(token: string): Promise<CommentatorJoinInfo> {
-  const base = commentatorOrigin();
-  const res = await fetch(`${base}/api/commentator/join/${encodeURIComponent(token)}`);
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `Join failed (${res.status})`);
+export type CommentatorJoinErrorCode = "pin_required" | "invalid_pin" | "expired" | "other";
+
+export class CommentatorJoinError extends Error {
+  readonly code: CommentatorJoinErrorCode;
+
+  constructor(message: string, code: CommentatorJoinErrorCode = "other") {
+    super(message);
+    this.name = "CommentatorJoinError";
+    this.code = code;
   }
-  return res.json();
+}
+
+export async function fetchCommentatorJoin(token: string, pin: string): Promise<CommentatorJoinInfo> {
+  const base = commentatorOrigin();
+  const res = await fetch(`${base}/api/commentator/join/${encodeURIComponent(token)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pin: pin.trim() }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg = body.error || `Join failed (${res.status})`;
+    if (body.pin_required) throw new CommentatorJoinError(msg, "pin_required");
+    if (body.invalid_pin) throw new CommentatorJoinError(msg, "invalid_pin");
+    if (body.expired) throw new CommentatorJoinError(msg, "expired");
+    throw new CommentatorJoinError(msg, "other");
+  }
+  return body as CommentatorJoinInfo;
 }
 
 type SignalMsg = {
@@ -193,6 +213,7 @@ export class CommentatorSession {
 
   constructor(
     private readonly token: string,
+    private readonly pin: string,
     options: CommentatorSessionOptions = {},
   ) {
     this.devices = options.devices ?? { micId: "", camId: "" };
@@ -211,7 +232,7 @@ export class CommentatorSession {
     this.pendingRemoteICE = [];
     this.onState?.("joining");
 
-    const join = await fetchCommentatorJoin(this.token);
+    const join = await fetchCommentatorJoin(this.token, this.pin);
     this.iceServers = join.ice_servers;
     this.onIntercom?.(join.intercom);
     if (join.display_name?.trim()) {
@@ -248,8 +269,17 @@ export class CommentatorSession {
     }
   }
 
-  private async connectSignaling(path: string): Promise<void> {
+  private signalingURL(path: string): string {
     const url = wsURL(path);
+    const pin = this.pin.trim();
+    if (!pin) return url;
+    const u = new URL(url);
+    u.searchParams.set("pin", pin);
+    return u.toString();
+  }
+
+  private async connectSignaling(path: string): Promise<void> {
+    const url = this.signalingURL(path);
     await new Promise<void>((resolve, reject) => {
       let settled = false;
       const ws = new WebSocket(url);

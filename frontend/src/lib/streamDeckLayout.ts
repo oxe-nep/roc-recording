@@ -1,5 +1,7 @@
 /** Logical key roles for commentator Stream Deck layouts (col/row grid). */
 
+import type { StreamDeckLayoutButton } from "@/lib/streamDeckBridge";
+
 export type StreamDeckKeyRole =
   | { kind: "ptt"; slot: number }
   | { kind: "hosta" }
@@ -118,11 +120,34 @@ export function detectStreamDeckPreset(columns: number, rows: number): StreamDec
   return STREAM_DECK_PRESETS[2];
 }
 
-export function roleMapForPage(preset: StreamDeckGridPreset, page: 1 | 2): Map<string, StreamDeckKeyRole> {
+export function isRoleRelevant(
+  role: StreamDeckKeyRole,
+  layout: StreamDeckLayoutButton[],
+): boolean {
+  switch (role.kind) {
+    case "ptt":
+    case "ic_vol":
+      return layout.some((b) => b.slot === role.slot);
+    case "pgm_vol":
+    case "hosta":
+      return true;
+    case "page":
+      // Volume page is only useful when at least one intercom is enabled.
+      return role.page === 1 || layout.length > 0;
+  }
+}
+
+export function roleMapForPage(
+  preset: StreamDeckGridPreset,
+  page: 1 | 2,
+  layout: StreamDeckLayoutButton[],
+): Map<string, StreamDeckKeyRole> {
   const keys = page === 1 ? preset.page1 : preset.page2;
   const map = new Map<string, StreamDeckKeyRole>();
   for (const { col, row, role } of keys) {
-    map.set(`${col},${row}`, role);
+    if (isRoleRelevant(role, layout)) {
+      map.set(`${col},${row}`, role);
+    }
   }
   return map;
 }

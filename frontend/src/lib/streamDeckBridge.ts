@@ -27,3 +27,10 @@ export function intercomToLayout(intercom: CommentatorIntercomSlot[]): StreamDec
 export function clampVolume(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
+
+export function isIntercomSlotActive(
+  layout: StreamDeckLayoutButton[],
+  slot: number,
+): boolean {
+  return layout.some((b) => b.slot === slot);
+}

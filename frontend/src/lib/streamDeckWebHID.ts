@@ -3,11 +3,17 @@ import { getStreamDecks, requestStreamDecks } from "@elgato-stream-deck/webhid";
 import type { CommentatorIntercomSlot } from "@/lib/api";
 import {
   detectStreamDeckPreset,
+  isRoleRelevant,
   roleMapForPage,
   type StreamDeckGridPreset,
   type StreamDeckKeyRole,
 } from "@/lib/streamDeckLayout";
-import { intercomToLayout, STREAM_DECK_VOLUME_STEP, type StreamDeckVolumeAdjust } from "@/lib/streamDeckBridge";
+import {
+  intercomToLayout,
+  isIntercomSlotActive,
+  STREAM_DECK_VOLUME_STEP,
+  type StreamDeckVolumeAdjust,
+} from "@/lib/streamDeckBridge";
 
 export function streamDeckWebHIDSupported(): boolean {
   return typeof navigator !== "undefined" && "hid" in navigator;
@@ -120,7 +126,8 @@ export class StreamDeckWebHIDController {
     const size = gridSize(deck);
     this.preset = detectStreamDeckPreset(size.columns, size.rows);
     this.page = 1;
-    this.applyPageRoles();
+    this.lastLayout = [];
+    this.roleByPos.clear();
     deck.on("down", this.downHandler);
     deck.on("up", this.upHandler);
     deck.on("error", this.errorHandler);
@@ -149,23 +156,43 @@ export class StreamDeckWebHIDController {
     const deck = this.deck;
     const preset = this.preset;
     if (!deck || !preset) return;
-    this.lastLayout = intercomToLayout(state.intercom);
+
+    const layout = intercomToLayout(state.intercom);
+    this.lastLayout = layout;
+
     if (state.page !== this.page) {
       this.page = state.page;
-      this.applyPageRoles();
     }
-    const layout = this.lastLayout;
+    // If volume page has nothing to show, stay on intercom page.
+    if (this.page === 2 && layout.length === 0) {
+      this.page = 1;
+      this.callbacks?.onPageChange?.(1);
+    }
 
-    const keys = this.page === 1 ? preset.page1 : preset.page2;
+    this.syncActivePTT(state, layout);
+    this.roleByPos = roleMapForPage(preset, this.page, layout);
 
-    for (const { col, row, role } of keys) {
+    const pageKeys = this.page === 1 ? preset.page1 : preset.page2;
+    for (const { col, row, role } of pageKeys) {
       const control = buttonControl(deck, col, row);
       if (!control || control.type !== "button") continue;
+
+      if (!isRoleRelevant(role, layout)) {
+        await deck.clearKey(control.index);
+        continue;
+      }
+
       const pixelSize = control.feedbackType === "lcd" ? control.pixelSize : { width: 72, height: 72 };
-      const { width, height } = pixelSize;
-      const canvas = this.canvasForRole(role, layout, state, width, height);
+      const canvas = this.canvasForRole(role, layout, state, pixelSize.width, pixelSize.height);
       await deck.fillKeyCanvas(control.index, canvas);
     }
+  }
+
+  private syncActivePTT(state: RenderState, layout: ReturnType<typeof intercomToLayout>) {
+    if (state.pttActive == null) return;
+    if (layout.some((b) => b.channel === state.pttActive)) return;
+    this.activePTT = null;
+    this.callbacks?.onPTT(0);
   }
 
   private canvasForRole(
@@ -178,8 +205,11 @@ export class StreamDeckWebHIDController {
     switch (role.kind) {
       case "ptt": {
         const btn = layout.find((b) => b.slot === role.slot);
-        const label = btn?.label.split(/\s+/)[0]?.slice(0, 10) || "PTT";
-        const active = btn != null && state.pttActive === btn.channel;
+        if (!btn) {
+          return drawKeyCanvas(width, height, [""], "#0a0a0a");
+        }
+        const label = btn.label.split(/\s+/)[0]?.slice(0, 10) || "PTT";
+        const active = state.pttActive === btn.channel;
         return drawKeyCanvas(width, height, ["PTT", label], active ? "#1a7f37" : "#1e293b");
       }
       case "hosta":
@@ -196,9 +226,12 @@ export class StreamDeckWebHIDController {
       }
       case "ic_vol": {
         const btn = layout.find((b) => b.slot === role.slot);
-        const short = btn?.label.split(/\s+/)[0]?.slice(0, 8) || "IC";
+        if (!btn) {
+          return drawKeyCanvas(width, height, [""], "#0a0a0a");
+        }
+        const short = btn.label.split(/\s+/)[0]?.slice(0, 8) || "IC";
         const arrow = role.direction === "up" ? "+" : "−";
-        const pct = btn ? Math.round((state.intercomVol[btn.channel] ?? 0.8) * 100) : 0;
+        const pct = Math.round((state.intercomVol[btn.channel] ?? 0.8) * 100);
         return drawKeyCanvas(width, height, [`${short} ${arrow}`, `${pct}%`], "#134e4a");
       }
       case "page":
@@ -209,11 +242,6 @@ export class StreamDeckWebHIDController {
           "#334155",
         );
     }
-  }
-
-  private applyPageRoles() {
-    if (!this.preset) return;
-    this.roleByPos = roleMapForPage(this.preset, this.page);
   }
 
   private handleDown(col: number, row: number) {
@@ -231,18 +259,23 @@ export class StreamDeckWebHIDController {
         this.callbacks.onHosta(true);
         break;
       case "pgm_vol":
-        this.callbacks.onVolume({ target: "pgm", delta: role.direction === "up" ? STREAM_DECK_VOLUME_STEP : -STREAM_DECK_VOLUME_STEP });
+        this.callbacks.onVolume({
+          target: "pgm",
+          delta: role.direction === "up" ? STREAM_DECK_VOLUME_STEP : -STREAM_DECK_VOLUME_STEP,
+        });
         break;
-      case "ic_vol":
+      case "ic_vol": {
+        if (!isIntercomSlotActive(this.lastLayout, role.slot)) return;
         this.callbacks.onVolume({
           target: "intercom",
           slot: role.slot,
           delta: role.direction === "up" ? STREAM_DECK_VOLUME_STEP : -STREAM_DECK_VOLUME_STEP,
         });
         break;
+      }
       case "page":
         this.page = role.page;
-        this.applyPageRoles();
+        this.roleByPos = roleMapForPage(this.preset!, this.page, this.lastLayout);
         this.callbacks.onPageChange?.(this.page);
         break;
     }

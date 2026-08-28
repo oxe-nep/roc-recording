@@ -29,7 +29,7 @@ const ctx = await esbuild.context({
   platform: "node",
   format: "esm",
   target: "node20",
-  external: ["@elgato/streamdeck"],
+  external: ["@elgato/streamdeck", "ws"],
   sourcemap: true,
   logLevel: "info",
 });

@@ -57,7 +57,8 @@ Get-Content "$env:APPDATA\Elgato\StreamDeck\Plugins\com.nep.commentator.sdPlugin
 
 If **no logs folder exists**, the Node process never started. Common causes:
 
-- Missing `node_modules/@elgato/streamdeck` inside the `*.sdPlugin` folder (the pack step runs `npm install` there).
+- Missing `node_modules/@elgato/streamdeck` or `node_modules/ws` inside the `*.sdPlugin` folder (the pack step runs `npm install` there).
+- `ws` bundled into `bin/plugin.js` (must stay external — bundling breaks with "Dynamic require of events is not supported").
 - Broken ESM load of `bin/plugin.js` (requires `bin/package.json` with `"type":"module"`).
 
 Stream Deck app logs: `%APPDATA%\Elgato\StreamDeck\logs\StreamDeck*.log` — look for `Process stopped (unexpected): code=0x00000001`.

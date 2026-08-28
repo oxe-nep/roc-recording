@@ -2,20 +2,18 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { CommentatorIntercomSlot } from "@/lib/api";
+import type { CommentatorSession } from "@/lib/commentatorWebRTC";
 import {
   clampVolume,
   intercomToLayout,
-  StreamDeckBridge,
-  type StreamDeckBridgeStatus,
   type StreamDeckVolumeAdjust,
 } from "@/lib/streamDeckBridge";
 
 type Args = {
   enabled: boolean;
-  origin: string;
   token: string;
   pin: string;
-  controlsPath: string;
+  sessionRef: React.RefObject<CommentatorSession | null>;
   intercom: CommentatorIntercomSlot[];
   pgmVol: number;
   intercomVol: Record<number, number>;
@@ -24,61 +22,72 @@ type Args = {
 
 export function useStreamDeckBridge({
   enabled,
-  origin,
   token,
   pin,
-  controlsPath,
+  sessionRef,
   intercom,
   pgmVol,
   intercomVol,
   onVolumeAdjust,
 }: Args) {
-  const bridgeRef = useRef<StreamDeckBridge | null>(null);
   const onVolumeAdjustRef = useRef(onVolumeAdjust);
-  const [status, setStatus] = useState<StreamDeckBridgeStatus>("offline");
-  const [controlsConnected, setControlsConnected] = useState(false);
+  const [pluginConnected, setPluginConnected] = useState(false);
 
   onVolumeAdjustRef.current = onVolumeAdjust;
 
   useEffect(() => {
-    if (!enabled || !token || !pin || !controlsPath) {
-      bridgeRef.current?.stop();
-      bridgeRef.current = null;
-      setStatus("offline");
-      setControlsConnected(false);
+    const session = sessionRef.current;
+    if (!session) return;
+    session.onDeckVolume = (adjust) => onVolumeAdjustRef.current(adjust);
+    return () => {
+      if (sessionRef.current === session) {
+        session.onDeckVolume = undefined;
+      }
+    };
+  }, [sessionRef, enabled]);
+
+  useEffect(() => {
+    if (!enabled || !token || !pin) {
+      setPluginConnected(false);
       return;
     }
-
-    const bridge = new StreamDeckBridge({
-      onStatus: (next) => {
-        setStatus(next);
-        if (next === "ready" || next === "paired") {
-          bridge.pair({ origin, token, pin, controlsPath });
-        }
-      },
-      onControlsConnected: setControlsConnected,
-      onVolumeAdjust: (adjust) => onVolumeAdjustRef.current(adjust),
-    });
-    bridgeRef.current = bridge;
-    bridge.start();
-
-    return () => {
-      bridge.stop();
-      bridgeRef.current = null;
+    let cancelled = false;
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const poll = async () => {
+      try {
+        const res = await fetch(
+          `${origin}/api/commentator/join/${encodeURIComponent(token)}/deck-status?pin=${encodeURIComponent(pin)}`,
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as { plugin_connected?: boolean };
+        if (!cancelled) setPluginConnected(!!data.plugin_connected);
+      } catch {
+        /* plugin status is best-effort */
+      }
     };
-  }, [enabled, origin, token, pin, controlsPath]);
+    void poll();
+    const timer = setInterval(poll, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [enabled, token, pin]);
 
   useEffect(() => {
-    if (!enabled || status !== "paired") return;
-    bridgeRef.current?.publishLayout(intercomToLayout(intercom));
-  }, [enabled, status, intercom]);
+    if (!enabled) return;
+    const session = sessionRef.current;
+    if (!session?.isSignalingOpen()) return;
+    session.sendDeckLayout(intercomToLayout(intercom));
+  }, [enabled, sessionRef, intercom, pluginConnected]);
 
   useEffect(() => {
-    if (!enabled || status !== "paired") return;
-    bridgeRef.current?.publishVolumes(pgmVol, intercomVol);
-  }, [enabled, status, pgmVol, intercomVol]);
+    if (!enabled) return;
+    const session = sessionRef.current;
+    if (!session?.isSignalingOpen()) return;
+    session.sendDeckVolumes(pgmVol, intercomVol);
+  }, [enabled, sessionRef, pgmVol, intercomVol, pluginConnected]);
 
-  return { status, controlsConnected };
+  return { pluginConnected };
 }
 
 export { clampVolume };

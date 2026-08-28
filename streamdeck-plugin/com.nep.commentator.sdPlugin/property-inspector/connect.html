@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Connect</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        color: #d8d8d8;
+        margin: 0;
+        padding: 12px;
+      }
+      label {
+        display: block;
+        margin: 10px 0 6px;
+        font-size: 12px;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+      }
+      p {
+        font-size: 11px;
+        opacity: 0.8;
+        line-height: 1.4;
+      }
+    </style>
+  </head>
+  <body>
+    <label for="server">Commentator server</label>
+    <input id="server" type="url" placeholder="https://commentator.nepsweden.tech" />
+
+    <label for="code">Pairing code (from commentator page)</label>
+    <input id="code" type="text" placeholder="ABC123" maxlength="6" style="text-transform: uppercase" />
+
+    <p>Copy the pairing code from the Stream Deck section on the commentator page, then press the Connect key.</p>
+    <script>
+      let websocket = null;
+      let uuid = null;
+      let settings = {};
+
+      function connectElgatoStreamDeckSocket(inPort, inPropertyInspectorUUID, inRegisterEvent, inInfo, inActionInfo) {
+        uuid = inPropertyInspectorUUID;
+        const actionInfo = JSON.parse(inActionInfo);
+        settings = actionInfo.payload?.settings || {};
+        document.getElementById("server").value =
+          settings.server || "https://commentator.nepsweden.tech";
+        document.getElementById("code").value = settings.code || "";
+
+        websocket = new WebSocket("ws://127.0.0.1:" + inPort);
+        websocket.onopen = () => {
+          websocket.send(JSON.stringify({ event: inRegisterEvent, uuid }));
+        };
+      }
+
+      function save() {
+        if (!websocket || !uuid) return;
+        settings.server = document.getElementById("server").value.trim();
+        settings.code = document.getElementById("code").value.trim().toUpperCase();
+        websocket.send(JSON.stringify({ event: "setSettings", context: uuid, payload: settings }));
+      }
+
+      for (const id of ["server", "code"]) {
+        document.getElementById(id).addEventListener("change", save);
+        document.getElementById(id).addEventListener("input", save);
+      }
+    </script>
+  </body>
+</html>

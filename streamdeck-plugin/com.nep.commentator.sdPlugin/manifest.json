@@ -2,7 +2,7 @@
   "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
   "UUID": "com.nep.commentator",
   "Name": "NEP Commentator",
-  "Version": "0.4.0.0",
+  "Version": "0.5.0.0",
   "Author": "NEP Sweden",
   "Description": "PTT intercom and volume control for NEP remote commentator sessions.",
   "Icon": "imgs/plugin",
@@ -62,6 +62,23 @@
       "States": [
         {
           "Image": "imgs/volume",
+          "TitleAlignment": "bottom",
+          "FontSize": 11
+        }
+      ]
+    },
+    {
+      "UUID": "com.nep.commentator.connect",
+      "Name": "Connect",
+      "Tooltip": "Link Stream Deck to the commentator session using a pairing code",
+      "Icon": "imgs/plugin",
+      "Controllers": [
+        "Keypad"
+      ],
+      "PropertyInspectorPath": "property-inspector/connect.html",
+      "States": [
+        {
+          "Image": "imgs/plugin",
           "TitleAlignment": "bottom",
           "FontSize": 11
         }

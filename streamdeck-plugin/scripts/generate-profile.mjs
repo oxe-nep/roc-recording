@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 
 const PTT_ACTION = "com.nep.commentator.ptt";
 const VOLUME_ACTION = "com.nep.commentator.volume";
+const CONNECT_ACTION = "com.nep.commentator.connect";
 const PAGE_PREV = "com.elgato.streamdeck.page.previous";
 const PAGE_NEXT = "com.elgato.streamdeck.page.next";
 
@@ -47,6 +48,7 @@ const PRESETS = [
       { col: 0, row: 1, slot: 5 },
     ],
     pgmVolume: { down: { col: 1, row: 1 }, up: { col: 2, row: 1 } },
+    connect: { col: 3, row: 2 },
     pageNav: { next: { col: 3, row: 1 }, prev: { col: 4, row: 2 } },
     volSlots: [
       { col: 0, row: 0, slot: 0, dir: "down" },
@@ -79,7 +81,8 @@ const PRESETS = [
       { col: 5, row: 0, slot: 5 },
     ],
     pgmVolume: { down: { col: 6, row: 0 }, up: { col: 7, row: 0 } },
-    pageNav: { next: { col: 7, row: 1 }, prev: { col: 6, row: 1 } },
+    connect: { col: 5, row: 1 },
+    pageNav: { next: { col: 6, row: 1 }, prev: { col: 7, row: 1 } },
     volSlots: [
       { col: 0, row: 2, slot: 0, dir: "down" },
       { col: 1, row: 2, slot: 0, dir: "up" },
@@ -111,6 +114,7 @@ const PRESETS = [
       { col: 2, row: 1, slot: 5 },
     ],
     pgmVolume: null,
+    connectPage2: { col: 2, row: 1 },
     pageNav: { next: { col: 2, row: 0 }, prev: { col: 2, row: 1 } },
     volSlots: [
       { col: 0, row: 0, slot: 0, dir: "down" },
@@ -161,6 +165,9 @@ function buildPage1(preset) {
     key(actions, down.col, down.row, pluginAction(VOLUME_ACTION, "PGM Volume", { target: "pgm", direction: "down" }));
     key(actions, up.col, up.row, pluginAction(VOLUME_ACTION, "PGM Volume", { target: "pgm", direction: "up" }));
   }
+  if (preset.connect) {
+    key(actions, preset.connect.col, preset.connect.row, pluginAction(CONNECT_ACTION, "Connect", {}));
+  }
   key(actions, preset.pageNav.next.col, preset.pageNav.next.row, systemAction(PAGE_NEXT, "Next Page", "Vol →"));
   key(actions, preset.pageNav.prev.col, preset.pageNav.prev.row, systemAction(PAGE_PREV, "Previous Page", "← PTT"));
   return actions;
@@ -177,6 +184,9 @@ function buildPage2(preset) {
     );
   }
   key(actions, preset.pageNav.prev.col, preset.pageNav.prev.row, systemAction(PAGE_PREV, "Previous Page", "← PTT"));
+  if (preset.connectPage2) {
+    key(actions, preset.connectPage2.col, preset.connectPage2.row, pluginAction(CONNECT_ACTION, "Connect", {}));
+  }
   return actions;
 }
 

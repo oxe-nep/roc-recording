@@ -3156,3 +3156,29 @@ body:has(.commentator-root) .container {
   color: #e8b86d;
 }
 
+.commentator-streamdeck-code {
+  margin: 16px 0;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.commentator-streamdeck-code-label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.7;
+  margin-bottom: 6px;
+}
+
+.commentator-streamdeck-code-value {
+  display: block;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  font-family: ui-monospace, monospace;
+  color: #8fd48f;
+}
+

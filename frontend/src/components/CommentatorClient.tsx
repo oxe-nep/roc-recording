@@ -72,7 +72,7 @@ export default function CommentatorClient({ token }: Props) {
   const [rtcStats, setRtcStats] = useState<CommentatorRTCStats | null>(null);
   const [showDebug, setShowDebug] = useState(() => loadCommentatorDebug(token));
   const [displayName, setDisplayName] = useState("");
-  const [controlsPath, setControlsPath] = useState("");
+  const [deckPairCode, setDeckPairCode] = useState("");
   const [reconnectRequired, setReconnectRequired] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [streamDeckOpen, setStreamDeckOpen] = useState(false);
@@ -112,11 +112,10 @@ export default function CommentatorClient({ token }: Props) {
   );
 
   const streamDeck = useStreamDeckBridge({
-    enabled: authenticated && state === "connected" && !!controlsPath,
-    origin: typeof window !== "undefined" ? window.location.origin : "",
+    enabled: authenticated && state === "connected",
     token,
     pin,
-    controlsPath,
+    sessionRef,
     intercom,
     pgmVol,
     intercomVol,
@@ -165,7 +164,7 @@ export default function CommentatorClient({ token }: Props) {
     session.onReconnectRequired = setReconnectRequired;
     session.onDisplayName = setDisplayName;
     session.onJoin = (join) => {
-      setControlsPath(join.controls_path || `/ws/commentator/${token}/controls`);
+      setDeckPairCode(join.deck_pair_code || "");
     };
     session.onIntercom = (slots) => {
       setIntercom(slots);
@@ -359,20 +358,37 @@ export default function CommentatorClient({ token }: Props) {
               (Windows or macOS).
             </li>
             <li>
-              Download and open the{" "}
+              Download and install the{" "}
               <a href={streamDeckPluginURL()} download>
                 NEP Commentator plugin
-              </a>{" "}
-              (v0.4+). Stream Deck installs it automatically — accept the bundled profile when prompted.
+              </a>
+              . Accept the bundled profile when prompted.
             </li>
             <li>
-              Open this page, enter PIN, and wait until status shows <strong>Connected</strong>. The{" "}
-              <strong>NEP Commentator</strong> profile should switch in automatically.
+              Connect on this page (status <strong>Connected</strong>). Copy the pairing code below into the{" "}
+              <strong>Connect</strong> action on your Stream Deck (tap the Connect key → enter code).
             </li>
             <li>
-              Header should show <strong>Deck</strong> when paired. PTT needs <strong>Deck · PTT</strong> (green) —
-              that means the plugin reached the backend.
+              When linked, header shows <strong>Deck</strong>. PTT works without browser focus; volume adjusts audio in
+              this tab.
             </li>
+          </ol>
+        </div>
+
+        {authenticated && deckPairCode && (
+          <div className="commentator-streamdeck-code">
+            <span className="commentator-streamdeck-code-label">Pairing code</span>
+            <code className="commentator-streamdeck-code-value">{deckPairCode}</code>
+            <p className="channel-settings-hint">
+              Enter this code in the Stream Deck <strong>Connect</strong> action (server:{" "}
+              {typeof window !== "undefined" ? window.location.origin : "this site"}).
+            </p>
+          </div>
+        )}
+
+        <div className="commentator-streamdeck-steps">
+          <ol start={5}>
+            <li>Page 1: intercom PTT + PGM volume. Page 2 (Vol →): per-intercom volume.</li>
           </ol>
         </div>
 
@@ -390,21 +406,20 @@ export default function CommentatorClient({ token }: Props) {
           </a>
         </div>
 
-        {streamDeck.status === "paired" && streamDeck.controlsConnected && (
+        {streamDeck.pluginConnected && (
           <p className="channel-settings-hint commentator-streamdeck-paired">
-            Stream Deck is connected and PTT is ready. Page 1: intercom PTT + PGM volume. Page 2 (Vol →): intercom
-            volumes.
+            Stream Deck is linked to this session. Button labels and volume percentages update automatically.
           </p>
         )}
-        {streamDeck.status === "paired" && !streamDeck.controlsConnected && (
+        {authenticated && state === "connected" && !streamDeck.pluginConnected && deckPairCode && (
           <p className="channel-settings-hint commentator-streamdeck-warn">
-            Plugin is paired but PTT backend is not reachable. Check that you are connected on this page and that the
-            capture host backend is running.
+            Stream Deck not linked yet. Enter pairing code <strong>{deckPairCode}</strong> in the Connect action on your
+            deck.
           </p>
         )}
-        {streamDeck.status === "offline" && authenticated && state === "connected" && (
-          <p className="channel-settings-hint">
-            No plugin detected yet. Install the plugin and keep Stream Deck running, then reconnect here if needed.
+        {authenticated && state === "connected" && !deckPairCode && (
+          <p className="channel-settings-hint commentator-streamdeck-warn">
+            Pairing code not available — redeploy the capture host backend, then reconnect.
           </p>
         )}
       </div>
@@ -475,17 +490,9 @@ export default function CommentatorClient({ token }: Props) {
             Settings
           </button>
           <span className={`commentator-status-pill ${statusClass}`}>{STATE_LABELS[state]}</span>
-          {streamDeck.status === "paired" && (
-            <span
-              className={`commentator-status-pill ${streamDeck.controlsConnected ? "commentator-status--ok" : "commentator-status--pending"}`}
-              title={streamDeck.controlsConnected ? "Stream Deck PTT ready" : "Stream Deck paired — waiting for PTT backend"}
-            >
-              {streamDeck.controlsConnected ? "Deck · PTT" : "Deck"}
-            </span>
-          )}
-          {streamDeck.status === "ready" && (
-            <span className="commentator-status-pill commentator-status--pending" title="Stream Deck plugin detected">
-              Deck…
+          {streamDeck.pluginConnected && (
+            <span className="commentator-status-pill commentator-status--ok" title="Stream Deck linked to this session">
+              Deck
             </span>
           )}
           {(state === "failed" || state === "reconnecting" || reconnectRequired) && (

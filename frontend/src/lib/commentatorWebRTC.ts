@@ -1,5 +1,6 @@
 import type { CommentatorIntercomSlot } from "@/lib/api";
 import type { CommentatorDevicePrefs } from "@/lib/commentatorPrefs";
+import type { StreamDeckLayoutButton, StreamDeckVolumeAdjust } from "@/lib/streamDeckBridge";
 
 export type CommentatorWebcamQuality = {
   width: number;
@@ -24,6 +25,7 @@ export type CommentatorJoinInfo = {
   quality?: CommentatorQuality;
   ws_path: string;
   controls_path: string;
+  deck_pair_code?: string;
 };
 
 export type CommentatorConnectionState =
@@ -174,6 +176,11 @@ type SignalMsg = {
   reconnect_required?: boolean;
   channel_id?: number;
   message?: string;
+  buttons?: StreamDeckLayoutButton[];
+  pgm?: number;
+  target?: "pgm" | "intercom";
+  slot?: number;
+  delta?: number;
 };
 
 export class CommentatorSession {
@@ -212,6 +219,7 @@ export class CommentatorSession {
   onStats?: (stats: CommentatorRTCStats) => void;
   onDisplayName?: (name: string) => void;
   onJoin?: (info: CommentatorJoinInfo) => void;
+  onDeckVolume?: (adjust: StreamDeckVolumeAdjust) => void;
 
   constructor(
     private readonly token: string,
@@ -605,6 +613,15 @@ export class CommentatorSession {
         }
         await this.pc.addIceCandidate(msg.candidate);
         break;
+      case "deck_volume":
+        if (msg.target && typeof msg.delta === "number") {
+          this.onDeckVolume?.({
+            target: msg.target,
+            slot: msg.slot,
+            delta: msg.delta,
+          });
+        }
+        break;
     }
   }
 
@@ -632,6 +649,22 @@ export class CommentatorSession {
   setPTT(channel: number) {
     void this.unlockAudio();
     this.send({ type: "ptt", channel });
+  }
+
+  sendDeckLayout(buttons: StreamDeckLayoutButton[]) {
+    this.send({ type: "deck_layout", buttons });
+  }
+
+  sendDeckVolumes(pgm: number, intercom: Record<number, number>) {
+    const payload: Record<string, number> = {};
+    for (const [id, value] of Object.entries(intercom)) {
+      payload[id] = value;
+    }
+    this.send({ type: "deck_volumes", pgm, intercom: payload });
+  }
+
+  isSignalingOpen(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN;
   }
 
   private send(msg: SignalMsg) {

@@ -1,9 +1,8 @@
 import type { DialAction, KeyAction } from "@elgato/streamdeck";
-import WebSocket, { WebSocketServer } from "ws";
+import WebSocket from "ws";
 import { scheduleProfileActivation } from "../profile.js";
 import type { VolumeSettings } from "../actions/volume.js";
 
-export const BRIDGE_PORT = 17200;
 export const VOLUME_STEP = 0.05;
 
 export type LayoutButton = {
@@ -12,27 +11,12 @@ export type LayoutButton = {
   label: string;
 };
 
-type PairMessage = {
-  type: "pair";
+type PairInfo = {
   origin: string;
   token: string;
   pin: string;
-  controls_path: string;
+  controlsPath: string;
 };
-
-type LayoutMessage = {
-  type: "layout";
-  buttons: LayoutButton[];
-  hosta?: boolean;
-};
-
-type VolumesMessage = {
-  type: "volumes";
-  pgm: number;
-  intercom: Record<string, number>;
-};
-
-type WebMessage = PairMessage | LayoutMessage | VolumesMessage | { type: "unpair" };
 
 type PTTKeyRef = {
   kind: "ptt";
@@ -50,30 +34,75 @@ type VolumeKeyRef = {
 
 type KeyRef = PTTKeyRef | VolumeKeyRef;
 
+type ControlsReady = {
+  type: "ready";
+  buttons?: LayoutButton[];
+};
+
+type ControlsLayout = {
+  type: "layout";
+  buttons: LayoutButton[];
+};
+
+type ControlsVolumes = {
+  type: "volumes";
+  pgm: number;
+  intercom: Record<string, number>;
+};
+
 class Bridge {
-  private wss: WebSocketServer | null = null;
-  private webClient: WebSocket | null = null;
   private controls: WebSocket | null = null;
   private controlsTimer: ReturnType<typeof setInterval> | null = null;
   private keys = new Map<string, KeyRef>();
   private layout: LayoutButton[] = [];
   private channelByKey = new Map<string, number>();
   private activeKey: string | null = null;
-  private pairInfo: { origin: string; token: string; pin: string; controlsPath: string } | null = null;
+  private pairInfo: PairInfo | null = null;
   private volumes = { pgm: 1, intercom: {} as Record<number, number> };
+  private connectSettings: { server?: string; code?: string } = {};
 
-  startLocalServer() {
-    if (this.wss) return;
-    this.wss = new WebSocketServer({ host: "127.0.0.1", port: BRIDGE_PORT });
-    this.wss.on("connection", (ws) => {
-      this.webClient = ws;
-      ws.send(JSON.stringify({ type: "ready", version: "0.3.0" }));
-      ws.on("message", (raw) => this.onWebMessage(ws, raw));
-      ws.on("close", () => {
-        if (this.webClient === ws) this.webClient = null;
-        this.disconnectControls();
+  saveConnectSettings(settings: { server?: string; code?: string }) {
+    this.connectSettings = {
+      server: settings.server?.trim() || this.connectSettings.server,
+      code: settings.code?.trim() || this.connectSettings.code,
+    };
+  }
+
+  async claimAndConnect(): Promise<boolean> {
+    const server = (this.connectSettings.server || "https://commentator.nepsweden.tech").replace(/\/$/, "");
+    const code = this.connectSettings.code?.trim().toUpperCase();
+    if (!code) {
+      console.error("[nep-commentator] missing pairing code in Connect action settings");
+      return false;
+    }
+    try {
+      const res = await fetch(`${server}/api/commentator/deck/claim`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
       });
-    });
+      if (!res.ok) {
+        console.error("[nep-commentator] deck claim failed:", res.status, await res.text());
+        return false;
+      }
+      const data = (await res.json()) as {
+        origin: string;
+        token: string;
+        pin: string;
+        controls_path: string;
+      };
+      this.pairInfo = {
+        origin: data.origin.replace(/\/$/, ""),
+        token: data.token,
+        pin: data.pin,
+        controlsPath: data.controls_path,
+      };
+      scheduleProfileActivation();
+      return this.connectControls();
+    } catch (err) {
+      console.error("[nep-commentator] deck claim error:", err);
+      return false;
+    }
   }
 
   registerKey(action: KeyAction | DialAction, slot: number) {
@@ -98,7 +127,7 @@ class Bridge {
     const ref = this.keys.get(actionId);
     if (!ref || ref.kind !== "volume") return;
     const delta = ref.direction === "up" ? VOLUME_STEP : -VOLUME_STEP;
-    this.sendToWeb({
+    this.sendControls({
       type: "volume",
       target: ref.target,
       slot: ref.slot,
@@ -119,28 +148,54 @@ class Bridge {
     this.sendControls({ type: "ptt", channel: 0 });
   }
 
-  private onWebMessage(ws: WebSocket, raw: WebSocket.RawData) {
-    let msg: WebMessage;
+  private controlsURL(): string | null {
+    if (!this.pairInfo) return null;
+    const u = new URL(this.pairInfo.controlsPath, this.pairInfo.origin);
+    u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
+    u.searchParams.set("pin", this.pairInfo.pin);
+    return u.toString();
+  }
+
+  private async connectControls(): Promise<boolean> {
+    const url = this.controlsURL();
+    if (!url) return false;
+    this.disconnectControls();
+    return new Promise((resolve) => {
+      const ws = new WebSocket(url);
+      this.controls = ws;
+      const timeout = setTimeout(() => resolve(false), 10000);
+      ws.on("open", () => {
+        clearTimeout(timeout);
+        this.controlsTimer = setInterval(() => {
+          this.sendControls({ type: "ping" });
+        }, 25000);
+        resolve(true);
+      });
+      ws.on("message", (raw) => this.onControlsMessage(raw));
+      ws.on("close", () => {
+        if (this.controls === ws) this.controls = null;
+      });
+      ws.on("error", (err) => {
+        clearTimeout(timeout);
+        console.error("[nep-commentator] controls websocket error:", url, err);
+        resolve(false);
+      });
+    });
+  }
+
+  private onControlsMessage(raw: WebSocket.RawData) {
+    let msg: ControlsReady | ControlsLayout | ControlsVolumes;
     try {
-      msg = JSON.parse(String(raw)) as WebMessage;
+      msg = JSON.parse(String(raw)) as ControlsReady | ControlsLayout | ControlsVolumes;
     } catch {
       return;
     }
     switch (msg.type) {
-      case "pair":
-        this.pairInfo = {
-          origin: msg.origin.replace(/\/$/, ""),
-          token: msg.token,
-          pin: msg.pin,
-          controlsPath: msg.controls_path,
-        };
-        scheduleProfileActivation();
-        void this.connectControls().then((ok) => {
-          ws.send(JSON.stringify({ type: "paired", ok, controls_connected: ok, profile_switched: true }));
-          if (!ok) {
-            console.error("[nep-commentator] controls websocket failed:", this.controlsURL());
-          }
-        });
+      case "ready":
+        if (msg.buttons?.length) {
+          this.layout = msg.buttons;
+          void this.refreshAllKeys();
+        }
         break;
       case "layout":
         this.layout = msg.buttons;
@@ -154,13 +209,6 @@ class Bridge {
           if (Number.isFinite(channel)) this.volumes.intercom[channel] = value;
         }
         void this.refreshVolumeKeys();
-        break;
-      case "unpair":
-        this.pairInfo = null;
-        this.layout = [];
-        this.volumes = { pgm: 1, intercom: {} };
-        this.disconnectControls();
-        void this.refreshAllKeys();
         break;
     }
   }
@@ -217,50 +265,6 @@ class Bridge {
     await ref.action.setTitle(`${short} ${arrow}\n${pct}%`);
   }
 
-  private controlsURL(): string | null {
-    if (!this.pairInfo) return null;
-    const u = new URL(this.pairInfo.controlsPath, this.pairInfo.origin);
-    u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
-    u.searchParams.set("pin", this.pairInfo.pin);
-    return u.toString();
-  }
-
-  private async connectControls(): Promise<boolean> {
-    const url = this.controlsURL();
-    if (!url) return false;
-    this.disconnectControls();
-    return new Promise((resolve) => {
-      const ws = new WebSocket(url);
-      this.controls = ws;
-      const timeout = setTimeout(() => resolve(false), 8000);
-      ws.on("open", () => {
-        clearTimeout(timeout);
-        this.controlsTimer = setInterval(() => {
-          this.sendControls({ type: "ping" });
-        }, 25000);
-        this.notifyStatus(true);
-        resolve(true);
-      });
-      ws.on("message", (raw) => {
-        try {
-          const msg = JSON.parse(String(raw)) as { type?: string };
-          if (msg.type === "ready") void this.refreshAllKeys();
-        } catch {
-          /* ignore */
-        }
-      });
-      ws.on("close", () => {
-        this.notifyStatus(false);
-        if (this.controls === ws) this.controls = null;
-      });
-      ws.on("error", (err) => {
-        clearTimeout(timeout);
-        console.error("[nep-commentator] controls websocket error:", url, err);
-        resolve(false);
-      });
-    });
-  }
-
   private disconnectControls() {
     if (this.controlsTimer) {
       clearInterval(this.controlsTimer);
@@ -268,21 +272,11 @@ class Bridge {
     }
     this.controls?.close();
     this.controls = null;
-    this.notifyStatus(false);
   }
 
   private sendControls(msg: object) {
     if (this.controls?.readyState !== WebSocket.OPEN) return;
     this.controls.send(JSON.stringify(msg));
-  }
-
-  private sendToWeb(msg: object) {
-    if (this.webClient?.readyState !== WebSocket.OPEN) return;
-    this.webClient.send(JSON.stringify(msg));
-  }
-
-  private notifyStatus(controlsConnected: boolean) {
-    this.sendToWeb({ type: "status", controls_connected: controlsConnected });
   }
 }
 

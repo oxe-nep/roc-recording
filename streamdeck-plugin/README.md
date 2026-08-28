@@ -12,7 +12,7 @@ The plugin connects to the commentator backend over **WSS** (no localhost bridge
 
 ## Setup
 
-1. Install [Stream Deck](https://www.elgato.com/stream-deck) (6.6+).
+1. Install [Stream Deck](https://www.elgato.com/stream-deck) (6.9+).
 2. Download and install the plugin from the commentator web UI (or `npm run pack:web`).
 3. Accept the bundled **NEP Commentator** profile when prompted.
 4. On the commentator page: connect with PIN and copy the **pairing code**.
@@ -24,6 +24,8 @@ The plugin connects to the commentator backend over **WSS** (no localhost bridge
 - **Page 2:** per-intercom volume −/+
 
 Profiles are generated for standard (15-key), Mini, and XL devices.
+
+Built with `@elgato/streamdeck` 2.x and manifest `SDKVersion` 3 (Marketplace-compatible).
 
 ## Development
 

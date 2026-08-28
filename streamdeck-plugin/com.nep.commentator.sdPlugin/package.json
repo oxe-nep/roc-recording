@@ -2,6 +2,6 @@
   "type": "module",
   "private": true,
   "dependencies": {
-    "@elgato/streamdeck": "^1.4.1"
+    "@elgato/streamdeck": "^2.1.2"
   }
 }

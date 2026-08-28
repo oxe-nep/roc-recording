@@ -2,16 +2,16 @@
   "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
   "UUID": "com.nep.commentator",
   "Name": "NEP Commentator",
-  "Version": "0.5.0.4",
+  "Version": "0.6.0.0",
   "Author": "NEP Sweden",
   "Description": "PTT intercom and volume control for NEP remote commentator sessions.",
   "Icon": "imgs/plugin",
   "Category": "NEP Commentator",
   "CategoryIcon": "imgs/plugin",
   "CodePath": "bin/plugin.js",
-  "SDKVersion": 2,
+  "SDKVersion": 3,
   "Software": {
-    "MinimumVersion": "6.6"
+    "MinimumVersion": "6.9"
   },
   "OS": [
     {

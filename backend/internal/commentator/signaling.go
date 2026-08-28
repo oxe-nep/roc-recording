@@ -16,27 +16,19 @@ import (
 const signalingMaxMsg = 256 * 1024
 
 type signalMsg struct {
-	Type      string             `json:"type"`
-	SDP       string             `json:"sdp,omitempty"`
-	Channel   int                `json:"channel,omitempty"`
-	Candidate json.RawMessage    `json:"candidate,omitempty"`
-	Buttons   []deckLayoutButton `json:"buttons,omitempty"`
-	PGM       *float64           `json:"pgm,omitempty"`
-	Intercom  map[string]float64 `json:"intercom,omitempty"`
-	Target    string             `json:"target,omitempty"`
-	Slot      *int               `json:"slot,omitempty"`
-	Delta     *float64           `json:"delta,omitempty"`
+	Type      string          `json:"type"`
+	SDP       string          `json:"sdp,omitempty"`
+	Channel   int             `json:"channel,omitempty"`
+	Candidate json.RawMessage `json:"candidate,omitempty"`
 }
 
 type joinResponse struct {
-	ChannelID    int               `json:"channel_id"`
-	DisplayName  string            `json:"display_name,omitempty"`
-	ICEServers   []map[string]any  `json:"ice_servers"`
-	Intercom     []IntercomSlot    `json:"intercom"`
-	Quality      QualityClientView `json:"quality"`
-	WSPath       string            `json:"ws_path"`
-	ControlsPath string            `json:"controls_path"`
-	DeckPairCode string            `json:"deck_pair_code"`
+	ChannelID   int               `json:"channel_id"`
+	DisplayName string            `json:"display_name,omitempty"`
+	ICEServers  []map[string]any  `json:"ice_servers"`
+	Intercom    []IntercomSlot    `json:"intercom"`
+	Quality     QualityClientView `json:"quality"`
+	WSPath      string            `json:"ws_path"`
 }
 
 var signalingUpgrader = websocket.Upgrader{
@@ -60,17 +52,13 @@ func (m *Manager) JoinInfo(token, pin string) (joinResponse, error) {
 		return joinResponse{}, err
 	}
 	settings := m.GetSettings(id)
-	deckCode := m.deck.issueCode(token, pin, id)
 	return joinResponse{
 		ChannelID:   id,
 		DisplayName: strings.TrimSpace(settings.DisplayName),
 		ICEServers:  m.ice.ClientICEServers(),
 		Intercom:    enabledIntercom(settings),
 		Quality:     qualityClientView(settings.Quality),
-		// Use /ws/commentator/ so nginx can proxy via the existing /ws WebSocket location.
-		WSPath:       "/ws/commentator/" + token,
-		ControlsPath: controlsPath(token),
-		DeckPairCode: deckCode,
+		WSPath:      "/ws/commentator/" + token,
 	}, nil
 }
 
@@ -197,9 +185,6 @@ func (m *Manager) ServeSignaling(w http.ResponseWriter, r *http.Request, token s
 
 	m.pushConfigMessage(sess, channelID, writeJSON)
 
-	m.deck.registerBrowser(channelID, writeJSON)
-	defer m.deck.unregisterBrowser(channelID)
-
 	sess.pc.OnICECandidate(func(c *webrtc.ICECandidate) {
 		if c == nil {
 			return
@@ -275,20 +260,6 @@ func (m *Manager) ServeSignaling(w http.ResponseWriter, r *http.Request, token s
 			}
 		case "ptt":
 			m.SetPTT(channelID, msg.Channel)
-		case "deck_layout":
-			if len(msg.Buttons) > 0 {
-				m.deck.pushLayout(channelID, msg.Buttons)
-			}
-		case "deck_volumes":
-			pgm := 1.0
-			if msg.PGM != nil {
-				pgm = *msg.PGM
-			}
-			intercom := msg.Intercom
-			if intercom == nil {
-				intercom = map[string]float64{}
-			}
-			m.deck.pushVolumes(channelID, pgm, intercom)
 		}
 	}
 }

@@ -49,7 +49,7 @@ WEBRTC_PUBLIC_HOST=10.199.28.249
 
 TURN (coturn) krävs för kommentatorer bakom NAT. Exempelconfig: [`deploy/coturn/turnserver.conf.example`](deploy/coturn/turnserver.conf.example).
 
-**Stream Deck (intercom PTT):** install the plugin from [`streamdeck-plugin/`](streamdeck-plugin/). The commentator web page pairs automatically over `ws://127.0.0.1:17200` and publishes intercom button labels. PTT is sent directly to `/ws/commentator/{token}/controls` — the browser tab does not need focus. Drag **Intercom PTT** actions to the top row (slot 0 = leftmost key).
+**Stream Deck (intercom PTT + volume):** connect directly from the commentator page in **Chrome** or **Edge** via WebHID — no Elgato plugin or Stream Deck app required. Quit the Stream Deck desktop app first so the browser can access the USB device. Open **Stream Deck** in the commentator header, join the session, then click **Connect Stream Deck**.
 
 **Deploy backend efter pull:**
 

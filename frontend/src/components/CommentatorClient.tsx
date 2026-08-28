@@ -22,16 +22,12 @@ import {
   type CommentatorRTCStats,
 } from "@/lib/commentatorWebRTC";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
-import { useStreamDeckBridge } from "@/hooks/useStreamDeckBridge";
+import { useStreamDeckWebHID } from "@/hooks/useStreamDeckWebHID";
 import {
   clampVolume,
   intercomToLayout,
   type StreamDeckVolumeAdjust,
 } from "@/lib/streamDeckBridge";
-import {
-  STREAM_DECK_APP_URL,
-  streamDeckPluginURL,
-} from "@/lib/streamDeckInstall";
 
 type Props = {
   token: string;
@@ -72,7 +68,6 @@ export default function CommentatorClient({ token }: Props) {
   const [rtcStats, setRtcStats] = useState<CommentatorRTCStats | null>(null);
   const [showDebug, setShowDebug] = useState(() => loadCommentatorDebug(token));
   const [displayName, setDisplayName] = useState("");
-  const [deckPairCode, setDeckPairCode] = useState("");
   const [reconnectRequired, setReconnectRequired] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [streamDeckOpen, setStreamDeckOpen] = useState(false);
@@ -116,14 +111,13 @@ export default function CommentatorClient({ token }: Props) {
     sessionRef.current?.setPTT(channel);
   }, []);
 
-  const streamDeck = useStreamDeckBridge({
+  const streamDeck = useStreamDeckWebHID({
     enabled: authenticated && state === "connected",
-    token,
-    pin,
-    sessionRef,
     intercom,
     pgmVol,
     intercomVol,
+    pttActive,
+    hostaActive,
     onVolumeAdjust: handleStreamDeckVolumeAdjust,
     onHostaChange: setHostaActive,
     onPTTChange: handleStreamDeckPTT,
@@ -170,9 +164,6 @@ export default function CommentatorClient({ token }: Props) {
     session.onStats = setRtcStats;
     session.onReconnectRequired = setReconnectRequired;
     session.onDisplayName = setDisplayName;
-    session.onJoin = (join) => {
-      setDeckPairCode(join.deck_pair_code || "");
-    };
     session.onIntercom = (slots) => {
       setIntercom(slots);
       setIntercomVol((prev) => {
@@ -350,89 +341,61 @@ export default function CommentatorClient({ token }: Props) {
           </button>
         </div>
 
-        <p className="channel-settings-hint">
-          Use a Stream Deck for intercom push-to-talk and volume. PTT works even when this browser tab is in the
-          background — audio and video still run here. Volume buttons adjust levels in this page.
-        </p>
-
-        <div className="commentator-streamdeck-steps">
-          <ol>
-            <li>
-              Install{" "}
-              <a href={STREAM_DECK_APP_URL} target="_blank" rel="noopener noreferrer">
-                Elgato Stream Deck
-              </a>{" "}
-              (Windows or macOS).
-            </li>
-            <li>
-              Download and install the{" "}
-              <a href={streamDeckPluginURL()} download>
-                NEP Commentator plugin
-              </a>
-              . Accept the bundled profile when prompted.
-            </li>
-            <li>
-              Switch to the bundled <strong>NEP Commentator</strong> profile (profile picker above the key grid). It
-              includes a <strong>Connect</strong> key.
-            </li>
-            <li>
-              Connect on this page (status <strong>Connected</strong>). Tap <strong>Connect</strong> on the deck, paste
-              the pairing code below in the property inspector, then press <strong>Connect</strong> again.
-            </li>
-            <li>
-              When linked, header shows <strong>Deck</strong>. PTT works without browser focus; volume adjusts audio in
-              this tab.
-            </li>
-          </ol>
-        </div>
-
-        {authenticated && deckPairCode && (
-          <div className="commentator-streamdeck-code">
-            <span className="commentator-streamdeck-code-label">Pairing code</span>
-            <code className="commentator-streamdeck-code-value">{deckPairCode}</code>
+        {!streamDeck.supported ? (
+          <p className="channel-settings-hint">
+            WebHID is not available in this browser. Use <strong>Chrome</strong> or <strong>Edge</strong> on Windows or
+            macOS.
+          </p>
+        ) : (
+          <>
             <p className="channel-settings-hint">
-              Enter this code in the Stream Deck <strong>Connect</strong> action (server:{" "}
-              {typeof window !== "undefined" ? window.location.origin : "this site"}).
+              Connect your Stream Deck directly from this page — no plugin or Elgato software required.{" "}
+              <strong>Quit the Stream Deck app</strong> first so the browser can access the device over USB.
             </p>
-          </div>
-        )}
 
-        <div className="commentator-streamdeck-steps">
-          <ol start={5}>
-            <li>Page 1 (Intercom): PTT keys + PGM volume + Connect + Hosta. Page 2 (Vol →): paired −/+ per intercom.</li>
-          </ol>
-        </div>
+            <div className="commentator-streamdeck-steps">
+              <ol>
+                <li>Close the Elgato Stream Deck application completely.</li>
+                <li>Join the commentator session (status <strong>Connected</strong>).</li>
+                <li>Click <strong>Connect Stream Deck</strong> below and pick your device.</li>
+                <li>
+                  Page 1: intercom PTT, PGM volume, Hosta. Page 2 (<strong>Vol →</strong>): intercom volume pairs.
+                </li>
+              </ol>
+            </div>
 
-        <div className="channel-settings-actions commentator-streamdeck-downloads">
-          <a
-            className="commentator-btn commentator-btn-primary"
-            href={STREAM_DECK_APP_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Get Stream Deck app
-          </a>
-          <a className="commentator-btn" href={streamDeckPluginURL()} download>
-            Download NEP plugin
-          </a>
-        </div>
+            <div className="channel-settings-actions commentator-streamdeck-downloads">
+              {streamDeck.connected ? (
+                <button type="button" className="commentator-btn" onClick={() => void streamDeck.disconnect()}>
+                  Disconnect Stream Deck
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="commentator-btn commentator-btn-primary"
+                  disabled={state !== "connected"}
+                  onClick={() => void streamDeck.connect(true)}
+                >
+                  Connect Stream Deck
+                </button>
+              )}
+            </div>
 
-        {streamDeck.pluginConnected && (
-          <p className="channel-settings-hint commentator-streamdeck-paired">
-            Stream Deck is linked to this session. Button labels and volume percentages update automatically.
-          </p>
-        )}
-        {authenticated && state === "connected" && !streamDeck.pluginConnected && deckPairCode && (
-          <p className="channel-settings-hint commentator-streamdeck-warn">
-            Stream Deck not linked yet. Use the <strong>NEP Commentator</strong> profile, enter code{" "}
-            <strong>{deckPairCode}</strong> in the Connect property inspector, then press the Connect key. The key title
-            should change to <strong>Linked</strong>.
-          </p>
-        )}
-        {authenticated && state === "connected" && !deckPairCode && (
-          <p className="channel-settings-hint commentator-streamdeck-warn">
-            Pairing code not available — redeploy the capture host backend, then reconnect.
-          </p>
+            {streamDeck.connected && (
+              <p className="channel-settings-hint commentator-streamdeck-paired">
+                Connected to {streamDeck.deviceName}
+                {streamDeck.presetLabel ? ` (${streamDeck.presetLabel})` : ""}. Button labels update automatically.
+              </p>
+            )}
+            {streamDeck.error && (
+              <p className="channel-settings-hint commentator-streamdeck-warn">{streamDeck.error}</p>
+            )}
+            {state !== "connected" && (
+              <p className="channel-settings-hint commentator-streamdeck-warn">
+                Join the session first, then connect the Stream Deck.
+              </p>
+            )}
+          </>
         )}
       </div>
     </div>
@@ -502,8 +465,8 @@ export default function CommentatorClient({ token }: Props) {
             Settings
           </button>
           <span className={`commentator-status-pill ${statusClass}`}>{STATE_LABELS[state]}</span>
-          {streamDeck.pluginConnected && (
-            <span className="commentator-status-pill commentator-status--ok" title="Stream Deck linked to this session">
+          {streamDeck.connected && (
+            <span className="commentator-status-pill commentator-status--ok" title="Stream Deck connected via WebHID">
               Deck
             </span>
           )}

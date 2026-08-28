@@ -1,8 +1,0 @@
-{
-  "type": "module",
-  "private": true,
-  "dependencies": {
-    "@elgato/streamdeck": "^2.1.2",
-    "ws": "^8.18.1"
-  }
-}

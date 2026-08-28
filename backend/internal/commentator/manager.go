@@ -72,7 +72,6 @@ type Manager struct {
 	sessionTTL    time.Duration
 	byID          map[int]*channel
 	rtcByChannel  map[int]*rtcSession
-	deck          *deckHub
 }
 
 func NewManager(settings *Store, sessions *SessionStore, publicBaseURL string, ffmpegBin string, channelInputs map[int]string, ice ICEConfig, playout PlayoutBridge, sessionTTL time.Duration) *Manager {
@@ -95,7 +94,6 @@ func NewManager(settings *Store, sessions *SessionStore, publicBaseURL string, f
 		sessionTTL:    sessionTTL,
 		byID:          make(map[int]*channel),
 		rtcByChannel:  make(map[int]*rtcSession),
-		deck:          newDeckHub(),
 	}
 }
 

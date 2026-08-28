@@ -22,8 +22,6 @@ func commentatorJoinError(w http.ResponseWriter, err error) {
 		body["pin_required"] = true
 	case errors.Is(err, commentator.ErrInvalidPin):
 		body["invalid_pin"] = true
-	case errors.Is(err, commentator.ErrInvalidDeckCode):
-		body["invalid_deck_code"] = true
 	case errors.Is(err, commentator.ErrExpiredToken):
 		body["expired"] = true
 	}
@@ -58,20 +56,9 @@ func registerCommentatorPublicRoutes(r chi.Router, commMgr *commentator.Manager)
 	}
 	r.Get("/api/commentator/join/{token}", joinHandler)
 	r.Post("/api/commentator/join/{token}", joinHandler)
-	r.Post("/api/commentator/deck/claim", func(w http.ResponseWriter, r *http.Request) {
-		commMgr.ServeDeckClaim(w, r)
-	})
-	r.Get("/api/commentator/join/{token}/deck-status", func(w http.ResponseWriter, r *http.Request) {
-		commMgr.ServeDeckStatus(w, r, chi.URLParam(r, "token"))
-	})
-	serveCommentatorControls := func(w http.ResponseWriter, r *http.Request) {
-		commMgr.ServeControls(w, r, chi.URLParam(r, "token"))
-	}
 	serveCommentatorWS := func(w http.ResponseWriter, r *http.Request) {
 		commMgr.ServeSignaling(w, r, chi.URLParam(r, "token"))
 	}
-	// Controls must be registered before the generic signaling route.
-	r.Get("/ws/commentator/{token}/controls", serveCommentatorControls)
 	// Primary path: nginx already upgrades WebSockets on location /ws.
 	r.Get("/ws/commentator/{token}", serveCommentatorWS)
 	// Legacy alias (older frontends / cached join responses).

@@ -1,5 +1,6 @@
 import type { DialAction, KeyAction } from "@elgato/streamdeck";
 import WebSocket from "ws";
+import { postJson } from "./http.js";
 import { scheduleProfileActivation } from "../profile.js";
 import type { VolumeSettings } from "../actions/volume.js";
 
@@ -76,21 +77,17 @@ class Bridge {
       return false;
     }
     try {
-      const res = await fetch(`${server}/api/commentator/deck/claim`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
-      });
-      if (!res.ok) {
-        console.error("[nep-commentator] deck claim failed:", res.status, await res.text());
-        return false;
-      }
-      const data = (await res.json()) as {
+      const res = await postJson<{
         origin: string;
         token: string;
         pin: string;
         controls_path: string;
-      };
+      }>(`${server}/api/commentator/deck/claim`, { code });
+      if (!res.ok || !res.data) {
+        console.error("[nep-commentator] deck claim failed:", res.status, res.text);
+        return false;
+      }
+      const data = res.data;
       this.pairInfo = {
         origin: server,
         token: data.token,

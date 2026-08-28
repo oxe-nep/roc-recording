@@ -392,7 +392,7 @@ export default function CommentatorClient({ token }: Props) {
 
         <div className="commentator-streamdeck-steps">
           <ol start={5}>
-            <li>Page 1: intercom PTT + PGM volume. Page 2 (Vol →): per-intercom volume.</li>
+            <li>Page 1 (Intercom): PTT keys + PGM volume + Connect. Page 2 (Vol →): paired −/+ per intercom.</li>
           </ol>
         </div>
 

@@ -1,4 +1,5 @@
 import type { DialAction, KeyAction } from "@elgato/streamdeck";
+import WebSocket from "ws";
 import { postJson } from "./http.js";
 import { scheduleProfileActivation } from "../profile.js";
 import type { VolumeSettings } from "../actions/volume.js";
@@ -156,31 +157,23 @@ class Bridge {
   private async connectControls(): Promise<boolean> {
     const url = this.controlsURL();
     if (!url) return false;
-    const WS = globalThis.WebSocket;
-    if (!WS) {
-      console.error("[nep-commentator] WebSocket is not available in this Node runtime");
-      return false;
-    }
     this.disconnectControls();
     return new Promise((resolve) => {
-      const ws = new WS(url);
+      const ws = new WebSocket(url);
       this.controls = ws;
       const timeout = setTimeout(() => resolve(false), 10000);
-      ws.addEventListener("open", () => {
+      ws.on("open", () => {
         clearTimeout(timeout);
         this.controlsTimer = setInterval(() => {
           this.sendControls({ type: "ping" });
         }, 25000);
         resolve(true);
       });
-      ws.addEventListener("message", (ev) => {
-        const raw = typeof ev.data === "string" ? ev.data : String(ev.data);
-        this.onControlsMessage(raw);
-      });
-      ws.addEventListener("close", () => {
+      ws.on("message", (raw) => this.onControlsMessage(String(raw)));
+      ws.on("close", () => {
         if (this.controls === ws) this.controls = null;
       });
-      ws.addEventListener("error", (err) => {
+      ws.on("error", (err) => {
         clearTimeout(timeout);
         console.error("[nep-commentator] controls websocket error:", url, err);
         resolve(false);
@@ -280,7 +273,7 @@ class Bridge {
   }
 
   private sendControls(msg: object) {
-    if (this.controls?.readyState !== WebSocket.OPEN) return;
+    if (!this.controls || this.controls.readyState !== WebSocket.OPEN) return;
     this.controls.send(JSON.stringify(msg));
   }
 }

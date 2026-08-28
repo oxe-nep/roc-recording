@@ -11,7 +11,8 @@
     "pack:web": "npm run pack && node scripts/copy-to-frontend.mjs"
   },
   "dependencies": {
-    "@elgato/streamdeck": "^2.1.2"
+    "@elgato/streamdeck": "^2.1.2",
+    "ws": "^8.18.1"
   },
   "devDependencies": {
     "@elgato/cli": "^1.4.0",

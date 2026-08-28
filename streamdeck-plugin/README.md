@@ -20,10 +20,14 @@ The plugin connects to the commentator backend over **WSS** (no localhost bridge
 
 ## Profile layout
 
-- **Page 1:** intercom PTT, PGM volume, Connect, page switch
-- **Page 2:** per-intercom volume −/+
+**Page 1 — Intercom:** PTT keys + PGM volume + Connect + page switch  
+**Page 2 — Volume:** paired −/+ per intercom + back to page 1
 
-Profiles are generated for standard (15-key), Mini, and XL devices.
+| Device | Page 1 | Page 2 |
+|--------|--------|--------|
+| **XL** | 6× PTT + PGM ± (top row), Connect below | 6× intercom vol pairs |
+| **Standard** | 5× PTT, 6th + PGM ±, Connect | 6× intercom vol pairs |
+| **Mini** | 6× PTT (full grid) | PGM ±, Connect, 1× intercom vol |
 
 Built with `@elgato/streamdeck` 2.x and manifest `SDKVersion` 3 (Marketplace-compatible).
 

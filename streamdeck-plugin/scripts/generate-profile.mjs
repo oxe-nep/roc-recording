@@ -1,83 +1,182 @@
 /**
- * Generates profiles/commentator.streamDeckProfile:
- * - Page 1: intercom PTT (6 keys) + PGM volume
- * - Page 2: per-intercom volume +/- (6 intercom slots)
+ * Generates bundled .streamDeckProfile archives for common Stream Deck models.
  */
 import { execSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PTT_ACTION = "com.nep.commentator.ptt";
 const VOLUME_ACTION = "com.nep.commentator.volume";
 const PAGE_PREV = "com.elgato.streamdeck.page.previous";
 const PAGE_NEXT = "com.elgato.streamdeck.page.next";
-const NULL_UUID = "00000000-0000-0000-0000-000000000000";
-const OUTER_UUID = "c1a5de5c-d6c9-4e40-aa5b-0c0ffee00001";
-const PAGE1_UUID = "a2b3c4d5-e6f7-4890-abcd-0c0ffee00002";
-const PAGE2_UUID = "b3c4d5e6-f7a8-4901-bcde-0c0ffee00003";
-const MK2_MODEL = "20GAA9902";
 
-function actionEntry(uuid, name, settings, title) {
+/** @typedef {{ col: number; row: number; slot: number }} PTTSlot */
+/** @typedef {{ col: number; row: number; slot: number; dir: "up" | "down" }} VolSlot */
+
+/**
+ * @type {Array<{
+ *   file: string;
+ *   profileName: string;
+ *   model: string;
+ *   outerUuid: string;
+ *   page1Uuid: string;
+ *   page2Uuid: string;
+ *   pttSlots: PTTSlot[];
+ *   pgmVolume: { down: { col: number; row: number }; up: { col: number; row: number } } | null;
+ *   pageNav: { next: { col: number; row: number }; prev: { col: number; row: number } };
+ *   volSlots: VolSlot[];
+ * }>}
+ */
+const PRESETS = [
+  {
+    file: "commentator.streamDeckProfile",
+    profileName: "NEP Commentator",
+    model: "20GAA9902",
+    outerUuid: "c1a5de5c-d6c9-4e40-aa5b-0c0ffee00001",
+    page1Uuid: "a2b3c4d5-e6f7-4890-abcd-0c0ffee00002",
+    page2Uuid: "b3c4d5e6-f7a8-4901-bcde-0c0ffee00003",
+    pttSlots: [
+      { col: 0, row: 0, slot: 0 },
+      { col: 1, row: 0, slot: 1 },
+      { col: 2, row: 0, slot: 2 },
+      { col: 3, row: 0, slot: 3 },
+      { col: 4, row: 0, slot: 4 },
+      { col: 0, row: 1, slot: 5 },
+    ],
+    pgmVolume: { down: { col: 1, row: 1 }, up: { col: 2, row: 1 } },
+    pageNav: { next: { col: 3, row: 1 }, prev: { col: 4, row: 2 } },
+    volSlots: [
+      { col: 0, row: 0, slot: 0, dir: "down" },
+      { col: 1, row: 0, slot: 0, dir: "up" },
+      { col: 2, row: 0, slot: 1, dir: "down" },
+      { col: 3, row: 0, slot: 1, dir: "up" },
+      { col: 4, row: 0, slot: 2, dir: "down" },
+      { col: 0, row: 1, slot: 2, dir: "up" },
+      { col: 1, row: 1, slot: 3, dir: "down" },
+      { col: 2, row: 1, slot: 3, dir: "up" },
+      { col: 3, row: 1, slot: 4, dir: "down" },
+      { col: 4, row: 1, slot: 4, dir: "up" },
+      { col: 0, row: 2, slot: 5, dir: "down" },
+      { col: 1, row: 2, slot: 5, dir: "up" },
+    ],
+  },
+  {
+    file: "commentator-xl.streamDeckProfile",
+    profileName: "NEP Commentator XL",
+    model: "20GBA9901",
+    outerUuid: "c1a5de5c-d6c9-4e40-aa5b-0c0ffee00011",
+    page1Uuid: "a2b3c4d5-e6f7-4890-abcd-0c0ffee00012",
+    page2Uuid: "b3c4d5e6-f7a8-4901-bcde-0c0ffee00013",
+    pttSlots: [
+      { col: 0, row: 0, slot: 0 },
+      { col: 1, row: 0, slot: 1 },
+      { col: 2, row: 0, slot: 2 },
+      { col: 3, row: 0, slot: 3 },
+      { col: 4, row: 0, slot: 4 },
+      { col: 5, row: 0, slot: 5 },
+    ],
+    pgmVolume: { down: { col: 6, row: 0 }, up: { col: 7, row: 0 } },
+    pageNav: { next: { col: 7, row: 1 }, prev: { col: 6, row: 1 } },
+    volSlots: [
+      { col: 0, row: 2, slot: 0, dir: "down" },
+      { col: 1, row: 2, slot: 0, dir: "up" },
+      { col: 2, row: 2, slot: 1, dir: "down" },
+      { col: 3, row: 2, slot: 1, dir: "up" },
+      { col: 4, row: 2, slot: 2, dir: "down" },
+      { col: 5, row: 2, slot: 2, dir: "up" },
+      { col: 6, row: 2, slot: 3, dir: "down" },
+      { col: 7, row: 2, slot: 3, dir: "up" },
+      { col: 0, row: 3, slot: 4, dir: "down" },
+      { col: 1, row: 3, slot: 4, dir: "up" },
+      { col: 2, row: 3, slot: 5, dir: "down" },
+      { col: 3, row: 3, slot: 5, dir: "up" },
+    ],
+  },
+  {
+    file: "commentator-mini.streamDeckProfile",
+    profileName: "NEP Commentator Mini",
+    model: "20GAM9901",
+    outerUuid: "c1a5de5c-d6c9-4e40-aa5b-0c0ffee00021",
+    page1Uuid: "a2b3c4d5-e6f7-4890-abcd-0c0ffee00022",
+    page2Uuid: "b3c4d5e6-f7a8-4901-bcde-0c0ffee00023",
+    pttSlots: [
+      { col: 0, row: 0, slot: 0 },
+      { col: 1, row: 0, slot: 1 },
+      { col: 2, row: 0, slot: 2 },
+      { col: 0, row: 1, slot: 3 },
+      { col: 1, row: 1, slot: 4 },
+      { col: 2, row: 1, slot: 5 },
+    ],
+    pgmVolume: null,
+    pageNav: { next: { col: 2, row: 0 }, prev: { col: 2, row: 1 } },
+    volSlots: [
+      { col: 0, row: 0, slot: 0, dir: "down" },
+      { col: 1, row: 0, slot: 0, dir: "up" },
+      { col: 0, row: 1, slot: 1, dir: "down" },
+      { col: 1, row: 1, slot: 1, dir: "up" },
+    ],
+  },
+];
+
+function pluginAction(uuid, name, settings) {
   return {
-    ActionID: NULL_UUID,
+    ActionID: randomUUID(),
     LinkedTitle: false,
     Name: name,
     Resources: null,
     Settings: settings,
+    State: 0,
+    States: [{}],
+    UUID: uuid,
+  };
+}
+
+function systemAction(uuid, name, title) {
+  return {
+    ActionID: randomUUID(),
+    LinkedTitle: true,
+    Name: name,
+    Resources: null,
+    Settings: {},
     State: 0,
     States: [{ Title: title, ShowTitle: true, TitleAlignment: "bottom", FontSize: 11 }],
     UUID: uuid,
   };
 }
 
-function buildPage1Actions() {
+function key(actions, col, row, entry) {
+  actions[`${col},${row}`] = entry;
+}
+
+function buildPage1(preset) {
   const actions = {};
-  const pttSlots = [
-    { col: 0, row: 0, slot: 0 },
-    { col: 1, row: 0, slot: 1 },
-    { col: 2, row: 0, slot: 2 },
-    { col: 3, row: 0, slot: 3 },
-    { col: 4, row: 0, slot: 4 },
-    { col: 0, row: 1, slot: 5 },
-  ];
-  for (const { col, row, slot } of pttSlots) {
-    actions[`${col},${row}`] = actionEntry(PTT_ACTION, "Intercom PTT", { slot }, "PTT");
+  for (const { col, row, slot } of preset.pttSlots) {
+    key(actions, col, row, pluginAction(PTT_ACTION, "Intercom PTT", { slot }));
   }
-  actions["1,1"] = actionEntry(VOLUME_ACTION, "PGM Volume", { target: "pgm", direction: "down" }, "PGM −");
-  actions["2,1"] = actionEntry(VOLUME_ACTION, "PGM Volume", { target: "pgm", direction: "up" }, "PGM +");
-  actions["3,1"] = actionEntry(PAGE_NEXT, "Next Page", {}, "Vol →");
-  actions["4,2"] = actionEntry(PAGE_PREV, "Previous Page", {}, "← PTT");
+  if (preset.pgmVolume) {
+    const { down, up } = preset.pgmVolume;
+    key(actions, down.col, down.row, pluginAction(VOLUME_ACTION, "PGM Volume", { target: "pgm", direction: "down" }));
+    key(actions, up.col, up.row, pluginAction(VOLUME_ACTION, "PGM Volume", { target: "pgm", direction: "up" }));
+  }
+  key(actions, preset.pageNav.next.col, preset.pageNav.next.row, systemAction(PAGE_NEXT, "Next Page", "Vol →"));
+  key(actions, preset.pageNav.prev.col, preset.pageNav.prev.row, systemAction(PAGE_PREV, "Previous Page", "← PTT"));
   return actions;
 }
 
-function buildPage2Actions() {
+function buildPage2(preset) {
   const actions = {};
-  const volSlots = [
-    { col: 0, row: 0, slot: 0, dir: "down" },
-    { col: 1, row: 0, slot: 0, dir: "up" },
-    { col: 2, row: 0, slot: 1, dir: "down" },
-    { col: 3, row: 0, slot: 1, dir: "up" },
-    { col: 4, row: 0, slot: 2, dir: "down" },
-    { col: 0, row: 1, slot: 2, dir: "up" },
-    { col: 1, row: 1, slot: 3, dir: "down" },
-    { col: 2, row: 1, slot: 3, dir: "up" },
-    { col: 3, row: 1, slot: 4, dir: "down" },
-    { col: 4, row: 1, slot: 4, dir: "up" },
-    { col: 0, row: 2, slot: 5, dir: "down" },
-    { col: 1, row: 2, slot: 5, dir: "up" },
-  ];
-  for (const { col, row, slot, dir } of volSlots) {
-    const sign = dir === "up" ? "+" : "−";
-    actions[`${col},${row}`] = actionEntry(
-      VOLUME_ACTION,
-      "Intercom Volume",
-      { target: "intercom", slot, direction: dir },
-      `IC${slot + 1} ${sign}`,
+  for (const { col, row, slot, dir } of preset.volSlots) {
+    key(
+      actions,
+      col,
+      row,
+      pluginAction(VOLUME_ACTION, "Intercom Volume", { target: "intercom", slot, direction: dir }),
     );
   }
-  actions["4,2"] = actionEntry(PAGE_PREV, "Previous Page", {}, "← PTT");
+  key(actions, preset.pageNav.prev.col, preset.pageNav.prev.row, systemAction(PAGE_PREV, "Previous Page", "← PTT"));
   return actions;
 }
 
@@ -101,21 +200,22 @@ function zipDir(sourceDir, outputPath) {
       `powershell -NoProfile -Command "Compress-Archive -Path '${src}\\*' -DestinationPath '${zipPath.replace(/'/g, "''")}' -Force"`,
       { stdio: "inherit" },
     );
-    execSync(`powershell -NoProfile -Command "Move-Item -Path '${zipPath.replace(/'/g, "''")}' -Destination '${out.replace(/'/g, "''")}' -Force"`, {
-      stdio: "inherit",
-    });
+    execSync(
+      `powershell -NoProfile -Command "Move-Item -Path '${zipPath.replace(/'/g, "''")}' -Destination '${out.replace(/'/g, "''")}' -Force"`,
+      { stdio: "inherit" },
+    );
   } else {
     execSync(`cd "${sourceDir}" && zip -qr "${out}" . -x ".*"`, { stdio: "inherit" });
   }
 }
 
-export function writeProfileArchive(outputPath, profileName = "NEP Commentator") {
+export function writeProfileArchive(outputPath, preset) {
   const staging = mkdtempSync(join(tmpdir(), "nep-commentator-profile-"));
   try {
-    const sdProfileDir = `${OUTER_UUID.toUpperCase()}.sdProfile`;
+    const sdProfileDir = `${preset.outerUuid.toUpperCase()}.sdProfile`;
     const base = join(staging, sdProfileDir);
-    const page1Dir = join(base, "Profiles", PAGE1_UUID.toUpperCase());
-    const page2Dir = join(base, "Profiles", PAGE2_UUID.toUpperCase());
+    const page1Dir = join(base, "Profiles", preset.page1Uuid.toUpperCase());
+    const page2Dir = join(base, "Profiles", preset.page2Uuid.toUpperCase());
     mkdirSync(page1Dir, { recursive: true });
     mkdirSync(page2Dir, { recursive: true });
 
@@ -123,12 +223,12 @@ export function writeProfileArchive(outputPath, profileName = "NEP Commentator")
       join(base, "manifest.json"),
       JSON.stringify({
         AppIdentifier: "*",
-        Device: { Model: MK2_MODEL, UUID: "" },
-        Name: profileName,
+        Device: { Model: preset.model, UUID: "" },
+        Name: preset.profileName,
         Pages: {
-          Current: PAGE1_UUID,
-          Default: PAGE1_UUID,
-          Pages: [PAGE1_UUID, PAGE2_UUID],
+          Current: preset.page1Uuid,
+          Default: preset.page1Uuid,
+          Pages: [preset.page1Uuid, preset.page2Uuid],
         },
         Version: "3.0",
       }),
@@ -136,17 +236,17 @@ export function writeProfileArchive(outputPath, profileName = "NEP Commentator")
     writeFileSync(
       join(page1Dir, "manifest.json"),
       JSON.stringify({
-        Controllers: [{ Actions: buildPage1Actions(), Type: "Keypad" }],
+        Controllers: [{ Actions: buildPage1(preset), Type: "Keypad" }],
         Icon: "",
-        Name: "PTT",
+        Name: "",
       }),
     );
     writeFileSync(
       join(page2Dir, "manifest.json"),
       JSON.stringify({
-        Controllers: [{ Actions: buildPage2Actions(), Type: "Keypad" }],
+        Controllers: [{ Actions: buildPage2(preset), Type: "Keypad" }],
         Icon: "",
-        Name: "Volumes",
+        Name: "",
       }),
     );
     zipDir(staging, resolve(outputPath));
@@ -156,6 +256,10 @@ export function writeProfileArchive(outputPath, profileName = "NEP Commentator")
 }
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
-const target = resolve(scriptDir, "..", "com.nep.commentator.sdPlugin", "profiles", "commentator.streamDeckProfile");
-writeProfileArchive(target);
-console.log(`wrote ${target}`);
+const profilesDir = resolve(scriptDir, "..", "com.nep.commentator.sdPlugin", "profiles");
+mkdirSync(profilesDir, { recursive: true });
+for (const preset of PRESETS) {
+  const target = join(profilesDir, preset.file);
+  writeProfileArchive(target, preset);
+  console.log(`wrote ${target}`);
+}

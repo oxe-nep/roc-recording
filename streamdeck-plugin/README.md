@@ -17,7 +17,9 @@ npx streamdeck link com.nep.commentator.sdPlugin
 
 Or download the pre-built `.streamDeckPlugin` from the commentator web UI.
 
-The bundled **NEP Commentator** profile installs automatically — no manual button layout required.
+The bundled **NEP Commentator** profile installs automatically when you install the plugin (accept the prompt). Profiles exist for standard (15-key), Mini, and XL devices.
+
+If buttons were added manually, open each action's property inspector and set the intercom slot / volume target.
 
 ## Layout
 

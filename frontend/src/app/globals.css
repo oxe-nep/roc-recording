@@ -3151,3 +3151,8 @@ body:has(.commentator-root) .container {
   color: #8fd48f;
 }
 
+.commentator-streamdeck-warn {
+  margin-top: 12px;
+  color: #e8b86d;
+}
+

@@ -1,6 +1,6 @@
 import type { DialAction, KeyAction } from "@elgato/streamdeck";
 import WebSocket, { WebSocketServer } from "ws";
-import { activateCommentatorProfile } from "../profile.js";
+import { scheduleProfileActivation } from "../profile.js";
 import type { VolumeSettings } from "../actions/volume.js";
 
 export const BRIDGE_PORT = 17200;
@@ -134,9 +134,12 @@ class Bridge {
           pin: msg.pin,
           controlsPath: msg.controls_path,
         };
-        void activateCommentatorProfile();
+        scheduleProfileActivation();
         void this.connectControls().then((ok) => {
           ws.send(JSON.stringify({ type: "paired", ok, controls_connected: ok, profile_switched: true }));
+          if (!ok) {
+            console.error("[nep-commentator] controls websocket failed:", this.controlsURL());
+          }
         });
         break;
       case "layout":
@@ -250,8 +253,9 @@ class Bridge {
         this.notifyStatus(false);
         if (this.controls === ws) this.controls = null;
       });
-      ws.on("error", () => {
+      ws.on("error", (err) => {
         clearTimeout(timeout);
+        console.error("[nep-commentator] controls websocket error:", url, err);
         resolve(false);
       });
     });

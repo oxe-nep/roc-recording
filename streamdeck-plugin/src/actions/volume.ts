@@ -1,4 +1,4 @@
-import { action, KeyDownEvent, SingletonAction, WillAppearEvent } from "@elgato/streamdeck";
+import { action, DidReceiveSettingsEvent, KeyDownEvent, SingletonAction, WillAppearEvent } from "@elgato/streamdeck";
 import { bridge } from "../bridge/bridge.js";
 
 export type VolumeSettings = {
@@ -10,6 +10,14 @@ export type VolumeSettings = {
 @action({ UUID: "com.nep.commentator.volume" })
 export class VolumeAction extends SingletonAction<VolumeSettings> {
   override onWillAppear(ev: WillAppearEvent<VolumeSettings>): void | Promise<void> {
+    this.register(ev);
+  }
+
+  override onDidReceiveSettings(ev: DidReceiveSettingsEvent<VolumeSettings>): void | Promise<void> {
+    this.register(ev);
+  }
+
+  private register(ev: WillAppearEvent<VolumeSettings> | DidReceiveSettingsEvent<VolumeSettings>) {
     bridge.registerVolumeKey(ev.action, ev.payload.settings ?? {});
   }
 

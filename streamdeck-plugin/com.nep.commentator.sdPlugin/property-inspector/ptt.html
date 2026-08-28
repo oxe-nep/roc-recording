@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Intercom PTT</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        color: #d8d8d8;
+        margin: 0;
+        padding: 12px;
+      }
+      label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 12px;
+      }
+      select {
+        width: 100%;
+        box-sizing: border-box;
+      }
+      p {
+        font-size: 11px;
+        opacity: 0.8;
+        line-height: 1.4;
+      }
+    </style>
+  </head>
+  <body>
+    <label for="slot">Intercom slot (0 = first channel)</label>
+    <select id="slot">
+      <option value="0">0 — first intercom</option>
+      <option value="1">1</option>
+      <option value="2">2</option>
+      <option value="3">3</option>
+      <option value="4">4</option>
+      <option value="5">5</option>
+    </select>
+    <p>Connect on the commentator web page first. Button labels update when paired.</p>
+    <script>
+      let websocket = null;
+      let uuid = null;
+      let settings = {};
+
+      function connectElgatoStreamDeckSocket(inPort, inPropertyInspectorUUID, inRegisterEvent, inInfo, inActionInfo) {
+        uuid = inPropertyInspectorUUID;
+        const actionInfo = JSON.parse(inActionInfo);
+        settings = actionInfo.payload?.settings || {};
+        document.getElementById("slot").value = String(settings.slot ?? 0);
+
+        websocket = new WebSocket("ws://127.0.0.1:" + inPort);
+        websocket.onopen = () => {
+          websocket.send(JSON.stringify({ event: inRegisterEvent, uuid }));
+        };
+      }
+
+      function save() {
+        if (!websocket || !uuid) return;
+        settings.slot = Number(document.getElementById("slot").value);
+        websocket.send(JSON.stringify({ event: "setSettings", context: uuid, payload: settings }));
+      }
+
+      document.getElementById("slot").addEventListener("change", save);
+    </script>
+  </body>
+</html>

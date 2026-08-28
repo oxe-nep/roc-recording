@@ -1,4 +1,4 @@
-import { action, KeyDownEvent, KeyUpEvent, SingletonAction, WillAppearEvent } from "@elgato/streamdeck";
+import { action, DidReceiveSettingsEvent, KeyDownEvent, KeyUpEvent, SingletonAction, WillAppearEvent } from "@elgato/streamdeck";
 import { bridge } from "../bridge/bridge.js";
 
 type PTTSettings = {
@@ -8,6 +8,14 @@ type PTTSettings = {
 @action({ UUID: "com.nep.commentator.ptt" })
 export class PTTAction extends SingletonAction<PTTSettings> {
   override onWillAppear(ev: WillAppearEvent<PTTSettings>): void | Promise<void> {
+    this.register(ev);
+  }
+
+  override onDidReceiveSettings(ev: DidReceiveSettingsEvent<PTTSettings>): void | Promise<void> {
+    this.register(ev);
+  }
+
+  private register(ev: WillAppearEvent<PTTSettings> | DidReceiveSettingsEvent<PTTSettings>) {
     const { row, column } = ev.payload.coordinates;
     const slot = ev.payload.settings?.slot ?? column + row * 5;
     bridge.registerKey(ev.action, slot);

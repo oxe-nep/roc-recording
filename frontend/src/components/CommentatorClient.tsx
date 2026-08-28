@@ -362,14 +362,17 @@ export default function CommentatorClient({ token }: Props) {
               Download and open the{" "}
               <a href={streamDeckPluginURL()} download>
                 NEP Commentator plugin
-              </a>
-              . Stream Deck installs it automatically.
+              </a>{" "}
+              (v0.4+). Stream Deck installs it automatically — accept the bundled profile when prompted.
             </li>
             <li>
-              Connect on this page — the <strong>NEP Commentator</strong> profile switches in automatically with PTT
-              keys, PGM volume, and a second page for intercom volumes.
+              Open this page, enter PIN, and wait until status shows <strong>Connected</strong>. The{" "}
+              <strong>NEP Commentator</strong> profile should switch in automatically.
             </li>
-            <li>Button labels and volume percentages update when paired (header shows Deck).</li>
+            <li>
+              Header should show <strong>Deck</strong> when paired. PTT needs <strong>Deck · PTT</strong> (green) —
+              that means the plugin reached the backend.
+            </li>
           </ol>
         </div>
 
@@ -387,9 +390,16 @@ export default function CommentatorClient({ token }: Props) {
           </a>
         </div>
 
-        {streamDeck.status === "paired" && (
+        {streamDeck.status === "paired" && streamDeck.controlsConnected && (
           <p className="channel-settings-hint commentator-streamdeck-paired">
-            Stream Deck is connected. Page 1: intercom PTT and PGM volume. Page 2 (Vol →): per-intercom volume.
+            Stream Deck is connected and PTT is ready. Page 1: intercom PTT + PGM volume. Page 2 (Vol →): intercom
+            volumes.
+          </p>
+        )}
+        {streamDeck.status === "paired" && !streamDeck.controlsConnected && (
+          <p className="channel-settings-hint commentator-streamdeck-warn">
+            Plugin is paired but PTT backend is not reachable. Check that you are connected on this page and that the
+            capture host backend is running.
           </p>
         )}
         {streamDeck.status === "offline" && authenticated && state === "connected" && (
@@ -466,8 +476,11 @@ export default function CommentatorClient({ token }: Props) {
           </button>
           <span className={`commentator-status-pill ${statusClass}`}>{STATE_LABELS[state]}</span>
           {streamDeck.status === "paired" && (
-            <span className="commentator-status-pill commentator-status--ok" title="Stream Deck connected">
-              Deck
+            <span
+              className={`commentator-status-pill ${streamDeck.controlsConnected ? "commentator-status--ok" : "commentator-status--pending"}`}
+              title={streamDeck.controlsConnected ? "Stream Deck PTT ready" : "Stream Deck paired — waiting for PTT backend"}
+            >
+              {streamDeck.controlsConnected ? "Deck · PTT" : "Deck"}
             </span>
           )}
           {streamDeck.status === "ready" && (

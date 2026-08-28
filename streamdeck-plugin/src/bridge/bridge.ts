@@ -1,7 +1,10 @@
 import type { DialAction, KeyAction } from "@elgato/streamdeck";
 import WebSocket, { WebSocketServer } from "ws";
+import { activateCommentatorProfile } from "../profile.js";
+import type { VolumeSettings } from "../actions/volume.js";
 
 export const BRIDGE_PORT = 17200;
+export const VOLUME_STEP = 0.05;
 
 export type LayoutButton = {
   slot: number;
@@ -23,13 +26,29 @@ type LayoutMessage = {
   hosta?: boolean;
 };
 
-type WebMessage = PairMessage | LayoutMessage | { type: "unpair" };
-
-type KeyRef = {
-  action: KeyAction | DialAction;
-  row: number;
-  column: number;
+type VolumesMessage = {
+  type: "volumes";
+  pgm: number;
+  intercom: Record<string, number>;
 };
+
+type WebMessage = PairMessage | LayoutMessage | VolumesMessage | { type: "unpair" };
+
+type PTTKeyRef = {
+  kind: "ptt";
+  action: KeyAction | DialAction;
+  slot: number;
+};
+
+type VolumeKeyRef = {
+  kind: "volume";
+  action: KeyAction | DialAction;
+  target: "pgm" | "intercom";
+  slot?: number;
+  direction: "up" | "down";
+};
+
+type KeyRef = PTTKeyRef | VolumeKeyRef;
 
 class Bridge {
   private wss: WebSocketServer | null = null;
@@ -38,17 +57,17 @@ class Bridge {
   private controlsTimer: ReturnType<typeof setInterval> | null = null;
   private keys = new Map<string, KeyRef>();
   private layout: LayoutButton[] = [];
-  private slotByKey = new Map<string, number>();
   private channelByKey = new Map<string, number>();
   private activeKey: string | null = null;
   private pairInfo: { origin: string; token: string; pin: string; controlsPath: string } | null = null;
+  private volumes = { pgm: 1, intercom: {} as Record<number, number> };
 
   startLocalServer() {
     if (this.wss) return;
     this.wss = new WebSocketServer({ host: "127.0.0.1", port: BRIDGE_PORT });
     this.wss.on("connection", (ws) => {
       this.webClient = ws;
-      ws.send(JSON.stringify({ type: "ready", version: "0.1.0" }));
+      ws.send(JSON.stringify({ type: "ready", version: "0.3.0" }));
       ws.on("message", (raw) => this.onWebMessage(ws, raw));
       ws.on("close", () => {
         if (this.webClient === ws) this.webClient = null;
@@ -57,25 +76,34 @@ class Bridge {
     });
   }
 
-  registerKey(action: KeyAction | DialAction, row: number, column: number) {
-    this.keys.set(action.id, { action, row, column });
-    void this.applyLayoutToAction(action);
+  registerKey(action: KeyAction | DialAction, slot: number) {
+    this.keys.set(action.id, { kind: "ptt", action, slot });
+    void this.applyPTTKey(action.id);
   }
 
-  async applyLayoutToAction(action: KeyAction | DialAction) {
-    const ref = this.keys.get(action.id);
-    if (!ref) return;
-    const slot = ref.row * 5 + ref.column;
-    this.slotByKey.set(action.id, slot);
-    const btn = this.layout.find((b) => b.slot === slot);
-    if (!btn) {
-      await action.setTitle("PTT");
-      this.channelByKey.delete(action.id);
-      return;
-    }
-    this.channelByKey.set(action.id, btn.channel);
-    await action.setTitle(btn.label);
-    await action.setState(0);
+  registerVolumeKey(action: KeyAction | DialAction, settings: VolumeSettings) {
+    const target = settings.target === "pgm" ? "pgm" : "intercom";
+    const direction = settings.direction === "down" ? "down" : "up";
+    this.keys.set(action.id, {
+      kind: "volume",
+      action,
+      target,
+      slot: settings.slot,
+      direction,
+    });
+    void this.applyVolumeKey(action.id);
+  }
+
+  adjustVolume(actionId: string) {
+    const ref = this.keys.get(actionId);
+    if (!ref || ref.kind !== "volume") return;
+    const delta = ref.direction === "up" ? VOLUME_STEP : -VOLUME_STEP;
+    this.sendToWeb({
+      type: "volume",
+      target: ref.target,
+      slot: ref.slot,
+      delta,
+    });
   }
 
   pttDown(actionId: string) {
@@ -106,17 +134,28 @@ class Bridge {
           pin: msg.pin,
           controlsPath: msg.controls_path,
         };
+        void activateCommentatorProfile();
         void this.connectControls().then((ok) => {
-          ws.send(JSON.stringify({ type: "paired", ok, controls_connected: ok }));
+          ws.send(JSON.stringify({ type: "paired", ok, controls_connected: ok, profile_switched: true }));
         });
         break;
       case "layout":
         this.layout = msg.buttons;
         void this.refreshAllKeys();
         break;
+      case "volumes":
+        this.volumes.pgm = msg.pgm;
+        this.volumes.intercom = {};
+        for (const [id, value] of Object.entries(msg.intercom)) {
+          const channel = Number(id);
+          if (Number.isFinite(channel)) this.volumes.intercom[channel] = value;
+        }
+        void this.refreshVolumeKeys();
+        break;
       case "unpair":
         this.pairInfo = null;
         this.layout = [];
+        this.volumes = { pgm: 1, intercom: {} };
         this.disconnectControls();
         void this.refreshAllKeys();
         break;
@@ -124,9 +163,55 @@ class Bridge {
   }
 
   private async refreshAllKeys() {
-    for (const ref of this.keys.values()) {
-      await this.applyLayoutToAction(ref.action);
+    for (const id of this.keys.keys()) {
+      await this.applyKey(id);
     }
+  }
+
+  private async refreshVolumeKeys() {
+    for (const [id, ref] of this.keys) {
+      if (ref.kind === "volume") await this.applyVolumeKey(id);
+    }
+  }
+
+  private async applyKey(actionId: string) {
+    const ref = this.keys.get(actionId);
+    if (!ref) return;
+    if (ref.kind === "ptt") await this.applyPTTKey(actionId);
+    else await this.applyVolumeKey(actionId);
+  }
+
+  private async applyPTTKey(actionId: string) {
+    const ref = this.keys.get(actionId);
+    if (!ref || ref.kind !== "ptt") return;
+    const btn = this.layout.find((b) => b.slot === ref.slot);
+    if (!btn) {
+      await ref.action.setTitle("PTT");
+      this.channelByKey.delete(actionId);
+      return;
+    }
+    this.channelByKey.set(actionId, btn.channel);
+    await ref.action.setTitle(btn.label);
+    await ref.action.setState(0);
+  }
+
+  private async applyVolumeKey(actionId: string) {
+    const ref = this.keys.get(actionId);
+    if (!ref || ref.kind !== "volume") return;
+    const arrow = ref.direction === "up" ? "+" : "−";
+    if (ref.target === "pgm") {
+      const pct = Math.round(this.volumes.pgm * 100);
+      await ref.action.setTitle(`PGM ${arrow}\n${pct}%`);
+      return;
+    }
+    const layoutBtn = ref.slot != null ? this.layout.find((b) => b.slot === ref.slot) : undefined;
+    if (!layoutBtn) {
+      await ref.action.setTitle(`${arrow}`);
+      return;
+    }
+    const pct = Math.round((this.volumes.intercom[layoutBtn.channel] ?? 0.8) * 100);
+    const short = layoutBtn.label.split(/\s+/)[0]?.slice(0, 8) || "IC";
+    await ref.action.setTitle(`${short} ${arrow}\n${pct}%`);
   }
 
   private controlsURL(): string | null {
@@ -187,9 +272,13 @@ class Bridge {
     this.controls.send(JSON.stringify(msg));
   }
 
-  private notifyStatus(controlsConnected: boolean) {
+  private sendToWeb(msg: object) {
     if (this.webClient?.readyState !== WebSocket.OPEN) return;
-    this.webClient.send(JSON.stringify({ type: "status", controls_connected: controlsConnected }));
+    this.webClient.send(JSON.stringify(msg));
+  }
+
+  private notifyStatus(controlsConnected: boolean) {
+    this.sendToWeb({ type: "status", controls_connected: controlsConnected });
   }
 }
 

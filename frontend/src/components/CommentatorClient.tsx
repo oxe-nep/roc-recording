@@ -24,6 +24,11 @@ import {
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 import { useStreamDeckBridge } from "@/hooks/useStreamDeckBridge";
 import {
+  clampVolume,
+  intercomToLayout,
+  type StreamDeckVolumeAdjust,
+} from "@/lib/streamDeckBridge";
+import {
   STREAM_DECK_APP_URL,
   streamDeckPluginURL,
 } from "@/lib/streamDeckInstall";
@@ -89,6 +94,23 @@ export default function CommentatorClient({ token }: Props) {
 
   useBodyScrollLock(settingsOpen || streamDeckOpen);
 
+  const handleStreamDeckVolumeAdjust = useCallback(
+    (adjust: StreamDeckVolumeAdjust) => {
+      if (adjust.target === "pgm") {
+        setPgmVol((prev) => clampVolume(prev + adjust.delta));
+        return;
+      }
+      if (adjust.target !== "intercom" || adjust.slot == null) return;
+      const layoutBtn = intercomToLayout(intercom).find((b) => b.slot === adjust.slot);
+      if (!layoutBtn) return;
+      setIntercomVol((prev) => {
+        const current = prev[layoutBtn.channel] ?? 0.8;
+        return { ...prev, [layoutBtn.channel]: clampVolume(current + adjust.delta) };
+      });
+    },
+    [intercom],
+  );
+
   const streamDeck = useStreamDeckBridge({
     enabled: authenticated && state === "connected" && !!controlsPath,
     origin: typeof window !== "undefined" ? window.location.origin : "",
@@ -96,6 +118,9 @@ export default function CommentatorClient({ token }: Props) {
     pin,
     controlsPath,
     intercom,
+    pgmVol,
+    intercomVol,
+    onVolumeAdjust: handleStreamDeckVolumeAdjust,
   });
 
   useEffect(() => {
@@ -320,8 +345,8 @@ export default function CommentatorClient({ token }: Props) {
         </div>
 
         <p className="channel-settings-hint">
-          Use a Stream Deck for intercom push-to-talk. PTT works even when this browser tab is in the
-          background — audio and video still run here.
+          Use a Stream Deck for intercom push-to-talk and volume. PTT works even when this browser tab is in the
+          background — audio and video still run here. Volume buttons adjust levels in this page.
         </p>
 
         <div className="commentator-streamdeck-steps">
@@ -341,10 +366,10 @@ export default function CommentatorClient({ token }: Props) {
               . Stream Deck installs it automatically.
             </li>
             <li>
-              In Stream Deck, drag <strong>Intercom PTT</strong> actions to the top row, left to right (first key =
-              first intercom channel).
+              Connect on this page — the <strong>NEP Commentator</strong> profile switches in automatically with PTT
+              keys, PGM volume, and a second page for intercom volumes.
             </li>
-            <li>Connect on this page — button labels update when the deck is paired (header shows Deck).</li>
+            <li>Button labels and volume percentages update when paired (header shows Deck).</li>
           </ol>
         </div>
 
@@ -364,7 +389,7 @@ export default function CommentatorClient({ token }: Props) {
 
         {streamDeck.status === "paired" && (
           <p className="channel-settings-hint commentator-streamdeck-paired">
-            Stream Deck is connected and receiving your intercom layout.
+            Stream Deck is connected. Page 1: intercom PTT and PGM volume. Page 2 (Vol →): per-intercom volume.
           </p>
         )}
         {streamDeck.status === "offline" && authenticated && state === "connected" && (

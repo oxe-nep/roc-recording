@@ -2,11 +2,18 @@ import type { CommentatorIntercomSlot } from "@/lib/api";
 
 /** Default local port for the NEP Commentator Stream Deck plugin bridge. */
 export const STREAM_DECK_BRIDGE_URL = "ws://127.0.0.1:17200";
+export const STREAM_DECK_VOLUME_STEP = 0.05;
 
 export type StreamDeckLayoutButton = {
   slot: number;
   channel: number;
   label: string;
+};
+
+export type StreamDeckVolumeAdjust = {
+  target: "pgm" | "intercom";
+  slot?: number;
+  delta: number;
 };
 
 export type StreamDeckBridgeStatus = "offline" | "connecting" | "ready" | "paired" | "error";
@@ -25,20 +32,35 @@ type LayoutMessage = {
   hosta?: boolean;
 };
 
+type VolumesMessage = {
+  type: "volumes";
+  pgm: number;
+  intercom: Record<string, number>;
+};
+
 type UnpairMessage = {
   type: "unpair";
 };
 
-type WebToPlugin = PairMessage | LayoutMessage | UnpairMessage;
+type WebToPlugin = PairMessage | LayoutMessage | VolumesMessage | UnpairMessage;
+
+type PluginVolumeMessage = {
+  type: "volume";
+  target: "pgm" | "intercom";
+  slot?: number;
+  delta: number;
+};
 
 type PluginMessage =
   | { type: "ready"; version?: string }
   | { type: "paired"; ok: boolean; error?: string; controls_connected?: boolean }
-  | { type: "status"; controls_connected?: boolean };
+  | { type: "status"; controls_connected?: boolean }
+  | PluginVolumeMessage;
 
 export type StreamDeckBridgeCallbacks = {
   onStatus?: (status: StreamDeckBridgeStatus) => void;
   onControlsConnected?: (connected: boolean) => void;
+  onVolumeAdjust?: (adjust: StreamDeckVolumeAdjust) => void;
 };
 
 export function intercomToLayout(intercom: CommentatorIntercomSlot[]): StreamDeckLayoutButton[] {
@@ -49,6 +71,10 @@ export function intercomToLayout(intercom: CommentatorIntercomSlot[]): StreamDec
       channel: slot.id,
       label: slot.name?.trim() || `Intercom ${slot.id}`,
     }));
+}
+
+export function clampVolume(value: number): number {
+  return Math.min(1, Math.max(0, value));
 }
 
 export class StreamDeckBridge {
@@ -100,6 +126,14 @@ export class StreamDeckBridge {
     this.send({ type: "layout", buttons, hosta });
   }
 
+  publishVolumes(pgm: number, intercom: Record<number, number>) {
+    const payload: Record<string, number> = {};
+    for (const [id, value] of Object.entries(intercom)) {
+      payload[id] = clampVolume(value);
+    }
+    this.send({ type: "volumes", pgm: clampVolume(pgm), intercom: payload });
+  }
+
   private connect() {
     if (this.stopped || typeof window === "undefined") return;
     this.setStatus("connecting");
@@ -137,6 +171,13 @@ export class StreamDeckBridge {
           break;
         case "status":
           this.callbacks.onControlsConnected?.(!!msg.controls_connected);
+          break;
+        case "volume":
+          this.callbacks.onVolumeAdjust?.({
+            target: msg.target,
+            slot: msg.slot,
+            delta: msg.delta,
+          });
           break;
       }
     };

@@ -2,7 +2,7 @@
   "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
   "UUID": "com.nep.commentator",
   "Name": "NEP Commentator",
-  "Version": "0.1.0.0",
+  "Version": "0.3.0.0",
   "Author": "NEP Sweden",
   "Description": "PTT intercom control for NEP remote commentator sessions.",
   "Icon": "imgs/plugin",
@@ -45,6 +45,28 @@
           "FontSize": 12
         }
       ]
+    },
+    {
+      "UUID": "com.nep.commentator.volume",
+      "Name": "Volume",
+      "Tooltip": "Tap to adjust PGM or intercom volume",
+      "Icon": "imgs/volume",
+      "States": [
+        {
+          "Image": "imgs/volume",
+          "TitleAlignment": "bottom",
+          "FontSize": 11
+        }
+      ]
+    }
+  ],
+  "Profiles": [
+    {
+      "Name": "profiles/commentator",
+      "DeviceType": 0,
+      "AutoInstall": true,
+      "DontAutoSwitchWhenInstalled": false,
+      "Readonly": false
     }
   ]
 }

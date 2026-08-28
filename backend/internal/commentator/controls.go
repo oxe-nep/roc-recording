@@ -4,8 +4,6 @@ import (
 	"log"
 	"net/http"
 	"strings"
-
-	"github.com/gorilla/websocket"
 )
 
 type controlsMsg struct {
@@ -71,4 +69,8 @@ func (m *Manager) ServeControls(w http.ResponseWriter, r *http.Request, token st
 			_ = conn.WriteJSON(map[string]string{"type": "pong"})
 		}
 	}
+}
+
+func controlsPath(token string) string {
+	return "/ws/commentator/" + token + "/controls"
 }

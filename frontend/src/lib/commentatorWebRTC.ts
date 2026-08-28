@@ -171,7 +171,7 @@ type SignalMsg = {
   sdp?: string;
   channel?: number;
   candidate?: RTCIceCandidateInit;
-  intercom?: CommentatorIntercomSlot[];
+  intercom?: CommentatorIntercomSlot[] | Record<string, number>;
   quality?: CommentatorQuality;
   reconnect_required?: boolean;
   channel_id?: number;
@@ -594,7 +594,7 @@ export class CommentatorSession {
   private async handleSignal(msg: SignalMsg) {
     switch (msg.type) {
       case "config":
-        if (msg.intercom) this.onIntercom?.(msg.intercom);
+        if (Array.isArray(msg.intercom)) this.onIntercom?.(msg.intercom);
         if (msg.quality?.webcam) this.webcamQuality = msg.quality.webcam;
         this.onReconnectRequired?.(!!msg.reconnect_required);
         return;

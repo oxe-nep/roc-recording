@@ -222,6 +222,7 @@ export class CommentatorSession {
   onJoin?: (info: CommentatorJoinInfo) => void;
   onDeckVolume?: (adjust: StreamDeckVolumeAdjust) => void;
   onDeckHosta?: (active: boolean) => void;
+  onDeckPTT?: (channel: number) => void;
 
   constructor(
     private readonly token: string,
@@ -627,6 +628,11 @@ export class CommentatorSession {
       case "deck_hosta":
         if (typeof msg.active === "boolean") {
           this.onDeckHosta?.(msg.active);
+        }
+        break;
+      case "deck_ptt":
+        if (typeof msg.channel === "number") {
+          this.onDeckPTT?.(msg.channel);
         }
         break;
     }

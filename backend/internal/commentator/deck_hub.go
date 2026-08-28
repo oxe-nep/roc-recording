@@ -152,6 +152,19 @@ func (h *deckHub) notifyBrowserHosta(channelID int, active bool) {
 	})
 }
 
+func (h *deckHub) notifyBrowserPTT(channelID int, channel int) {
+	h.mu.Lock()
+	push := h.browsers[channelID]
+	h.mu.Unlock()
+	if push == nil {
+		return
+	}
+	push(map[string]any{
+		"type":    "deck_ptt",
+		"channel": channel,
+	})
+}
+
 func (h *deckHub) broadcastControls(channelID int, msg any) {
 	h.mu.Lock()
 	set := h.controls[channelID]

@@ -137,12 +137,16 @@ class Bridge {
 
   pttDown(actionId: string) {
     const channel = this.pttChannelFor(actionId);
-    if (!channel) return;
+    if (channel == null) {
+      console.warn("[nep-commentator] PTT key has no channel mapping:", actionId);
+      return;
+    }
     this.activeKey = actionId;
     this.sendControls({ type: "ptt", channel });
   }
 
-  pttUp() {
+  pttUp(actionId?: string) {
+    if (actionId && this.activeKey && this.activeKey !== actionId) return;
     if (!this.activeKey) return;
     this.activeKey = null;
     this.sendControls({ type: "ptt", channel: 0 });
@@ -158,11 +162,13 @@ class Bridge {
 
   private pttChannelFor(actionId: string): number | undefined {
     const mapped = this.channelByKey.get(actionId);
-    if (mapped) return mapped;
+    if (mapped != null && Number.isFinite(mapped)) return mapped;
     const ref = this.keys.get(actionId);
     if (!ref || ref.kind !== "ptt") return undefined;
     const btn = this.layout.find((b) => b.slot === ref.slot);
-    return btn?.channel;
+    if (btn == null) return undefined;
+    const channel = Number(btn.channel);
+    return Number.isFinite(channel) ? channel : undefined;
   }
 
   private controlsURL(): string | null {
@@ -259,7 +265,7 @@ class Bridge {
       this.channelByKey.delete(actionId);
       return;
     }
-    this.channelByKey.set(actionId, btn.channel);
+    this.channelByKey.set(actionId, Number(btn.channel));
     await ref.action.setTitle(btn.label);
     await ref.action.setState(this.activeKey === actionId ? 1 : 0);
   }

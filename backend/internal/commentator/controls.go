@@ -57,6 +57,7 @@ func (m *Manager) ServeControls(w http.ResponseWriter, r *http.Request, token st
 		switch msg.Type {
 		case "ptt":
 			m.SetPTT(channelID, msg.Channel)
+			m.deck.notifyBrowserPTT(channelID, msg.Channel)
 		case "hosta":
 			m.deck.notifyBrowserHosta(channelID, msg.Active)
 		case "volume":

@@ -19,6 +19,7 @@ type Args = {
   intercomVol: Record<number, number>;
   onVolumeAdjust: (adjust: StreamDeckVolumeAdjust) => void;
   onHostaChange?: (active: boolean) => void;
+  onPTTChange?: (channel: number) => void;
 };
 
 export function useStreamDeckBridge({
@@ -31,23 +32,28 @@ export function useStreamDeckBridge({
   intercomVol,
   onVolumeAdjust,
   onHostaChange,
+  onPTTChange,
 }: Args) {
   const onVolumeAdjustRef = useRef(onVolumeAdjust);
   const onHostaChangeRef = useRef(onHostaChange);
+  const onPTTChangeRef = useRef(onPTTChange);
   const [pluginConnected, setPluginConnected] = useState(false);
 
   onVolumeAdjustRef.current = onVolumeAdjust;
   onHostaChangeRef.current = onHostaChange;
+  onPTTChangeRef.current = onPTTChange;
 
   useEffect(() => {
     const session = sessionRef.current;
     if (!session) return;
     session.onDeckVolume = (adjust) => onVolumeAdjustRef.current(adjust);
     session.onDeckHosta = (active) => onHostaChangeRef.current?.(active);
+    session.onDeckPTT = (channel) => onPTTChangeRef.current?.(channel);
     return () => {
       if (sessionRef.current === session) {
         session.onDeckVolume = undefined;
         session.onDeckHosta = undefined;
+        session.onDeckPTT = undefined;
       }
     };
   }, [sessionRef, enabled]);

@@ -1,4 +1,4 @@
-import { action, DidReceiveSettingsEvent, KeyDownEvent, KeyUpEvent, SingletonAction, WillAppearEvent } from "@elgato/streamdeck";
+import { action, DidReceiveSettingsEvent, KeyDownEvent, KeyUpEvent, SingletonAction, WillAppearEvent, WillDisappearEvent } from "@elgato/streamdeck";
 import { bridge } from "../bridge/bridge.js";
 import { toSlotNumber } from "../util/slot.js";
 
@@ -28,11 +28,11 @@ export class PTTAction extends SingletonAction<PTTSettings> {
   }
 
   override onKeyUp(ev: KeyUpEvent<PTTSettings>): void | Promise<void> {
-    bridge.pttUp();
+    bridge.pttUp(ev.action.id);
     void ev.action.setState(0);
   }
 
-  override onWillDisappear(): void | Promise<void> {
-    bridge.pttUp();
+  override onWillDisappear(ev: WillDisappearEvent<PTTSettings>): void | Promise<void> {
+    bridge.pttUp(ev.action.id);
   }
 }

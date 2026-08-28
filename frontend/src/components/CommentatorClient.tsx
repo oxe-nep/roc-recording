@@ -111,6 +111,11 @@ export default function CommentatorClient({ token }: Props) {
     [intercom],
   );
 
+  const handleStreamDeckPTT = useCallback((channel: number) => {
+    setPttActive(channel === 0 ? null : channel);
+    sessionRef.current?.setPTT(channel);
+  }, []);
+
   const streamDeck = useStreamDeckBridge({
     enabled: authenticated && state === "connected",
     token,
@@ -121,6 +126,7 @@ export default function CommentatorClient({ token }: Props) {
     intercomVol,
     onVolumeAdjust: handleStreamDeckVolumeAdjust,
     onHostaChange: setHostaActive,
+    onPTTChange: handleStreamDeckPTT,
   });
 
   useEffect(() => {

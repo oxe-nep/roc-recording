@@ -1,0 +1,50 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+  "UUID": "com.nep.commentator",
+  "Name": "NEP Commentator",
+  "Version": "0.1.0.0",
+  "Author": "NEP Sweden",
+  "Description": "PTT intercom control for NEP remote commentator sessions.",
+  "Icon": "imgs/plugin",
+  "Category": "NEP Commentator",
+  "CategoryIcon": "imgs/plugin",
+  "CodePath": "bin/plugin.js",
+  "SDKVersion": 2,
+  "Software": {
+    "MinimumVersion": "6.6"
+  },
+  "OS": [
+    {
+      "Platform": "mac",
+      "MinimumVersion": "13"
+    },
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    }
+  ],
+  "Nodejs": {
+    "Version": "20",
+    "Debug": "enabled"
+  },
+  "Actions": [
+    {
+      "UUID": "com.nep.commentator.ptt",
+      "Name": "Intercom PTT",
+      "Tooltip": "Hold for intercom push-to-talk",
+      "Icon": "imgs/action",
+      "States": [
+        {
+          "Image": "imgs/action",
+          "TitleAlignment": "bottom",
+          "FontSize": 12
+        },
+        {
+          "Image": "imgs/action-active",
+          "TitleAlignment": "bottom",
+          "FontSize": 12
+        }
+      ]
+    }
+  ]
+}

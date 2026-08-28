@@ -22,6 +22,11 @@ import {
   type CommentatorRTCStats,
 } from "@/lib/commentatorWebRTC";
 import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
+import { useStreamDeckBridge } from "@/hooks/useStreamDeckBridge";
+import {
+  STREAM_DECK_APP_URL,
+  streamDeckPluginURL,
+} from "@/lib/streamDeckInstall";
 
 type Props = {
   token: string;
@@ -62,8 +67,10 @@ export default function CommentatorClient({ token }: Props) {
   const [rtcStats, setRtcStats] = useState<CommentatorRTCStats | null>(null);
   const [showDebug, setShowDebug] = useState(() => loadCommentatorDebug(token));
   const [displayName, setDisplayName] = useState("");
+  const [controlsPath, setControlsPath] = useState("");
   const [reconnectRequired, setReconnectRequired] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [streamDeckOpen, setStreamDeckOpen] = useState(false);
   const [devices, setDevices] = useState<CommentatorDevicePrefs>(() => loadCommentatorDevices());
   const [deviceLists, setDeviceLists] = useState<{ mics: MediaDeviceInfo[]; cams: MediaDeviceInfo[] }>({
     mics: [],
@@ -80,7 +87,16 @@ export default function CommentatorClient({ token }: Props) {
   pgmVolRef.current = pgmVol;
   intercomVolRef.current = intercomVol;
 
-  useBodyScrollLock(settingsOpen);
+  useBodyScrollLock(settingsOpen || streamDeckOpen);
+
+  const streamDeck = useStreamDeckBridge({
+    enabled: authenticated && state === "connected" && !!controlsPath,
+    origin: typeof window !== "undefined" ? window.location.origin : "",
+    token,
+    pin,
+    controlsPath,
+    intercom,
+  });
 
   useEffect(() => {
     const saved = loadCommentatorVolumes(token);
@@ -123,6 +139,9 @@ export default function CommentatorClient({ token }: Props) {
     session.onStats = setRtcStats;
     session.onReconnectRequired = setReconnectRequired;
     session.onDisplayName = setDisplayName;
+    session.onJoin = (join) => {
+      setControlsPath(join.controls_path || `/ws/commentator/${token}/controls`);
+    };
     session.onIntercom = (slots) => {
       setIntercom(slots);
       setIntercomVol((prev) => {
@@ -285,8 +304,81 @@ export default function CommentatorClient({ token }: Props) {
         ? "commentator-status--err"
         : "commentator-status--pending";
 
+  const streamDeckModal = streamDeckOpen ? (
+    <div className="modal-backdrop" onClick={() => setStreamDeckOpen(false)} role="presentation">
+      <div
+        className="modal-panel commentator-settings-panel commentator-streamdeck-panel"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-label="Stream Deck setup"
+      >
+        <div className="modal-header">
+          <h2>Stream Deck</h2>
+          <button type="button" className="modal-close" onClick={() => setStreamDeckOpen(false)} aria-label="Close">
+            ×
+          </button>
+        </div>
+
+        <p className="channel-settings-hint">
+          Use a Stream Deck for intercom push-to-talk. PTT works even when this browser tab is in the
+          background — audio and video still run here.
+        </p>
+
+        <div className="commentator-streamdeck-steps">
+          <ol>
+            <li>
+              Install{" "}
+              <a href={STREAM_DECK_APP_URL} target="_blank" rel="noopener noreferrer">
+                Elgato Stream Deck
+              </a>{" "}
+              (Windows or macOS).
+            </li>
+            <li>
+              Download and open the{" "}
+              <a href={streamDeckPluginURL()} download>
+                NEP Commentator plugin
+              </a>
+              . Stream Deck installs it automatically.
+            </li>
+            <li>
+              In Stream Deck, drag <strong>Intercom PTT</strong> actions to the top row, left to right (first key =
+              first intercom channel).
+            </li>
+            <li>Connect on this page — button labels update when the deck is paired (header shows Deck).</li>
+          </ol>
+        </div>
+
+        <div className="channel-settings-actions commentator-streamdeck-downloads">
+          <a
+            className="commentator-btn commentator-btn-primary"
+            href={STREAM_DECK_APP_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Get Stream Deck app
+          </a>
+          <a className="commentator-btn" href={streamDeckPluginURL()} download>
+            Download NEP plugin
+          </a>
+        </div>
+
+        {streamDeck.status === "paired" && (
+          <p className="channel-settings-hint commentator-streamdeck-paired">
+            Stream Deck is connected and receiving your intercom layout.
+          </p>
+        )}
+        {streamDeck.status === "offline" && authenticated && state === "connected" && (
+          <p className="channel-settings-hint">
+            No plugin detected yet. Install the plugin and keep Stream Deck running, then reconnect here if needed.
+          </p>
+        )}
+      </div>
+    </div>
+  ) : null;
+
   if (!authenticated) {
     return (
+      <>
       <div className="commentator-shell commentator-shell--pin">
         <header className="commentator-header">
           <div className="commentator-header-brand">
@@ -320,12 +412,18 @@ export default function CommentatorClient({ token }: Props) {
               Join session
             </button>
           </form>
+          <button type="button" className="commentator-btn commentator-pin-deck-link" onClick={() => setStreamDeckOpen(true)}>
+            Stream Deck setup
+          </button>
         </main>
       </div>
+      {streamDeckModal}
+      </>
     );
   }
 
   return (
+    <>
     <div className="commentator-shell">
       <header className="commentator-header">
         <div className="commentator-header-brand">
@@ -335,10 +433,23 @@ export default function CommentatorClient({ token }: Props) {
           </div>
         </div>
         <div className="commentator-header-actions">
+          <button type="button" className="commentator-btn" onClick={() => setStreamDeckOpen(true)}>
+            Stream Deck
+          </button>
           <button type="button" className="commentator-btn" onClick={() => void openSettings()}>
             Settings
           </button>
           <span className={`commentator-status-pill ${statusClass}`}>{STATE_LABELS[state]}</span>
+          {streamDeck.status === "paired" && (
+            <span className="commentator-status-pill commentator-status--ok" title="Stream Deck connected">
+              Deck
+            </span>
+          )}
+          {streamDeck.status === "ready" && (
+            <span className="commentator-status-pill commentator-status--pending" title="Stream Deck plugin detected">
+              Deck…
+            </span>
+          )}
           {(state === "failed" || state === "reconnecting" || reconnectRequired) && (
             <button type="button" className="commentator-btn commentator-btn-primary" onClick={reconnect}>
               Reconnect
@@ -483,6 +594,8 @@ export default function CommentatorClient({ token }: Props) {
         </section>
       </div>
 
+      {streamDeckModal}
+
       {settingsOpen && (
         <div className="modal-backdrop" onClick={() => setSettingsOpen(false)} role="presentation">
           <div
@@ -549,5 +662,6 @@ export default function CommentatorClient({ token }: Props) {
         </div>
       )}
     </div>
+    </>
   );
 }

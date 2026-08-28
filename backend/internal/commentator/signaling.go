@@ -23,12 +23,13 @@ type signalMsg struct {
 }
 
 type joinResponse struct {
-	ChannelID   int               `json:"channel_id"`
-	DisplayName string            `json:"display_name,omitempty"`
-	ICEServers  []map[string]any  `json:"ice_servers"`
-	Intercom    []IntercomSlot   `json:"intercom"`
-	Quality     QualityClientView `json:"quality"`
-	WSPath      string            `json:"ws_path"`
+	ChannelID    int               `json:"channel_id"`
+	DisplayName  string            `json:"display_name,omitempty"`
+	ICEServers   []map[string]any  `json:"ice_servers"`
+	Intercom     []IntercomSlot    `json:"intercom"`
+	Quality      QualityClientView `json:"quality"`
+	WSPath       string            `json:"ws_path"`
+	ControlsPath string            `json:"controls_path"`
 }
 
 var signalingUpgrader = websocket.Upgrader{
@@ -59,7 +60,8 @@ func (m *Manager) JoinInfo(token, pin string) (joinResponse, error) {
 		Intercom:    enabledIntercom(settings),
 		Quality:     qualityClientView(settings.Quality),
 		// Use /ws/commentator/ so nginx can proxy via the existing /ws WebSocket location.
-		WSPath: "/ws/commentator/" + token,
+		WSPath:       "/ws/commentator/" + token,
+		ControlsPath: controlsPath(token),
 	}, nil
 }
 

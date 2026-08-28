@@ -23,6 +23,7 @@ export type CommentatorJoinInfo = {
   intercom: CommentatorIntercomSlot[];
   quality?: CommentatorQuality;
   ws_path: string;
+  controls_path: string;
 };
 
 export type CommentatorConnectionState =
@@ -210,6 +211,7 @@ export class CommentatorSession {
   onAudioLocked?: (locked: boolean) => void;
   onStats?: (stats: CommentatorRTCStats) => void;
   onDisplayName?: (name: string) => void;
+  onJoin?: (info: CommentatorJoinInfo) => void;
 
   constructor(
     private readonly token: string,
@@ -233,6 +235,7 @@ export class CommentatorSession {
     this.onState?.("joining");
 
     const join = await fetchCommentatorJoin(this.token, this.pin);
+    this.onJoin?.(join);
     this.iceServers = join.ice_servers;
     this.onIntercom?.(join.intercom);
     if (join.display_name?.trim()) {

@@ -3083,6 +3083,11 @@ body:has(.commentator-root) .container {
   gap: 12px;
 }
 
+.commentator-pin-deck-link {
+  align-self: center;
+  margin-top: 4px;
+}
+
 .commentator-pin-input {
   font-size: 1.75rem;
   letter-spacing: 0.35em;
@@ -3103,5 +3108,46 @@ body:has(.commentator-root) .container {
   font-size: 1.1rem;
   letter-spacing: 0.2em;
   font-weight: 600;
+}
+
+.commentator-streamdeck-panel .channel-settings-actions {
+  margin-top: 8px;
+}
+
+.commentator-streamdeck-downloads {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.commentator-streamdeck-downloads .commentator-btn {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.commentator-streamdeck-steps {
+  margin: 12px 0 4px;
+}
+
+.commentator-streamdeck-steps ol {
+  margin: 0;
+  padding-left: 1.25rem;
+  color: var(--text-secondary);
+  line-height: 1.55;
+  font-size: 0.9rem;
+}
+
+.commentator-streamdeck-steps li + li {
+  margin-top: 8px;
+}
+
+.commentator-streamdeck-steps a {
+  color: var(--accent, #5b9fd4);
+}
+
+.commentator-streamdeck-paired {
+  margin-top: 12px;
+  color: #8fd48f;
 }
 

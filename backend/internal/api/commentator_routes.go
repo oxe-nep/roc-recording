@@ -56,9 +56,14 @@ func registerCommentatorPublicRoutes(r chi.Router, commMgr *commentator.Manager)
 	}
 	r.Get("/api/commentator/join/{token}", joinHandler)
 	r.Post("/api/commentator/join/{token}", joinHandler)
+	serveCommentatorControls := func(w http.ResponseWriter, r *http.Request) {
+		commMgr.ServeControls(w, r, chi.URLParam(r, "token"))
+	}
 	serveCommentatorWS := func(w http.ResponseWriter, r *http.Request) {
 		commMgr.ServeSignaling(w, r, chi.URLParam(r, "token"))
 	}
+	// Controls must be registered before the generic signaling route.
+	r.Get("/ws/commentator/{token}/controls", serveCommentatorControls)
 	// Primary path: nginx already upgrades WebSockets on location /ws.
 	r.Get("/ws/commentator/{token}", serveCommentatorWS)
 	// Legacy alias (older frontends / cached join responses).

@@ -1,18 +1,25 @@
 import * as esbuild from "esbuild";
+import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const watch = process.argv.includes("--watch");
 const root = path.dirname(fileURLToPath(import.meta.url));
-const binDir = path.join(root, "com.nep.commentator.sdPlugin", "bin");
+const pluginRoot = path.join(root, "com.nep.commentator.sdPlugin");
+const binDir = path.join(pluginRoot, "bin");
+const binPackageJson = path.join(binDir, "package.json");
+
+function preparePluginDeps() {
+  execSync("npm install --omit=dev --no-audit --no-fund", {
+    cwd: pluginRoot,
+    stdio: "inherit",
+  });
+}
 
 function writeBinPackageJson() {
   fs.mkdirSync(binDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(binDir, "package.json"),
-    JSON.stringify({ type: "module" }, null, 2) + "\n",
-  );
+  fs.writeFileSync(binPackageJson, JSON.stringify({ type: "module" }, null, 2) + "\n");
 }
 
 const ctx = await esbuild.context({
@@ -28,6 +35,7 @@ const ctx = await esbuild.context({
 });
 
 async function build() {
+  preparePluginDeps();
   writeBinPackageJson();
   await ctx.rebuild();
 }

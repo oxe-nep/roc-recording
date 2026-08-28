@@ -49,9 +49,12 @@ Tail on Windows:
 Get-Content "$env:APPDATA\Elgato\StreamDeck\Plugins\com.nep.commentator.sdPlugin\logs\com.nep.commentator.0.log" -Wait -Tail 50
 ```
 
-If **no logs folder exists**, the Node process never started — usually a broken `bin/plugin.js` load. This plugin ships `bin/package.json` with `"type":"module"` because the bundle is ESM.
+If **no logs folder exists**, the Node process never started. Common causes:
 
-Stream Deck app logs: `%APPDATA%\Elgato\StreamDeck\logs\StreamDeck*.log`
+- Missing `node_modules/@elgato/streamdeck` inside the `*.sdPlugin` folder (the pack step runs `npm install` there).
+- Broken ESM load of `bin/plugin.js` (requires `bin/package.json` with `"type":"module"`).
+
+Stream Deck app logs: `%APPDATA%\Elgato\StreamDeck\logs\StreamDeck*.log` — look for `Process stopped (unexpected): code=0x00000001`.
 
 ### Debugging
 

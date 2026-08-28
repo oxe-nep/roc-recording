@@ -1,5 +1,4 @@
 import type { DialAction, KeyAction } from "@elgato/streamdeck";
-import WebSocket from "ws";
 import { postJson } from "./http.js";
 import { scheduleProfileActivation } from "../profile.js";
 import type { VolumeSettings } from "../actions/volume.js";
@@ -157,23 +156,31 @@ class Bridge {
   private async connectControls(): Promise<boolean> {
     const url = this.controlsURL();
     if (!url) return false;
+    const WS = globalThis.WebSocket;
+    if (!WS) {
+      console.error("[nep-commentator] WebSocket is not available in this Node runtime");
+      return false;
+    }
     this.disconnectControls();
     return new Promise((resolve) => {
-      const ws = new WebSocket(url);
+      const ws = new WS(url);
       this.controls = ws;
       const timeout = setTimeout(() => resolve(false), 10000);
-      ws.on("open", () => {
+      ws.addEventListener("open", () => {
         clearTimeout(timeout);
         this.controlsTimer = setInterval(() => {
           this.sendControls({ type: "ping" });
         }, 25000);
         resolve(true);
       });
-      ws.on("message", (raw) => this.onControlsMessage(raw));
-      ws.on("close", () => {
+      ws.addEventListener("message", (ev) => {
+        const raw = typeof ev.data === "string" ? ev.data : String(ev.data);
+        this.onControlsMessage(raw);
+      });
+      ws.addEventListener("close", () => {
         if (this.controls === ws) this.controls = null;
       });
-      ws.on("error", (err) => {
+      ws.addEventListener("error", (err) => {
         clearTimeout(timeout);
         console.error("[nep-commentator] controls websocket error:", url, err);
         resolve(false);
@@ -181,10 +188,10 @@ class Bridge {
     });
   }
 
-  private onControlsMessage(raw: WebSocket.RawData) {
+  private onControlsMessage(raw: string) {
     let msg: ControlsReady | ControlsLayout | ControlsVolumes;
     try {
-      msg = JSON.parse(String(raw)) as ControlsReady | ControlsLayout | ControlsVolumes;
+      msg = JSON.parse(raw) as ControlsReady | ControlsLayout | ControlsVolumes;
     } catch {
       return;
     }

@@ -139,6 +139,19 @@ func (h *deckHub) notifyBrowserVolume(channelID int, adjust deckVolumeAdjust) {
 	})
 }
 
+func (h *deckHub) notifyBrowserHosta(channelID int, active bool) {
+	h.mu.Lock()
+	push := h.browsers[channelID]
+	h.mu.Unlock()
+	if push == nil {
+		return
+	}
+	push(map[string]any{
+		"type":   "deck_hosta",
+		"active": active,
+	})
+}
+
 func (h *deckHub) broadcastControls(channelID int, msg any) {
 	h.mu.Lock()
 	set := h.controls[channelID]

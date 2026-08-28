@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 const PTT_ACTION = "com.nep.commentator.ptt";
 const VOLUME_ACTION = "com.nep.commentator.volume";
 const CONNECT_ACTION = "com.nep.commentator.connect";
+const HOSTA_ACTION = "com.nep.commentator.hosta";
 const PAGE_PREV = "com.elgato.streamdeck.page.previous";
 const PAGE_NEXT = "com.elgato.streamdeck.page.next";
 
@@ -32,6 +33,8 @@ const PAGE_NEXT = "com.elgato.streamdeck.page.next";
  *   pgmVolume: { down: { col: number; row: number }; up: { col: number; row: number } } | null;
  *   connect?: { col: number; row: number };
  *   connectPage2?: { col: number; row: number };
+ *   hosta?: { col: number; row: number };
+ *   hostaPage2?: { col: number; row: number };
  *   pageNav: { next: { col: number; row: number }; prev: { col: number; row: number } };
  *   volSlots: VolSlot[];
  * }>}
@@ -56,6 +59,7 @@ const PRESETS = [
     ],
     pgmVolume: { down: { col: 1, row: 1 }, up: { col: 2, row: 1 } },
     connect: { col: 0, row: 2 },
+    hosta: { col: 1, row: 2 },
     pageNav: { next: { col: 4, row: 1 }, prev: { col: 4, row: 2 } },
     // Page 2: paired −/+ per intercom, two rows
     volSlots: [
@@ -91,6 +95,7 @@ const PRESETS = [
     ],
     pgmVolume: { down: { col: 6, row: 0 }, up: { col: 7, row: 0 } },
     connect: { col: 0, row: 1 },
+    hosta: { col: 1, row: 1 },
     pageNav: { next: { col: 7, row: 1 }, prev: { col: 7, row: 2 } },
     // Page 2: four intercom pairs on row 0, two on row 1
     volSlots: [
@@ -115,20 +120,20 @@ const PRESETS = [
     outerUuid: "c1a5de5c-d6c9-4e40-aa5b-0c0ffee00021",
     page1Uuid: "a2b3c4d5-e6f7-4890-abcd-0c0ffee00022",
     page2Uuid: "b3c4d5e6-f7a8-4901-bcde-0c0ffee00023",
-    // All six intercom PTT keys on page 1
+    // Five intercom PTT keys on page 1; sixth slot is Connect
     pttSlots: [
       { col: 0, row: 0, slot: 0 },
       { col: 1, row: 0, slot: 1 },
       { col: 2, row: 0, slot: 2 },
       { col: 0, row: 1, slot: 3 },
       { col: 1, row: 1, slot: 4 },
-      { col: 2, row: 1, slot: 5 },
     ],
     pgmVolume: null,
+    connect: { col: 2, row: 1 },
     pageNav: { next: { col: 2, row: 0 }, prev: { col: 2, row: 1 } },
     volSlots: [],
     pgmVolumePage2: { down: { col: 0, row: 0 }, up: { col: 1, row: 0 } },
-    connectPage2: { col: 2, row: 0 },
+    hostaPage2: { col: 2, row: 0 },
     volSlotsPage2: [
       { col: 0, row: 1, slot: 0, dir: "down" },
       { col: 1, row: 1, slot: 0, dir: "up" },
@@ -182,6 +187,9 @@ function buildPage1(preset) {
   if (preset.connect) {
     key(actions, preset.connect.col, preset.connect.row, pluginAction(CONNECT_ACTION, "Connect", {}));
   }
+  if (preset.hosta) {
+    key(actions, preset.hosta.col, preset.hosta.row, pluginAction(HOSTA_ACTION, "Hosta", {}));
+  }
   key(actions, preset.pageNav.next.col, preset.pageNav.next.row, systemAction(PAGE_NEXT, "Next Page", "Vol →"));
   return actions;
 }
@@ -200,6 +208,9 @@ function buildPage2(preset) {
   addPgmVolume(actions, preset.pgmVolumePage2);
   if (preset.connectPage2) {
     key(actions, preset.connectPage2.col, preset.connectPage2.row, pluginAction(CONNECT_ACTION, "Connect", {}));
+  }
+  if (preset.hostaPage2) {
+    key(actions, preset.hostaPage2.col, preset.hostaPage2.row, pluginAction(HOSTA_ACTION, "Hosta", {}));
   }
   key(actions, preset.pageNav.prev.col, preset.pageNav.prev.row, systemAction(PAGE_PREV, "Previous Page", "← PTT"));
   return actions;

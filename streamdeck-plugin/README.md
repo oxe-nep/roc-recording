@@ -25,9 +25,9 @@ The plugin connects to the commentator backend over **WSS** (no localhost bridge
 
 | Device | Page 1 | Page 2 |
 |--------|--------|--------|
-| **XL** | 6× PTT + PGM ± (top row), Connect below | 6× intercom vol pairs |
-| **Standard** | 5× PTT, 6th + PGM ±, Connect | 6× intercom vol pairs |
-| **Mini** | 6× PTT (full grid) | PGM ±, Connect, 1× intercom vol |
+| **XL** | 6× PTT + PGM ± (top row), Connect + Hosta below | 6× intercom vol pairs |
+| **Standard** | 5× PTT, 6th + PGM ±, Connect + Hosta | 6× intercom vol pairs |
+| **Mini** | 5× PTT + Connect | PGM ±, Hosta, 1× intercom vol |
 
 Built with `@elgato/streamdeck` 2.x and manifest `SDKVersion` 3 (Marketplace-compatible).
 

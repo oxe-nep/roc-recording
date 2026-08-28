@@ -3,6 +3,7 @@ import WebSocket from "ws";
 import { postJson } from "./http.js";
 import { scheduleProfileActivation } from "../profile.js";
 import type { VolumeSettings } from "../actions/volume.js";
+import { toSlotNumber } from "../util/slot.js";
 
 export const VOLUME_STEP = 0.05;
 
@@ -103,7 +104,9 @@ class Bridge {
   }
 
   registerKey(action: KeyAction | DialAction, slot: number) {
-    this.keys.set(action.id, { kind: "ptt", action, slot });
+    const normalized = toSlotNumber(slot);
+    if (normalized === undefined) return;
+    this.keys.set(action.id, { kind: "ptt", action, slot: normalized });
     void this.applyPTTKey(action.id);
   }
 
@@ -114,7 +117,7 @@ class Bridge {
       kind: "volume",
       action,
       target,
-      slot: settings.slot,
+      slot: toSlotNumber(settings.slot),
       direction,
     });
     void this.applyVolumeKey(action.id);
@@ -133,7 +136,7 @@ class Bridge {
   }
 
   pttDown(actionId: string) {
-    const channel = this.channelByKey.get(actionId);
+    const channel = this.pttChannelFor(actionId);
     if (!channel) return;
     this.activeKey = actionId;
     this.sendControls({ type: "ptt", channel });
@@ -143,6 +146,23 @@ class Bridge {
     if (!this.activeKey) return;
     this.activeKey = null;
     this.sendControls({ type: "ptt", channel: 0 });
+  }
+
+  hostaDown() {
+    this.sendControls({ type: "hosta", active: true });
+  }
+
+  hostaUp() {
+    this.sendControls({ type: "hosta", active: false });
+  }
+
+  private pttChannelFor(actionId: string): number | undefined {
+    const mapped = this.channelByKey.get(actionId);
+    if (mapped) return mapped;
+    const ref = this.keys.get(actionId);
+    if (!ref || ref.kind !== "ptt") return undefined;
+    const btn = this.layout.find((b) => b.slot === ref.slot);
+    return btn?.channel;
   }
 
   private controlsURL(): string | null {
@@ -241,7 +261,7 @@ class Bridge {
     }
     this.channelByKey.set(actionId, btn.channel);
     await ref.action.setTitle(btn.label);
-    await ref.action.setState(0);
+    await ref.action.setState(this.activeKey === actionId ? 1 : 0);
   }
 
   private async applyVolumeKey(actionId: string) {

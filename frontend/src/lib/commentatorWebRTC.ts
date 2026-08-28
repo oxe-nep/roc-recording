@@ -181,6 +181,7 @@ type SignalMsg = {
   target?: "pgm" | "intercom";
   slot?: number;
   delta?: number;
+  active?: boolean;
 };
 
 export class CommentatorSession {
@@ -220,6 +221,7 @@ export class CommentatorSession {
   onDisplayName?: (name: string) => void;
   onJoin?: (info: CommentatorJoinInfo) => void;
   onDeckVolume?: (adjust: StreamDeckVolumeAdjust) => void;
+  onDeckHosta?: (active: boolean) => void;
 
   constructor(
     private readonly token: string,
@@ -620,6 +622,11 @@ export class CommentatorSession {
             slot: msg.slot,
             delta: msg.delta,
           });
+        }
+        break;
+      case "deck_hosta":
+        if (typeof msg.active === "boolean") {
+          this.onDeckHosta?.(msg.active);
         }
         break;
     }

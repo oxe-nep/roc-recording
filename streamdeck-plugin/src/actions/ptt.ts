@@ -1,5 +1,6 @@
 import { action, DidReceiveSettingsEvent, KeyDownEvent, KeyUpEvent, SingletonAction, WillAppearEvent } from "@elgato/streamdeck";
 import { bridge } from "../bridge/bridge.js";
+import { toSlotNumber } from "../util/slot.js";
 
 type PTTSettings = {
   slot?: number;
@@ -17,7 +18,7 @@ export class PTTAction extends SingletonAction<PTTSettings> {
 
   private register(ev: WillAppearEvent<PTTSettings> | DidReceiveSettingsEvent<PTTSettings>) {
     const { row, column } = ev.payload.coordinates;
-    const slot = ev.payload.settings?.slot ?? column + row * 5;
+    const slot = toSlotNumber(ev.payload.settings?.slot) ?? column + row * 5;
     bridge.registerKey(ev.action, slot);
   }
 

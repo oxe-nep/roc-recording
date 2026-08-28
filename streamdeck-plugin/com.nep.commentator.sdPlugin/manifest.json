@@ -2,7 +2,7 @@
   "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
   "UUID": "com.nep.commentator",
   "Name": "NEP Commentator",
-  "Version": "0.6.0.2",
+  "Version": "0.6.0.3",
   "Author": "NEP Sweden",
   "Description": "PTT intercom and volume control for NEP remote commentator sessions.",
   "Icon": "imgs/plugin",
@@ -79,6 +79,27 @@
       "States": [
         {
           "Image": "imgs/plugin",
+          "TitleAlignment": "bottom",
+          "FontSize": 11
+        }
+      ]
+    },
+    {
+      "UUID": "com.nep.commentator.hosta",
+      "Name": "Hosta",
+      "Tooltip": "Hold to mute outgoing mic (cough mute)",
+      "Icon": "imgs/action",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/action",
+          "TitleAlignment": "bottom",
+          "FontSize": 11
+        },
+        {
+          "Image": "imgs/action-active",
           "TitleAlignment": "bottom",
           "FontSize": 11
         }

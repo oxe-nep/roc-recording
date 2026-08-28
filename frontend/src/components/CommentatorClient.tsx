@@ -120,6 +120,7 @@ export default function CommentatorClient({ token }: Props) {
     pgmVol,
     intercomVol,
     onVolumeAdjust: handleStreamDeckVolumeAdjust,
+    onHostaChange: setHostaActive,
   });
 
   useEffect(() => {
@@ -392,7 +393,7 @@ export default function CommentatorClient({ token }: Props) {
 
         <div className="commentator-streamdeck-steps">
           <ol start={5}>
-            <li>Page 1 (Intercom): PTT keys + PGM volume + Connect. Page 2 (Vol →): paired −/+ per intercom.</li>
+            <li>Page 1 (Intercom): PTT keys + PGM volume + Connect + Hosta. Page 2 (Vol →): paired −/+ per intercom.</li>
           </ol>
         </div>
 

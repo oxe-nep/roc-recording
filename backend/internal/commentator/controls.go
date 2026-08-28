@@ -12,6 +12,7 @@ type controlsMsg struct {
 	Target  string  `json:"target,omitempty"`
 	Slot    *int    `json:"slot,omitempty"`
 	Delta   float64 `json:"delta,omitempty"`
+	Active  bool    `json:"active,omitempty"`
 }
 
 // ServeControls handles Stream Deck plugin WebSocket (PTT, volume relay, layout push).
@@ -56,6 +57,8 @@ func (m *Manager) ServeControls(w http.ResponseWriter, r *http.Request, token st
 		switch msg.Type {
 		case "ptt":
 			m.SetPTT(channelID, msg.Channel)
+		case "hosta":
+			m.deck.notifyBrowserHosta(channelID, msg.Active)
 		case "volume":
 			if msg.Target == "" || msg.Delta == 0 {
 				continue

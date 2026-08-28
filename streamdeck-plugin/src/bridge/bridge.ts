@@ -92,7 +92,7 @@ class Bridge {
         controls_path: string;
       };
       this.pairInfo = {
-        origin: data.origin.replace(/\/$/, ""),
+        origin: server,
         token: data.token,
         pin: data.pin,
         controlsPath: data.controls_path,
@@ -150,7 +150,8 @@ class Bridge {
 
   private controlsURL(): string | null {
     if (!this.pairInfo) return null;
-    const u = new URL(this.pairInfo.controlsPath, this.pairInfo.origin);
+    const base = (this.connectSettings.server || this.pairInfo.origin).replace(/\/$/, "");
+    const u = new URL(this.pairInfo.controlsPath, base);
     u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
     u.searchParams.set("pin", this.pairInfo.pin);
     return u.toString();

@@ -21,17 +21,17 @@ type deckStatusResponse struct {
 	PluginConnected bool `json:"plugin_connected"`
 }
 
-func (m *Manager) ClaimDeckPair(code string) (deckClaimResponse, error) {
+func (m *Manager) ClaimDeckPair(code string, r *http.Request) (deckClaimResponse, error) {
 	code = strings.ToUpper(strings.TrimSpace(code))
 	if code == "" {
 		return deckClaimResponse{}, ErrPinRequired
 	}
 	entry, ok := m.deck.claim(code)
 	if !ok {
-		return deckClaimResponse{}, ErrInvalidPin
+		return deckClaimResponse{}, ErrInvalidDeckCode
 	}
 	return deckClaimResponse{
-		Origin:       m.publicBaseURL,
+		Origin:       deckClaimOrigin(m.publicBaseURL, r),
 		Token:        entry.token,
 		Pin:          entry.pin,
 		ControlsPath: controlsPath(entry.token),
@@ -56,7 +56,7 @@ func (m *Manager) ServeDeckClaim(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json body", http.StatusBadRequest)
 		return
 	}
-	resp, err := m.ClaimDeckPair(body.Code)
+	resp, err := m.ClaimDeckPair(body.Code, r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusUnauthorized)
 		return

@@ -18,9 +18,16 @@ export class ConnectAction extends SingletonAction<ConnectSettings> {
   }
 
   override onKeyDown(ev: KeyDownEvent<ConnectSettings>): void | Promise<void> {
+    const settings = ev.payload.settings ?? {};
+    bridge.saveConnectSettings(settings);
+    const code = settings.code?.trim();
+    if (!code) {
+      void ev.action.setTitle("No code");
+      return;
+    }
     void ev.action.setTitle("…");
     void bridge.claimAndConnect().then((ok) => {
-      void ev.action.setTitle(ok ? "Linked" : "Connect");
+      void ev.action.setTitle(ok ? "Linked" : "Failed");
     });
   }
 }

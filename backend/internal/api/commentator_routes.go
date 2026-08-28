@@ -22,6 +22,8 @@ func commentatorJoinError(w http.ResponseWriter, err error) {
 		body["pin_required"] = true
 	case errors.Is(err, commentator.ErrInvalidPin):
 		body["invalid_pin"] = true
+	case errors.Is(err, commentator.ErrInvalidDeckCode):
+		body["invalid_deck_code"] = true
 	case errors.Is(err, commentator.ErrExpiredToken):
 		body["expired"] = true
 	}

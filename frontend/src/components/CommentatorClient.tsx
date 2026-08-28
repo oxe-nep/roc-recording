@@ -365,8 +365,12 @@ export default function CommentatorClient({ token }: Props) {
               . Accept the bundled profile when prompted.
             </li>
             <li>
-              Connect on this page (status <strong>Connected</strong>). Copy the pairing code below into the{" "}
-              <strong>Connect</strong> action on your Stream Deck (tap the Connect key → enter code).
+              Switch to the bundled <strong>NEP Commentator</strong> profile (profile picker above the key grid). It
+              includes a <strong>Connect</strong> key.
+            </li>
+            <li>
+              Connect on this page (status <strong>Connected</strong>). Tap <strong>Connect</strong> on the deck, paste
+              the pairing code below in the property inspector, then press <strong>Connect</strong> again.
             </li>
             <li>
               When linked, header shows <strong>Deck</strong>. PTT works without browser focus; volume adjusts audio in
@@ -413,8 +417,9 @@ export default function CommentatorClient({ token }: Props) {
         )}
         {authenticated && state === "connected" && !streamDeck.pluginConnected && deckPairCode && (
           <p className="channel-settings-hint commentator-streamdeck-warn">
-            Stream Deck not linked yet. Enter pairing code <strong>{deckPairCode}</strong> in the Connect action on your
-            deck.
+            Stream Deck not linked yet. Use the <strong>NEP Commentator</strong> profile, enter code{" "}
+            <strong>{deckPairCode}</strong> in the Connect property inspector, then press the Connect key. The key title
+            should change to <strong>Linked</strong>.
           </p>
         )}
         {authenticated && state === "connected" && !deckPairCode && (

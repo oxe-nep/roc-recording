@@ -4,8 +4,6 @@ import (
 	"log"
 	"net/http"
 	"strings"
-
-	"github.com/gorilla/websocket"
 )
 
 // ServeControls handles a lightweight WebSocket for PTT-only control (Stream Deck, etc.).

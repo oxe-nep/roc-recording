@@ -50,6 +50,11 @@ func (h *deckHub) issueCode(token, pin string, channelID int) string {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.purgeExpiredLocked()
+	for code, entry := range h.codes {
+		if entry.token == token && entry.pin == pin && entry.channelID == channelID {
+			return code
+		}
+	}
 	code := randomDeckCode()
 	h.codes[code] = deckPairEntry{
 		token:     token,

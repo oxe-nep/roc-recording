@@ -6,6 +6,7 @@
   "scripts": {
     "build": "node scripts/generate-profile.mjs && node esbuild.config.mjs",
     "watch": "node esbuild.config.mjs --watch",
+    "link": "npm run build && node scripts/link-local.mjs",
     "pack": "npm run build && streamdeck pack com.nep.commentator.sdPlugin -f",
     "pack:web": "npm run pack && node scripts/copy-to-frontend.mjs"
   },

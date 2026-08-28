@@ -14,6 +14,15 @@ func TestDeckHubIssueAndClaim(t *testing.T) {
 	}
 }
 
+func TestDeckHubReusesCodeForSameSession(t *testing.T) {
+	h := newDeckHub()
+	first := h.issueCode("tok", "123456", 2)
+	second := h.issueCode("tok", "123456", 2)
+	if first != second {
+		t.Fatalf("issueCode = %q and %q, want same code for same session", first, second)
+	}
+}
+
 func TestIntercomToDeckLayout(t *testing.T) {
 	layout := intercomToDeckLayout([]IntercomSlot{
 		{ID: 1, Name: "Producer", Enabled: true},

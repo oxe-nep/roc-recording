@@ -16,7 +16,7 @@ The plugin connects to the commentator backend over **WSS** (no localhost bridge
 2. Download and install the plugin from the commentator web UI (or `npm run pack:web`).
 3. Accept the bundled **NEP Commentator** profile when prompted.
 4. On the commentator page: connect with PIN and copy the **pairing code**.
-5. On Stream Deck: tap **Connect**, enter server URL + pairing code in the property inspector, press Connect again.
+5. On Stream Deck: tap **Connect**, enter server URL + pairing code in the property inspector, press **Pair now** or tap the Connect key again.
 
 ## Profile layout
 
@@ -29,8 +29,38 @@ Profiles are generated for standard (15-key), Mini, and XL devices.
 
 ```bash
 npm install
-npm run watch          # rebuild plugin on changes
+npm run link           # build + symlink into Stream Deck Plugins folder
+npm run watch          # rebuild on changes (run link once first)
 npm run pack:web       # pack + copy to frontend/public/downloads
 ```
 
-Restart the plugin from Stream Deck after code changes.
+Restart the plugin from **Stream Deck → Plugins → NEP Commentator** after code changes.
+
+### Logs
+
+Plugin logs (after a successful start):
+
+- **Windows:** `%APPDATA%\Elgato\StreamDeck\Plugins\com.nep.commentator.sdPlugin\logs\`
+- **macOS:** `~/Library/Application Support/com.elgato.StreamDeck/Plugins/com.nep.commentator.sdPlugin/logs/`
+
+Tail on Windows:
+
+```powershell
+Get-Content "$env:APPDATA\Elgato\StreamDeck\Plugins\com.nep.commentator.sdPlugin\logs\com.nep.commentator.0.log" -Wait -Tail 50
+```
+
+If **no logs folder exists**, the Node process never started — usually a broken `bin/plugin.js` load. This plugin ships `bin/package.json` with `"type":"module"` because the bundle is ESM.
+
+Stream Deck app logs: `%APPDATA%\Elgato\StreamDeck\logs\StreamDeck*.log`
+
+### Debugging
+
+`manifest.json` has `"Nodejs": { "Debug": "enabled" }`. After the plugin starts you should see a Node target in `chrome://inspect/#devices` or via **Attach to Node Process** in VS Code/Cursor.
+
+Fixed debug port (optional):
+
+```json
+"Debug": "--inspect=127.0.0.1:9230"
+```
+
+Property inspector (Connect panel): enable `html_remote_debugging_enabled=1` in registry, restart Stream Deck, open `http://localhost:23654/` in Chrome.

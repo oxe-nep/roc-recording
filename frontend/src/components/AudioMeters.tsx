@@ -156,11 +156,11 @@ export default function AudioMeters({
   }
   return (
     <>
-      <div className="audio-meter audio-meter-left">
+      <div className="audio-meter audio-meter-left audio-meter-8ch">
         <MeterBank dbs={ch.slice(0, 4)} labels={["1", "2", "3", "4"]} title="Audio 1–4" />
       </div>
       {children}
-      <div className="audio-meter audio-meter-right">
+      <div className="audio-meter audio-meter-right audio-meter-8ch">
         <MeterBank dbs={ch.slice(4, 8)} labels={["5", "6", "7", "8"]} title="Audio 5–8" />
       </div>
     </>

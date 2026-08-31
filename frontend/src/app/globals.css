@@ -1356,6 +1356,27 @@ html {
   border-right: 1px solid var(--border-subtle);
 }
 
+.audio-meter-right {
+  border-left: 1px solid var(--border-subtle);
+}
+
+.audio-meter-8ch {
+  width: 44px;
+  padding: 6px 2px;
+}
+
+.audio-meter-8ch .audio-meter-labels {
+  gap: 0;
+  justify-content: stretch;
+}
+
+.audio-meter-8ch .audio-label {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-size: 0.52rem;
+}
+
 .audio-meter-stereo {
   border-right: 1px solid var(--border-subtle);
   width: 28px;

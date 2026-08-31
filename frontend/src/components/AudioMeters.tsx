@@ -6,7 +6,6 @@ import { useMeterLevels, type MeterBus } from "@/hooks/useDashboard";
 const METER_SEGMENTS = 24;
 const METER_MIN_DB = -50;
 const METER_MAX_DB = 0;
-const COL_GAP = 3;
 const SEG_GAP = 1;
 const OFF = "rgba(255, 255, 255, 0.07)";
 const GREEN = "#3fa34a";
@@ -50,8 +49,7 @@ function zoneColor(zone: "green" | "yellow" | "red"): string {
   return RED;
 }
 
-function drawBank(canvas: HTMLCanvasElement, dbs: number[]) {
-  const cols = Math.max(1, dbs.length);
+function drawColumn(canvas: HTMLCanvasElement, db: number) {
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
@@ -66,48 +64,55 @@ function drawBank(canvas: HTMLCanvasElement, dbs: number[]) {
   if (!ctx) return;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
-  const colW = (w - COL_GAP * (cols - 1)) / cols;
+  const lit = litSegmentCount(db);
   const segH = (h - SEG_GAP * (METER_SEGMENTS - 1)) / METER_SEGMENTS;
-  for (let c = 0; c < cols; c++) {
-    const lit = litSegmentCount(dbs[c]);
-    const x = c * (colW + COL_GAP);
-    for (let i = 0; i < METER_SEGMENTS; i++) {
-      const y = h - (i + 1) * segH - i * SEG_GAP;
-      ctx.fillStyle = i < lit ? zoneColor(segmentZone(i)) : OFF;
-      const hh = Math.max(1, segH);
-      if (typeof ctx.roundRect === "function") {
-        ctx.beginPath();
-        ctx.roundRect(x, y, colW, hh, 1);
-        ctx.fill();
-      } else {
-        ctx.fillRect(x, y, colW, hh);
-      }
+  for (let i = 0; i < METER_SEGMENTS; i++) {
+    const y = h - (i + 1) * segH - i * SEG_GAP;
+    ctx.fillStyle = i < lit ? zoneColor(segmentZone(i)) : OFF;
+    const hh = Math.max(1, segH);
+    if (typeof ctx.roundRect === "function") {
+      ctx.beginPath();
+      ctx.roundRect(0, y, w, hh, 1);
+      ctx.fill();
+    } else {
+      ctx.fillRect(0, y, w, hh);
     }
   }
 }
 
-function MeterBank({ dbs, labels, title }: { dbs: number[]; labels: string[]; title: string }) {
-  const bankRef = useRef<HTMLDivElement>(null);
+function MeterColumn({ db, label }: { db: number; label: string }) {
+  const colRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const dbsRef = useRef(dbs);
-  dbsRef.current = dbs;
+  const dbRef = useRef(db);
+  dbRef.current = db;
 
   useEffect(() => {
-    const bank = bankRef.current;
+    const col = colRef.current;
     const canvas = canvasRef.current;
-    if (!bank || !canvas) return;
-    const paint = () => drawBank(canvas, dbsRef.current);
+    if (!col || !canvas) return;
+    const paint = () => drawColumn(canvas, dbRef.current);
     paint();
     const ro = new ResizeObserver(paint);
-    ro.observe(bank);
+    ro.observe(col);
     return () => ro.disconnect();
   }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (canvas) drawBank(canvas, dbs);
-  }, [dbs]);
+    if (canvas) drawColumn(canvas, db);
+  }, [db]);
 
+  const tip = hasAudioLevel(db) ? `${db.toFixed(1)} dBFS` : "— dBFS";
+
+  return (
+    <div ref={colRef} className="audio-col" title={`Ch ${label}: ${tip}`}>
+      <canvas ref={canvasRef} className="audio-meter-canvas" aria-hidden />
+      <span className="audio-label">{label}</span>
+    </div>
+  );
+}
+
+function MeterBank({ dbs, labels, title }: { dbs: number[]; labels: string[]; title: string }) {
   const tip = labels
     .map((label, i) => {
       const db = dbs[i];
@@ -117,15 +122,10 @@ function MeterBank({ dbs, labels, title }: { dbs: number[]; labels: string[]; ti
     .join(" · ");
 
   return (
-    <div ref={bankRef} className="audio-bank" title={`${title}. Green ≤ -18 · Yellow ≤ -9 · Red above -9. ${tip}`}>
-      <canvas ref={canvasRef} className="audio-meter-canvas" aria-hidden />
-      <div className="audio-meter-labels">
-        {labels.map((label) => (
-          <span key={label} className="audio-label">
-            {label}
-          </span>
-        ))}
-      </div>
+    <div className="audio-bank audio-bank-cols" title={`${title}. Green ≤ -18 · Yellow ≤ -9 · Red above -9. ${tip}`}>
+      {dbs.map((db, i) => (
+        <MeterColumn key={labels[i]} db={db} label={labels[i]} />
+      ))}
     </div>
   );
 }

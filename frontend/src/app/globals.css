@@ -1361,25 +1361,13 @@ html {
 }
 
 .audio-meter-8ch {
-  width: 44px;
-  padding: 6px 2px;
-}
-
-.audio-meter-8ch .audio-meter-labels {
-  gap: 0;
-  justify-content: stretch;
-}
-
-.audio-meter-8ch .audio-label {
-  flex: 1;
-  min-width: 0;
-  text-align: center;
-  font-size: 0.52rem;
+  width: 46px;
+  padding: 6px 4px;
 }
 
 .audio-meter-stereo {
   border-right: 1px solid var(--border-subtle);
-  width: 28px;
+  width: 30px;
 }
 
 .audio-meter-stereo .audio-meter-canvas {
@@ -1392,10 +1380,44 @@ html {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 4px;
   height: 100%;
   min-height: 0;
   overflow: hidden;
+}
+
+.audio-bank-cols {
+  flex-direction: row;
+  align-items: stretch;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.audio-col {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.audio-col .audio-meter-canvas {
+  flex: 1 1 0;
+  width: 100%;
+  height: 0;
+  min-height: 0;
+}
+
+.audio-col .audio-label {
+  flex-shrink: 0;
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  line-height: 1;
+  text-align: center;
 }
 
 .audio-meter-canvas {
@@ -1408,11 +1430,7 @@ html {
 }
 
 .audio-meter-labels {
-  display: flex;
-  flex-direction: row;
-  justify-content: space-between;
-  gap: 3px;
-  flex-shrink: 0;
+  display: none;
 }
 
 .audio-label {
